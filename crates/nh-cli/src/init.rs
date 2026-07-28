@@ -44,75 +44,11 @@ const HANDLERS: &[(&str, &str)] = &[
     ("primary_var", include_str!("templates/handlers/primary_var.rs")),
 ];
 
-/// Whether the NailHammer crates are on crates.io.
-///
-/// **Flip this to `true` at publish time — it is the only edit needed.**
-///
-/// While it is `false`, a scaffolded project depends on the crates by path, so
-/// it points into whatever checkout built the `nh` binary and only builds on
-/// that machine. Switching to a plain `version` before the crates actually
-/// exist would make every scaffolded project fail to build instead, which is
-/// worse, so the order matters: publish first, then flip.
-const PUBLISHED: bool = false;
-
-/// How a scaffolded `Cargo.toml` should depend on one of our crates.
-///
-/// Three cases, and the middle one is the reason this is not a one-liner:
-///
-/// * **Published** — an ordinary version requirement.
-/// * **Built from a working checkout** — a path to the sibling crate, so
-///   editing `nh-runtime` shows up in scaffolded projects immediately. This is
-///   what you want while developing NailHammer itself.
-/// * **Installed from git** — a git dependency. `cargo install --git` builds
-///   from `~/.cargo/git/checkouts/<hash>/<commit>/`, and a path into *that* is
-///   machine-specific, pinned to one commit, and inside a directory cargo may
-///   garbage-collect. A scaffolded project pointing there works once, on one
-///   machine, until it does not.
-fn dependency(crate_name: &str) -> String {
-    if PUBLISHED {
-        return format!("\"{VERSION}\"");
-    }
-
-    let path = crate_path(crate_name);
-    if is_working_checkout(&path) {
-        format!("{{ version = \"{VERSION}\", path = \"{path}\" }}")
-    } else {
-        format!("{{ git = \"{REPO}\" }}")
-    }
-}
-
-/// Whether a compile-time crate path is a real checkout rather than a cache.
-///
-/// Checked at *run* time: the same binary is a working checkout on the machine
-/// that built it and a cache entry everywhere else.
-fn is_working_checkout(path: &str) -> bool {
-    !path.contains("/.cargo/git/")
-        && !path.contains("/.cargo/registry/")
-        && Path::new(path).join("Cargo.toml").exists()
-}
-
-/// Where a scaffolded project fetches the runtime from when `nh` was installed
-/// rather than built in place.
-const REPO: &str = env!("CARGO_PKG_REPOSITORY");
-
 /// Kept in step with the workspace version.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Path to this checkout's `nh-runtime`.
 ///
-/// `nh-runtime` is not published, so a scaffolded project has to point at the
-/// crate inside whatever checkout built the `nh` binary. Captured at compile
-/// time, since at run time `nh` has no idea where it came from.
-fn crate_path(name: &str) -> String {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    manifest
-        .parent()
-        .map(|crates| crates.join(name))
-        .unwrap_or_else(|| PathBuf::from("..").join(name))
-        .display()
-        .to_string()
-}
-
 #[derive(Debug)]
 pub struct Options {
     pub dir: PathBuf,
@@ -213,8 +149,7 @@ fn render(template: &str, opts: &Options) -> String {
         .replace("{{name}}", &opts.name)
         .replace("{{Name}}", &opts.grammar)
         .replace("{{ext}}", &opts.ext)
-        .replace("{{runtimedep}}", &dependency("nh-runtime"))
-        .replace("{{builddep}}", &dependency("nh-build"))
+
 }
 
 pub struct Created {
@@ -275,6 +210,14 @@ pub fn scaffold(opts: &Options) -> Result<Created, String> {
         written.push(path);
     }
 
+    // The runtime travels with the project rather than being fetched, so
+    // `cargo run` needs no credentials and no cargo configuration.
+    for rel in crate::vendor::write(&opts.dir, VERSION)
+        .map_err(|e| format!("cannot vendor the runtime: {e}"))?
+    {
+        written.push(opts.dir.join(rel));
+    }
+
     Ok(Created {
         files: written,
         grammar_path,
@@ -294,45 +237,39 @@ mod tests {
         assert_eq!(sanitize("9lives"), "_9lives");
     }
 
-    /// Both dependency forms must be well-formed TOML, so flipping `PUBLISHED`
-    /// at publish time cannot produce a manifest that does not parse.
+    /// A scaffolded project must depend on **pest and the vendored runtime**,
+    /// and nothing else. Anything reached over the network is a credential, a
+    /// cargo setting, or an outage between somebody and a working project.
     #[test]
-    fn both_dependency_forms_are_valid() {
-        let path_form = format!(
-            "{{ version = \"{VERSION}\", path = \"{}\" }}",
-            crate_path("nh-runtime")
+    fn a_scaffold_depends_only_on_pest_and_the_vendored_runtime() {
+        let toml = render(CARGO_TOML, &Options::new(
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false,
+        ).unwrap());
+
+        assert!(
+            toml.contains(r#"nh-runtime = { path = "vendor/nh-runtime" }"#),
+            "{toml}"
         );
-        assert!(path_form.starts_with("{ version = "), "{path_form}");
-        assert!(path_form.ends_with(" }"), "{path_form}");
+        for absent in ["git =", "nh-build", "{{runtimedep}}", "{{builddep}}"] {
+            assert!(!toml.contains(absent), "`{absent}` is still in:\n{toml}");
+        }
 
-        let version_form = format!("\"{VERSION}\"");
-        assert_eq!(version_form, "\"0.1.0\"");
-
-        let git_form = format!("{{ git = \"{REPO}\" }}");
-        assert!(git_form.contains("github.com"), "{git_form}");
-
-        // Whichever is active must be what `dependency` returns.
-        let active = dependency("nh-runtime");
-        let expected = if PUBLISHED {
-            version_form
-        } else if is_working_checkout(&crate_path("nh-runtime")) {
-            path_form
-        } else {
-            git_form
-        };
-        assert_eq!(active, expected);
+        // `grammar-extras` is the setting that fails silently when missing.
+        assert!(toml.contains(r#"features = ["grammar-extras"]"#), "{toml}");
     }
 
-    /// A path into cargo's git cache is not a checkout somebody can depend on:
-    /// it names one commit, on one machine, in a directory cargo may collect.
+    /// `build.rs` calls the binary rather than linking the generator, which is
+    /// what keeps the dependency list to pest.
     #[test]
-    fn a_cargo_cache_path_is_not_a_working_checkout() {
-        assert!(!is_working_checkout(
-            "/Users/x/.cargo/git/checkouts/nailhammer-5e2e/563ff25/crates/nh-runtime"
-        ));
-        assert!(!is_working_checkout("/Users/x/.cargo/registry/src/foo/nh-runtime"));
-        // The real sibling, wherever this was built, is one.
-        assert!(is_working_checkout(&crate_path("nh-runtime")));
+    fn the_build_script_shells_out_rather_than_depending_on_the_generator() {
+        let build = render(BUILD_RS, &Options::new(
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false,
+        ).unwrap());
+
+        assert!(build.contains("Command::new"), "{build}");
+        assert!(!build.contains("nh_build::"), "{build}");
+        // A missing binary must say what to do about it.
+        assert!(build.contains("cargo install"), "{build}");
     }
 
     #[test]

@@ -536,6 +536,20 @@ $ nh build mylang.nh -o src/mylang.pest --rust src
 ok: generated 14 file(s) in src  [9 new handler(s), 0 kept]
 ```
 
+A scaffolded project depends on **pest and nothing else**:
+
+```toml
+[dependencies]
+nh-runtime = { path = "vendor/nh-runtime" }
+pest = "2.8"
+pest_derive = { version = "2.8", features = ["grammar-extras"] }
+```
+
+`nh init` vendors the runtime into `vendor/nh-runtime/`, so the project builds
+with no credentials, no cargo configuration, and no access to the NailHammer
+repository. The copy is pinned to the `nh` that generated it, which is the right
+coupling: generated code and its runtime have to agree.
+
 That produces two kinds of file, and the difference matters:
 
 | | |
@@ -1161,21 +1175,20 @@ let pairs = ExampleParser::parse(Rule::program, source)?;
 
 ### Regenerating automatically
 
+`nh init` writes a `build.rs` that calls the `nh` binary:
+
 ```rust
 // build.rs
-nh_build::Builder::new("mylang.nh").run();
+Command::new("nh").args(["build", "mylang.nh", "-o", "src/mylang.pest", "--rust", "src"])
 ```
 
-```toml
-[build-dependencies]
-nh-build = { path = "..." }
-```
+Cargo re-runs it whenever the `.nh` file changes. It is safe on every build:
+handler files are never overwritten, and output is byte-compared before writing,
+so an unchanged grammar does not trigger a rebuild.
 
-Cargo re-runs this whenever the `.nh` file, or anything it imports, changes. It
-is safe on every build: handler files are never overwritten, and output is
-byte-compared before writing, so an unchanged grammar does not trigger a rebuild.
-
-`.deny_warnings(true)` makes determinism warnings fail the build.
+It shells out rather than depending on the generator as a crate, which is what
+keeps a generated project's dependency list down to pest. Set `NH` if the binary
+is not on your `PATH`.
 
 ### Removing an alternative
 

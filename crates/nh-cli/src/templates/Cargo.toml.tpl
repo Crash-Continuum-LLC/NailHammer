@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 # Runtime support for the generated code: views, spans, diagnostics, and the
 # operator driver.
-nh-runtime = {{runtimedep}}
+nh-runtime = { path = "vendor/nh-runtime" }
 
 pest = "2.8"
 
@@ -28,7 +28,3 @@ pest = "2.8"
 # cause. Leave it on.
 pest_derive = { version = "2.8", features = ["grammar-extras"] }
 
-[build-dependencies]
-# Regenerates the parser and the generated Rust on every `cargo build`, so a
-# grammar edit cannot leave you compiling against stale views.
-nh-build = {{builddep}}

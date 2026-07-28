@@ -75,11 +75,44 @@ fn scaffold_creates_a_complete_project() {
 fn the_scaffold_regenerates_on_cargo_build() {
     let dir = scaffold("buildrs");
     let build_rs = read(&dir, "build.rs");
-    assert!(build_rs.contains("nh_build::Builder"), "{build_rs}");
+
+    // It calls the binary rather than linking the generator, which is what
+    // keeps a scaffolded project's dependencies down to pest.
+    assert!(build_rs.contains("Command::new"), "{build_rs}");
+    assert!(build_rs.contains("rerun-if-changed"), "{build_rs}");
 
     let toml = read(&dir, "Cargo.toml");
-    assert!(toml.contains("[build-dependencies]"), "{toml}");
     assert!(toml.contains("build = \"build.rs\""), "{toml}");
+    assert!(
+        !toml.contains("[build-dependencies]"),
+        "shelling out means there is nothing to depend on:\n{toml}"
+    );
+}
+
+/// The runtime travels with the project. Anything fetched over the network is
+/// a credential, a cargo setting, or an outage between somebody and a working
+/// project — and the runtime was all three before it was vendored.
+#[test]
+fn the_runtime_is_vendored_into_the_project() {
+    let dir = scaffold("vendored");
+
+    assert!(dir.join("vendor/nh-runtime/Cargo.toml").exists());
+    for m in ["lib", "ctx", "diagnostic", "error", "name", "node", "ops", "source"] {
+        assert!(
+            dir.join(format!("vendor/nh-runtime/src/{m}.rs")).exists(),
+            "missing vendored module `{m}`"
+        );
+    }
+
+    let toml = read(&dir, "Cargo.toml");
+    assert!(toml.contains(r#"path = "vendor/nh-runtime""#), "{toml}");
+    assert!(!toml.contains("git ="), "nothing is fetched:\n{toml}");
+
+    // The vendored manifest must not inherit from a workspace that is not
+    // there, and must not be adopted by one that is.
+    let vendored = read(&dir, "vendor/nh-runtime/Cargo.toml");
+    assert!(!vendored.contains(".workspace = true"), "{vendored}");
+    assert!(vendored.contains("[workspace]"), "{vendored}");
 }
 
 /// The scaffold ships *working* handlers rather than stubs, so a fresh project
