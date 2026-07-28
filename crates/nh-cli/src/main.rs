@@ -18,7 +18,7 @@ nh — NailHammer grammar toolkit
 
 USAGE:
     nh init    [dir] [--name <name>] [--ext <ext>] [--force]
-    nh check   <file.nh> [--quiet]
+    nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
     nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
     nh explain <file.nh> [--source]
     nh --help | --version
@@ -38,15 +38,13 @@ OPTIONS:
     --deny-warnings
                check: treat analysis warnings as errors, for CI
     --lints    check: list the determinism lints and exit
+    --json     check: print diagnostics as JSON on stdout, for editors
     -o <path>  build: write the .pest here instead of alongside the .nh file
     --rust <d> build: also generate views, dispatch, and handler stubs into <d>
     --prune    build: remove handler files with no matching grammar alternative
     --source   explain: print the table as .nh source you could paste
 
 New here? `nh init mylang && cd mylang && cargo run`
-
-Not yet implemented:
-    Operator driver — folding expressions by precedence   (milestone M3)
 ";
 
 fn main() -> ExitCode {

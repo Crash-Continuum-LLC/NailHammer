@@ -475,3 +475,23 @@ fn an_edited_grammar_without_nh_is_a_build_error() {
     assert!(stderr.contains("has changed"), "{stderr}");
     assert!(stderr.contains("previous grammar"), "{stderr}");
 }
+
+/// `--help` is the first thing a new user reads, and it had been claiming the
+/// operator driver was unimplemented long after M3 shipped. Nothing failed
+/// when that went stale, which is exactly why it needs a test.
+#[test]
+fn help_lists_every_flag_and_claims_nothing_untrue() {
+    let out = Command::new(env!("CARGO_BIN_EXE_nh"))
+        .arg("--help")
+        .output()
+        .expect("running nh --help");
+    let help = String::from_utf8_lossy(&out.stdout);
+
+    for flag in ["--json", "--deny-warnings", "--prune", "--lints", "--source", "--ext"] {
+        assert!(help.contains(flag), "`{flag}` is undocumented:\n{help}");
+    }
+    assert!(
+        !help.contains("Not yet implemented"),
+        "every milestone is complete; the help should not say otherwise:\n{help}"
+    );
+}
