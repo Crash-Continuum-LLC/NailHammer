@@ -52,16 +52,44 @@ const HANDLERS: &[(&str, &str)] = &[
 const PUBLISHED: bool = false;
 
 /// How a scaffolded `Cargo.toml` should depend on one of our crates.
+///
+/// Three cases, and the middle one is the reason this is not a one-liner:
+///
+/// * **Published** — an ordinary version requirement.
+/// * **Built from a working checkout** — a path to the sibling crate, so
+///   editing `nh-runtime` shows up in scaffolded projects immediately. This is
+///   what you want while developing NailHammer itself.
+/// * **Installed from git** — a git dependency. `cargo install --git` builds
+///   from `~/.cargo/git/checkouts/<hash>/<commit>/`, and a path into *that* is
+///   machine-specific, pinned to one commit, and inside a directory cargo may
+///   garbage-collect. A scaffolded project pointing there works once, on one
+///   machine, until it does not.
 fn dependency(crate_name: &str) -> String {
     if PUBLISHED {
-        format!("\"{VERSION}\"")
+        return format!("\"{VERSION}\"");
+    }
+
+    let path = crate_path(crate_name);
+    if is_working_checkout(&path) {
+        format!("{{ version = \"{VERSION}\", path = \"{path}\" }}")
     } else {
-        format!(
-            "{{ version = \"{VERSION}\", path = \"{}\" }}",
-            crate_path(crate_name)
-        )
+        format!("{{ git = \"{REPO}\" }}")
     }
 }
+
+/// Whether a compile-time crate path is a real checkout rather than a cache.
+///
+/// Checked at *run* time: the same binary is a working checkout on the machine
+/// that built it and a cache entry everywhere else.
+fn is_working_checkout(path: &str) -> bool {
+    !path.contains("/.cargo/git/")
+        && !path.contains("/.cargo/registry/")
+        && Path::new(path).join("Cargo.toml").exists()
+}
+
+/// Where a scaffolded project fetches the runtime from when `nh` was installed
+/// rather than built in place.
+const REPO: &str = env!("CARGO_PKG_REPOSITORY");
 
 /// Kept in step with the workspace version.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -276,9 +304,31 @@ mod tests {
         let version_form = format!("\"{VERSION}\"");
         assert_eq!(version_form, "\"0.1.0\"");
 
+        let git_form = format!("{{ git = \"{REPO}\" }}");
+        assert!(git_form.contains("github.com"), "{git_form}");
+
         // Whichever is active must be what `dependency` returns.
         let active = dependency("nh-runtime");
-        assert_eq!(active, if PUBLISHED { version_form } else { path_form });
+        let expected = if PUBLISHED {
+            version_form
+        } else if is_working_checkout(&crate_path("nh-runtime")) {
+            path_form
+        } else {
+            git_form
+        };
+        assert_eq!(active, expected);
+    }
+
+    /// A path into cargo's git cache is not a checkout somebody can depend on:
+    /// it names one commit, on one machine, in a directory cargo may collect.
+    #[test]
+    fn a_cargo_cache_path_is_not_a_working_checkout() {
+        assert!(!is_working_checkout(
+            "/Users/x/.cargo/git/checkouts/nailhammer-5e2e/563ff25/crates/nh-runtime"
+        ));
+        assert!(!is_working_checkout("/Users/x/.cargo/registry/src/foo/nh-runtime"));
+        // The real sibling, wherever this was built, is one.
+        assert!(is_working_checkout(&crate_path("nh-runtime")));
     }
 
     #[test]
