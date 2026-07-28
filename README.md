@@ -180,7 +180,7 @@ Or build it from source with `cd editors/vscode && npm run package`. See
 | [`examples/calc-interp`](examples/calc-interp) | Operators end to end: precedence, short-circuiting, assignment, recovery, `lazy` |
 | [`examples/selfhost`](examples/selfhost) | `.nh` describing `.nh`, parsing every grammar in this repo |
 | [`examples/basic-interp`](examples/basic-interp) | Mini BASIC: `PRINT`, `FOR`, `WHILE`, `SUB`, `FUNCTION`, `GOTO`, `EXIT`/`CONTINUE`. Recursion with local frames, stored bodies, jumps, signals, a from-scratch operator table |
-| [`examples/bytecode`](examples/bytecode) | A **bytecode compiler**, not an interpreter. Same handler shapes, `type Out = ()`, handlers emit instead of compute. Precedence becomes instruction order; `lazy` becomes jump patching |
+| [`examples/bytecode`](examples/bytecode) | A **bytecode compiler**, not an interpreter (`nh init --compiler` scaffolds one). Same handler shapes, `type Out = ()`, handlers emit instead of compute. Precedence becomes instruction order; `lazy` becomes jump patching |
 | [`examples/basic.nh`](examples/basic.nh) | The BASIC grammar on its own, with `GOTO` and line numbers |
 
 ## Status

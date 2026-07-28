@@ -7,8 +7,10 @@ pub mod ast;
 pub mod diagnostics;
 pub mod dispatch;
 pub mod place;
+pub mod run;
 pub mod views;
 
 pub use diagnostics::{render_parse_error, syntax_errors};
 pub use dispatch::{Eval, Handlers};
 pub use place::Place;
+pub use run::eval_source;

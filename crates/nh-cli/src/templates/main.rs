@@ -1,12 +1,25 @@
 //! Runs a {{Name}} program.
+//!
+//! Three things happen here, and all three are **yours**, which is why they are
+//! in a file you own rather than in `src/generated/`:
+//!
+//!   1. Where the source comes from. A file here; a socket, a REPL line, or a
+//!      string literal in a test somewhere else.
+//!   2. What to do with the result.
+//!   3. Where errors go, and what an exit code means.
+//!
+//! Everything in between — parse, report a parse error, collect syntax errors
+//! that recovery got past, build the owned tree, evaluate — is
+//! `generated::eval_source`. That sequence is the same in every project and has
+//! exactly one correct order, so you are not asked to write it.
 
 use nh_runtime::{Ctx, SourceMap};
-use pest::Parser;
-use {{name}}::{generated, Interp, Rule, {{Name}}Parser};
+use {{name}}::{generated, Interp};
 
 {{tokiomain}}{{mainasync}}fn main() -> std::process::ExitCode {
     let path = std::env::args().nth(1).unwrap_or_else(|| "sample.{{ext}}".into());
 
+    // Yours: where the source comes from.
     let mut sources = SourceMap::new();
     let file = match sources.load(&path) {
         Ok(f) => f,
@@ -15,47 +28,34 @@ use {{name}}::{generated, Interp, Rule, {{Name}}Parser};
             return std::process::ExitCode::FAILURE;
         }
     };
-    let text = sources.text(file).to_string();
-
-    let mut pairs = match {{Name}}Parser::parse(Rule::program, &text) {
-        Ok(p) => p,
-        Err(e) => {
-            // `expect` declarations turn pest's rule names into a sentence.
-            eprint!("{}", generated::render_parse_error(&e, file).render(&sources));
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-    let program = pairs.next().expect("`program` yields one pair");
-
-    // `recover` means the parse succeeded past bad statements, leaving error
-    // nodes behind. Report them ALL before evaluating anything, so one typo
-    // does not hide the rest.
-    let syntax = generated::syntax_errors(&program, file);
-    for d in &syntax {
-        eprint!("{}", d.render(&sources));
-        eprintln!();
-    }
 
     let mut cx = Ctx::new(sources);
-    cx.enter(nh_runtime::Span::new(file, 0, 0));
     let mut interp = Interp::default();
 
-    // Two steps, and the first one is worth having on its own: `build_program`
-    // produces an **owned** tree that outlives the parse, so it can be kept,
-    // inspected, or run more than once.
-    let result = generated::ast::build_program(program, file)
-        .and_then(|tree| generated::dispatch::eval_program(&mut interp, &tree, &mut cx));
+    let outcome = generated::eval_source(&mut interp, &mut cx, file);
 
-    for line in &interp.output {
-        println!("{line}");
-    }
+    // Yours: what to do with what was produced.
+    //
+    // This happens either way, on purpose. A run that recovered from a syntax
+    // error still evaluated everything it could, and that output is worth
+    // seeing — reporting the error is not a reason to hide it.
+{{produced}}
 
-    match result {
-        Err(e) => {
-            eprint!("{}", cx.render(&e));
+    match outcome {
+        Ok(_) => std::process::ExitCode::SUCCESS,
+
+        // Yours: where errors go. `eval_source` returns them rather than
+        // printing them, so a test, an LSP, and this binary can each do
+        // something different with the same list.
+        //
+        // A program whose parse *recovered* arrives here too, even though
+        // everything it could evaluate did — a reported typo is not a success.
+        Err(errors) => {
+            for d in &errors {
+                eprint!("{}", d.render(cx.sources()));
+                eprintln!();
+            }
             std::process::ExitCode::FAILURE
         }
-        Ok(_) if !syntax.is_empty() => std::process::ExitCode::FAILURE,
-        Ok(_) => std::process::ExitCode::SUCCESS,
     }
 }

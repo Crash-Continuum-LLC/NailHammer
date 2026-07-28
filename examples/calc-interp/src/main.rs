@@ -1,12 +1,17 @@
 //! Evaluates each statement in a file and prints the results.
+//!
+//! Three things happen here, and all three are this program's business rather
+//! than the grammar's: where the source comes from, what to do with a result,
+//! and where errors go. Everything in between — parse, check for recovered
+//! syntax errors, build the owned tree, evaluate — is `generated::eval_source`.
 
-use calc_interp::{generated, CalcParser, Interp, Rule};
+use calc_interp::{generated, Interp};
 use nh_runtime::{Ctx, SourceMap};
-use pest::Parser;
 
 fn main() -> std::process::ExitCode {
     let path = std::env::args().nth(1).unwrap_or_else(|| "sample.calc".into());
 
+    // Yours: where the source comes from.
     let mut sources = SourceMap::new();
     let file = match sources.load(&path) {
         Ok(f) => f,
@@ -15,73 +20,28 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
-    let text = sources.text(file).to_string();
-
-    let mut pairs = match CalcParser::parse(Rule::program, &text) {
-        Ok(p) => p,
-        Err(e) => {
-            // `expect` declarations turn pest's rule names into a sentence.
-            let d = generated::render_parse_error(&e, file);
-            eprint!("{}", d.render(&sources));
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-    let program = pairs.next().expect("one program pair");
-
-    // `recover` means the parse succeeded past bad statements, leaving error
-    // nodes behind. Report them all before evaluating anything.
-    let syntax = generated::syntax_errors(&program, file);
-    let recovered = syntax.len();
-    for d in &syntax {
-        eprint!("{}", d.render(&sources));
-        eprintln!();
-    }
 
     let mut cx = Ctx::new(sources);
-    cx.enter(nh_runtime::Span::new(file, 0, 0));
     let mut interp = Interp::default();
 
-    match build_and_eval(&mut interp, program, file, &mut cx) {
-        Ok(_) => {
-            for line in &interp.output {
-                println!("{line}");
+    let outcome = generated::eval_source(&mut interp, &mut cx, file);
+
+    // Either way: a run that recovered from a syntax error still evaluated
+    // everything it could, and that output is worth seeing.
+    for line in &interp.output {
+        println!("{line}");
+    }
+
+    match outcome {
+        Ok(_) => std::process::ExitCode::SUCCESS,
+        // Yours: where errors go. A recovered run arrives here even though
+        // everything it *could* evaluate did — a reported typo is not success.
+        Err(errors) => {
+            for d in &errors {
+                eprint!("{}", d.render(cx.sources()));
+                eprintln!();
             }
-            std::process::ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprint!("{}", cx.render(&e));
             std::process::ExitCode::FAILURE
         }
     }
-    .to_owned_with(recovered)
-}
-
-trait ExitWith {
-    fn to_owned_with(self, recovered: usize) -> std::process::ExitCode;
-}
-
-impl ExitWith for std::process::ExitCode {
-    /// A run that recovered from syntax errors is not a success, even if
-    /// everything it *could* evaluate did evaluate.
-    fn to_owned_with(self, recovered: usize) -> std::process::ExitCode {
-        if recovered > 0 {
-            std::process::ExitCode::FAILURE
-        } else {
-            self
-        }
-    }
-}
-
-/// Builds the owned AST, then evaluates it.
-///
-/// Two steps rather than one because the tree is worth having: it outlives the
-/// parse, so a caller can keep it, walk it, or run it more than once.
-fn build_and_eval(
-    interp: &mut Interp,
-    pair: pest::iterators::Pair<'_, Rule>,
-    file: nh_runtime::FileId,
-    cx: &mut Ctx,
-) -> nh_runtime::Result<<Interp as generated::dispatch::Semantics>::Out> {
-    let tree = generated::ast::build_program(pair, file)?;
-    generated::dispatch::eval_program(interp, &tree, cx)
 }

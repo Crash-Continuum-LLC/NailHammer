@@ -17,7 +17,7 @@ const USAGE: &str = "\
 nh — NailHammer grammar toolkit
 
 USAGE:
-    nh init    [dir] [--name <name>] [--ext <ext>] [--async] [--force]
+    nh init    [dir] [--name <name>] [--ext <ext>] [--compiler] [--async] [--force]
     nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
     nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
     nh explain <file.nh> [--source]
@@ -32,6 +32,7 @@ COMMANDS:
 OPTIONS:
     --name     init: project name (default: the directory name)
     --ext      init: source file extension for your language (default: the name)
+    --compiler init: scaffold a bytecode compiler instead of an interpreter
     --async    init: add tokio and a `block_on` helper for async work in handlers
     --force    init: write into a non-empty directory
                build: with --prune, remove implemented handlers too
@@ -141,7 +142,7 @@ fn report(errors: &Errors, sm: &SourceMap) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn init_cmd(args: &[String]) -> ExitCode {
-    let parsed = match parse_args(args, &["--force", "--async"], &["--name", "--ext"]) {
+    let parsed = match parse_args(args, &["--force", "--async", "--compiler"], &["--name", "--ext"]) {
         Ok(p) => p,
         Err(e) => return usage_error(e),
     };
@@ -153,6 +154,7 @@ fn init_cmd(args: &[String]) -> ExitCode {
         parsed.value("--ext").map(str::to_string),
         parsed.has("--force"),
         parsed.has("--async"),
+        parsed.has("--compiler"),
     ) {
         Ok(o) => o,
         Err(e) => return usage_error(e),

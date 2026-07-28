@@ -3,28 +3,22 @@
 //! These run the pipeline a user would: parse with the generated pest grammar,
 //! dispatch through generated views into hand-written handlers.
 
-use config_example::{ConfigParser, Interp, Rule, Value};
-use nh_runtime::{Ctx, SourceMap, Span};
-use pest::Parser;
+use config_example::{Interp, Value};
+use nh_runtime::{Ctx, SourceMap};
 
 fn eval(source: &str) -> Result<Value, String> {
     let mut sources = SourceMap::new();
     let file = sources.add("test.conf", source);
-    let text = sources.text(file).to_string();
-
-    let mut pairs = ConfigParser::parse(Rule::document, &text).map_err(|e| e.to_string())?;
-    let doc = pairs.next().expect("one document pair");
-
     let mut cx = Ctx::new(sources);
-    cx.enter(Span::new(file, 0, 0));
     let mut interp = Interp;
 
-    {
-        let tree = config_example::generated::ast::build_document(doc, file)
-            .map_err(|e| cx.render(&e))?;
-        config_example::generated::dispatch::eval_document(&mut interp, &tree, &mut cx)
-            .map_err(|e| cx.render(&e))
-    }
+    config_example::generated::eval_source(&mut interp, &mut cx, file).map_err(|errors| {
+        errors
+            .iter()
+            .map(|d| d.render(cx.sources()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
 }
 
 fn table(v: Value) -> Vec<(String, Value)> {

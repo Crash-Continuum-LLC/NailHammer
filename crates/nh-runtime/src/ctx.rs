@@ -127,26 +127,9 @@ impl Ctx {
     /// Renders an error the way the diagnostics do, so a returned `Error` and a
     /// reported `Diagnostic` look identical to the user.
     pub fn render(&self, e: &Error) -> String {
-        match e {
-            Error::AlreadyReported => String::new(),
-            Error::Runtime { message, span } => {
-                let mut d = Diagnostic::error(message.clone());
-                if let Some(s) = span {
-                    d = d.at(*s);
-                }
-                d.render(&self.sources)
-            }
-            // An uncaught jump is a real error, and naming it is the whole
-            // reason the label is a string rather than an opaque tag.
-            Error::Signal { label, span } => {
-                let mut d = Diagnostic::error(format!(
-                    "`{label}` is not inside anything that handles it"
-                ));
-                if let Some(s) = span {
-                    d = d.at(*s);
-                }
-                d.render(&self.sources)
-            }
+        match e.diagnostic() {
+            Some(d) => d.render(&self.sources),
+            None => String::new(),
         }
     }
 

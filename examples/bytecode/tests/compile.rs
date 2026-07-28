@@ -7,28 +7,22 @@
 //! requirement — `truthy` — that only an interpreter can meet. These assertions
 //! are what stops that happening again.
 
-use bc::{generated, BcParser, Interp, Op, Rule};
-use nh_runtime::{Ctx, SourceMap, Span};
-use pest::Parser;
+use bc::{generated, Interp, Op};
+use nh_runtime::{Ctx, SourceMap};
 
 /// Compiles a program, returning the emitted instructions.
 fn compile(source: &str) -> Vec<Op> {
     let mut sources = SourceMap::new();
     let file = sources.add("t.bc", source);
-    let text = sources.text(file).to_string();
-
-    let mut pairs = BcParser::parse(Rule::program, &text)
-        .unwrap_or_else(|e| panic!("`{source}` did not parse:\n{e}"));
-    let program = pairs.next().expect("one program pair");
-
     let mut cx = Ctx::new(sources);
-    cx.enter(Span::new(file, 0, 0));
     let mut host = Interp::default();
 
-    let tree = generated::ast::build_program(program, file)
-        .unwrap_or_else(|e| panic!("`{source}`:\n{}", cx.render(&e)));
-    generated::dispatch::eval_program(&mut host, &tree, &mut cx)
-        .unwrap_or_else(|e| panic!("`{source}`:\n{}", cx.render(&e)));
+    // The same driver an interpreter uses. It does not know that evaluating
+    // this host means emitting instructions.
+    if let Err(errors) = generated::eval_source(&mut host, &mut cx, file) {
+        let rendered: Vec<_> = errors.iter().map(|d| d.render(cx.sources())).collect();
+        panic!("`{source}`:\n{}", rendered.join("\n"));
+    }
 
     host.code
 }

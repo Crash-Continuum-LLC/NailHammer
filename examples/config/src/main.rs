@@ -2,13 +2,15 @@
 //!
 //! Everything of interest is in `src/handlers/` — one small file per grammar
 //! alternative, each reading its inputs by name.
+//!
+//! What is left here is only what belongs to *this program*: where the source
+//! comes from, what to do with a result, and where errors go. Parse, syntax
+//! check, build, and evaluate are `generated::eval_source`.
 
-use config_example::{generated, ConfigParser, Interp, Rule};
+use config_example::{generated, Interp};
 use nh_runtime::{Ctx, SourceMap};
-use pest::Parser;
 
 fn main() -> std::process::ExitCode {
-
     let path = std::env::args().nth(1).unwrap_or_else(|| "sample.conf".into());
 
     let mut sources = SourceMap::new();
@@ -20,43 +22,20 @@ fn main() -> std::process::ExitCode {
         }
     };
 
-    let text = sources.text(file).to_string();
-    let mut pairs = match ConfigParser::parse(Rule::document, &text) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("{e}");
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-    let document = pairs.next().expect("`document` always yields one pair");
-
     let mut cx = Ctx::new(sources);
-    // Seed the span stack so dispatch knows which file it is in.
-    cx.enter(nh_runtime::Span::new(file, 0, 0));
-
     let mut interp = Interp;
-    match build_and_eval(&mut interp, document, file, &mut cx) {
+
+    match generated::eval_source(&mut interp, &mut cx, file) {
         Ok(value) => {
             println!("{value}");
             std::process::ExitCode::SUCCESS
         }
-        Err(e) => {
-            eprint!("{}", cx.render(&e));
+        Err(errors) => {
+            for d in &errors {
+                eprint!("{}", d.render(cx.sources()));
+                eprintln!();
+            }
             std::process::ExitCode::FAILURE
         }
     }
-}
-
-/// Builds the owned AST, then evaluates it.
-///
-/// Two steps rather than one because the tree is worth having: it outlives the
-/// parse, so a caller can keep it, walk it, or run it more than once.
-fn build_and_eval(
-    interp: &mut Interp,
-    pair: pest::iterators::Pair<'_, Rule>,
-    file: nh_runtime::FileId,
-    cx: &mut Ctx,
-) -> nh_runtime::Result<<Interp as generated::dispatch::Semantics>::Out> {
-    let tree = generated::ast::build_document(pair, file)?;
-    generated::dispatch::eval_document(interp, &tree, cx)
 }

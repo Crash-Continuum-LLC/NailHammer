@@ -23,6 +23,8 @@ const GRAMMAR: &str = include_str!("templates/grammar.nh");
 // build of every project that depends on us. Same reason as `build.rs.tpl`.
 const CARGO_TOML: &str = include_str!("templates/Cargo.toml.tpl");
 const LIB_RS: &str = include_str!("templates/lib.rs");
+/// The same project, `type Out = ()`. See `--compiler`.
+const LIB_RS_COMPILER: &str = include_str!("templates/lib_compiler.rs");
 const MAIN_RS: &str = include_str!("templates/main.rs");
 const README: &str = include_str!("templates/README.md");
 const GITIGNORE: &str = include_str!("templates/gitignore");
@@ -43,6 +45,37 @@ const HANDLERS: &[(&str, &str)] = &[
     ("primary_num", include_str!("templates/handlers/primary_num.rs")),
     ("primary_var", include_str!("templates/handlers/primary_var.rs")),
 ];
+
+/// The same handlers for a host that emits rather than computes.
+///
+/// Compare them side by side: the signatures are identical bar the return type,
+/// and every body does the emitting equivalent of what the interpreter's does.
+/// That similarity is the claim `--compiler` exists to make checkable.
+const HANDLERS_COMPILER: &[(&str, &str)] = &[
+    ("program", include_str!("templates/handlers_compiler/program.rs")),
+    ("stmt_bind", include_str!("templates/handlers_compiler/stmt_bind.rs")),
+    ("stmt_print", include_str!("templates/handlers_compiler/stmt_print.rs")),
+    ("stmt_eval", include_str!("templates/handlers_compiler/stmt_eval.rs")),
+    ("primary_num", include_str!("templates/handlers_compiler/primary_num.rs")),
+    ("primary_var", include_str!("templates/handlers_compiler/primary_var.rs")),
+];
+
+/// What `main.rs` does with what the run produced. The only part of the binary
+/// that knows which shape this project is — everything else, including the
+/// whole error path, is identical.
+const PRODUCED_INTERP: &str = r#"    for line in &interp.output {
+        println!("{line}");
+    }"#;
+
+const PRODUCED_COMPILER: &str = r#"    // Compiling produced instructions; running them produces output.
+    eprintln!("--- bytecode ---");
+    for (i, op) in interp.code.iter().enumerate() {
+        eprintln!("{i:3}  {op:?}");
+    }
+    eprintln!("--- output ---");
+    for line in interp.run() {
+        println!("{line}");
+    }"#;
 
 /// Added to `Cargo.toml` by `--async`.
 const TOKIO_DEP: &str = r#"
@@ -101,6 +134,12 @@ pub struct Options {
     /// Source file extension for the target language.
     pub ext: String,
     pub force: bool,
+    /// Scaffold a bytecode compiler rather than an interpreter.
+    ///
+    /// The grammar, the generated code, and `eval_source` are the same either
+    /// way — only `src/lib.rs` and the handlers differ, and only in that `Out`
+    /// is `()` and bodies emit instead of compute.
+    pub is_compiler: bool,
     /// Set up the project for async work in handlers.
     ///
     /// The evaluator stays synchronous — see `ASYNC_NOTE` for why, and for the
@@ -109,7 +148,14 @@ pub struct Options {
 }
 
 impl Options {
-    pub fn new(dir: PathBuf, name: Option<String>, ext: Option<String>, force: bool, is_async: bool) -> Result<Self, String> {
+    pub fn new(
+        dir: PathBuf,
+        name: Option<String>,
+        ext: Option<String>,
+        force: bool,
+        is_async: bool,
+        is_compiler: bool,
+    ) -> Result<Self, String> {
         let derived = match &name {
             Some(n) => n.clone(),
             None => dir
@@ -143,6 +189,7 @@ impl Options {
             ext,
             force,
             is_async,
+            is_compiler,
         })
     }
 }
@@ -201,6 +248,14 @@ fn render(template: &str, opts: &Options) -> String {
         .replace("{{tokiomain}}", if opts.is_async { "#[tokio::main(flavor = \"multi_thread\")]\n" } else { "" })
         .replace("{{mainasync}}", if opts.is_async { "async " } else { "" })
         .replace("{{asyncsupport}}", if opts.is_async { ASYNC_SUPPORT } else { "" })
+        .replace(
+            "{{produced}}",
+            if opts.is_compiler {
+                PRODUCED_COMPILER
+            } else {
+                PRODUCED_INTERP
+            },
+        )
 
 }
 
@@ -248,10 +303,18 @@ pub fn scaffold(opts: &Options) -> Result<Created, String> {
             render(SAMPLE, opts),
         ),
         (opts.dir.join("build.rs"), render(BUILD_RS, opts)),
-        (src.join("lib.rs"), render(LIB_RS, opts)),
+        (
+            src.join("lib.rs"),
+            render(if opts.is_compiler { LIB_RS_COMPILER } else { LIB_RS }, opts),
+        ),
         (src.join("main.rs"), render(MAIN_RS, opts)),
     ];
-    for (name, body) in HANDLERS {
+    let handler_set = if opts.is_compiler {
+        HANDLERS_COMPILER
+    } else {
+        HANDLERS
+    };
+    for (name, body) in handler_set {
         files.push((handlers.join(format!("{name}.rs")), render(body, opts)));
     }
 
@@ -295,7 +358,7 @@ mod tests {
     #[test]
     fn a_scaffold_depends_only_on_pest_and_the_vendored_runtime() {
         let toml = render(CARGO_TOML, &Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false,
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false,
         ).unwrap());
 
         assert!(
@@ -315,7 +378,7 @@ mod tests {
     #[test]
     fn the_build_script_shells_out_rather_than_depending_on_the_generator() {
         let build = render(BUILD_RS, &Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false,
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false,
         ).unwrap());
 
         assert!(build.contains("Command::new"), "{build}");
@@ -327,7 +390,7 @@ mod tests {
     #[test]
     fn a_keyword_name_is_refused() {
         // `nh init pub` would generate `use pub::...`, which does not compile.
-        let err = Options::new(PathBuf::from("/tmp/pub"), Some("pub".into()), None, false, false)
+        let err = Options::new(PathBuf::from("/tmp/pub"), Some("pub".into()), None, false, false, false)
             .expect_err("a Rust keyword cannot name a crate");
         assert!(err.contains("Rust keyword"), "{err}");
         assert!(err.contains("--name"), "{err}");
@@ -341,7 +404,7 @@ mod tests {
 
     #[test]
     fn templates_have_no_unreplaced_placeholders() {
-        let opts = Options::new(PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false).unwrap();
+        let opts = Options::new(PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false).unwrap();
         for t in [GRAMMAR, CARGO_TOML, MAIN_RS, README, GITIGNORE, SAMPLE] {
             let out = render(t, &opts);
             assert!(

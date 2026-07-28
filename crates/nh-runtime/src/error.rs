@@ -1,5 +1,6 @@
 //! The error type generated handlers return.
 
+use crate::diagnostic::Diagnostic;
 use crate::source::Span;
 use std::fmt;
 
@@ -105,6 +106,36 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    /// This failure as a [`Diagnostic`], or `None` if it has already been
+    /// reported.
+    ///
+    /// Split out of `Ctx::render` so a caller that collects diagnostics and a
+    /// caller that prints a string produce the same words. Before this, the
+    /// only way to turn a returned `Error` into something you could put in a
+    /// list beside the syntax errors was to render it and lose the structure.
+    pub fn diagnostic(&self) -> Option<Diagnostic> {
+        let (message, span) = match self {
+            // The diagnostic already exists somewhere else; a second one would
+            // be the cascade §5.5 exists to suppress.
+            Error::AlreadyReported => return None,
+            Error::Runtime { message, span } => (message.clone(), *span),
+            // An uncaught jump is a real error, and naming it is the whole
+            // reason the label is a string rather than an opaque tag.
+            Error::Signal { label, span } => (
+                format!("`{label}` is not inside anything that handles it"),
+                *span,
+            ),
+        };
+
+        let mut d = Diagnostic::error(message);
+        if let Some(s) = span {
+            d = d.at(s);
+        }
+        Some(d)
+    }
+}
 
 #[cfg(test)]
 mod tests {
