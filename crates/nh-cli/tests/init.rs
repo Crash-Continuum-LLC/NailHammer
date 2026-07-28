@@ -303,6 +303,7 @@ fn scaffolded_project_builds_and_runs() {
     let dir = scaffold("e2e");
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
         .args(["run", "--quiet"])
         .output()
         .expect("running cargo in the scaffolded project");
@@ -343,6 +344,7 @@ fn an_unhandled_alternative_breaks_the_build() {
 
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
         .args(["build", "--quiet"])
         .output()
         .expect("running cargo");
@@ -373,6 +375,7 @@ fn a_scaffolded_project_recovers_from_syntax_errors() {
 
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
         .args(["run", "--quiet", "--", "broken.recov"])
         .output()
         .expect("running the scaffolded project");
@@ -392,4 +395,83 @@ fn a_scaffolded_project_recovers_from_syntax_errors() {
         "every statement that could run should have run:\n{stdout}"
     );
     assert!(!out.status.success(), "a recovered error is still a failure");
+}
+
+/// A scaffolded project must build for somebody who does not have `nh`.
+///
+/// The generated code is committed, so it compiles on its own; requiring the
+/// tool to *build* would mean a project could not be handed to a colleague or
+/// built in CI without installing the generator first. That is exactly what
+/// broke when `build.rs` stopped depending on `nh-build` and started shelling
+/// out — every scaffolded project failed on a machine without `nh`.
+#[test]
+#[ignore = "compiles a scaffolded project"]
+fn a_scaffolded_project_builds_without_nh_installed() {
+    let dir = scaffold("nonh");
+
+    let out = Command::new(env!("CARGO"))
+        .current_dir(&dir)
+        // A name nothing will resolve, standing in for "not installed".
+        .env("NH", "nh-that-is-not-installed")
+        .args(["run", "--quiet"])
+        .output()
+        .expect("running cargo");
+
+    assert!(
+        out.status.success(),
+        "a project must build without the tool:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).lines().collect::<Vec<_>>(),
+        vec!["28", "22", "5", "14"],
+    );
+    // `--quiet` suppresses `cargo:warning`, so the notice is checked with a
+    // separate ordinary build rather than by loosening the run above.
+    let noisy = Command::new(env!("CARGO"))
+        .current_dir(&dir)
+        .env("NH", "nh-that-is-not-installed")
+        .args(["build"])
+        .output()
+        .expect("running cargo");
+    let stderr = String::from_utf8_lossy(&noisy.stderr);
+    assert!(
+        stderr.contains("not found") && stderr.contains("will not take effect"),
+        "it should say the grammar will not be regenerated:\n{stderr}"
+    );
+}
+
+/// ...but an edited grammar with no tool must stop, rather than quietly
+/// compiling the previous one.
+#[test]
+#[ignore = "compiles a scaffolded project"]
+fn an_edited_grammar_without_nh_is_a_build_error() {
+    let dir = scaffold("stale");
+
+    // Build once so the generated output exists and is current.
+    let first = Command::new(env!("CARGO"))
+        .current_dir(&dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .args(["build", "--quiet"])
+        .output()
+        .expect("running cargo");
+    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+
+    // Touch the grammar so it is newer than what was generated from it.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let grammar = dir.join("stale.nh");
+    let text = std::fs::read_to_string(&grammar).unwrap();
+    std::fs::write(&grammar, format!("{text}\n// edited\n")).unwrap();
+
+    let out = Command::new(env!("CARGO"))
+        .current_dir(&dir)
+        .env("NH", "nh-that-is-not-installed")
+        .args(["build", "--quiet"])
+        .output()
+        .expect("running cargo");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "stale output must not compile:\n{stderr}");
+    assert!(stderr.contains("has changed"), "{stderr}");
+    assert!(stderr.contains("previous grammar"), "{stderr}");
 }
