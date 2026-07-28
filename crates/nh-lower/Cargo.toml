@@ -1,0 +1,26 @@
+[package]
+name = "nh-lower"
+description = "Lowers NailHammer .nh grammars to pest source"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+nh-syntax.workspace = true
+nh-operators.workspace = true
+
+[dev-dependencies]
+# `grammar-extras` must be on here for the same reason it must be on in a user's
+# project — but for a sharper reason too: `validate_tag_silent_rules`, which
+# rejects tags on built-in and silent rules, is ITSELF gated behind this
+# feature. Without it these tests validate tag correctness with tag validation
+# compiled out, and happily pass grammars that `pest_derive` rejects.
+pest_meta = { version = "2.8", features = ["grammar-extras"] }
+pest_vm = { version = "2.8", features = ["grammar-extras"] }

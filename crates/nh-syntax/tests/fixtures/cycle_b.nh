@@ -1,0 +1,2 @@
+import "cycle_a.nh";
+rule b = "b";

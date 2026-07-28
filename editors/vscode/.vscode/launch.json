@@ -1,0 +1,19 @@
+{
+  // Open `editors/vscode` as a folder to use this. It launches a second VS Code
+  // window with the extension loaded, which is how extensions are debugged —
+  // and why it does not live in the repository root, where F5 should build and
+  // debug NailHammer itself.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run the extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/../.."
+      ],
+      "preLaunchTask": "npm: test"
+    }
+  ]
+}

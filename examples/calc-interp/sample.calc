@@ -1,0 +1,14 @@
+# Precedence and associativity come entirely from `use operators::core`.
+
+let a = 2 + 3 * 4;        # 14, not 20
+let b = 2 ** 3 ** 2;      # 512 — `**` is right-associative
+let c = -2 ** 2;          # 4 — prefix binds tighter than `**` here
+
+a; b; c;
+(2 + 3) * 4;
+a > 10 && b > 100;
+
+# `lazy body:stmt` means the handler decides whether the body runs at all.
+if a > 10 then a += 1;
+if a > 99 then a += 1000;
+a;

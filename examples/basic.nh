@@ -1,0 +1,84 @@
+// BASIC — the stress case from DESIGN.md §6.2.
+//
+// This grammar exists to prove the operator system is not quietly C-shaped. It
+// breaks a C-derived table in four independent ways:
+//
+//   * operators are *words* (`AND`, `OR`, `MOD`, `NOT`), not symbols;
+//   * `^` is exponentiation, not XOR;
+//   * `NOT` binds *looser* than comparison, so `NOT A = B` is `NOT (A = B)`;
+//   * `AND`/`OR` are bitwise and do NOT short-circuit.
+//
+// Note also what is absent: `=` binds `compare`, not `assign`. BASIC's
+// assignment is a statement, so `=` in expression position is unambiguously
+// equality and needs no context-sensitivity mechanism at all.
+
+grammar Basic;
+
+use operators::none;
+
+keywords case-insensitive;
+
+// Newlines are significant here (they terminate a line), so they are not skipped.
+skip WHITESPACE = " " | "\t";
+skip COMMENT    = "REM" (!"\n" ANY)*;
+
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token STRING = @ "\"" (!"\"" ANY)* "\"";
+token EOL    = @ "\r"? "\n";
+
+// Identifiers fold case too, so `Counter` and `COUNTER` are one variable. That
+// makes `.key()` available on IDENT views for symbol-table lookup, while
+// `.text()` still reports what the programmer actually typed.
+token IDENT = @ case-insensitive ALPHA (ALPHA | DIGIT | "_")*;
+
+reserved from IDENT { "LET" "IF" "THEN" "PRINT" "GOTO" "END" "REM" }
+
+precedence {
+    left    word "OR" | word "XOR";
+    left    word "AND";
+    prefix  word "NOT";                              // looser than comparison
+    left    "=" | "<>" | "<=" | ">=" | "<" | ">" -> compare;
+    left    "+" | "-";
+    left    "*" | "/" | word "MOD";
+    prefix  "-";
+    right   "^" -> pow;                              // exponent, not xor
+    atom    atom;
+}
+
+// Anchored, so a program that opens with a comment or a blank line parses.
+rule program = SOI line+ EOI;
+
+rule line = label:NUMBER? body:stmt EOL -> pass;
+
+rule stmt
+  = "LET"? target:place_expr "=" value:expr -> let
+  | "PRINT" args:print_list?                -> print
+  // `lazy`: the handler decides whether the body runs, so THEN is a real
+  // conditional rather than a statement that has already happened.
+  | "IF" cond:expr "THEN" lazy body:stmt    -> if
+  | "GOTO" target:NUMBER                    -> goto
+  | "END"                                   -> end
+  ;
+
+rule print_list = expr ((";" | ",") expr)*;
+
+// BASIC subscripts with parentheses, so an assignment target is either a bare
+// name or an array element.
+rule place_expr
+  = name:IDENT "(" index:expr ")" -> array_elem place
+  | name:IDENT                    -> var place
+  ;
+
+rule atom = primary;
+
+rule primary
+  = value:NUMBER                 -> num
+  | text:STRING                  -> str
+  | name:IDENT "(" args:expr ")" -> call
+  | name:IDENT                   -> var place
+  | "(" inner:expr ")"           -> pass
+  ;
+
+recover stmt sync EOL;

@@ -1,0 +1,91 @@
+{
+  "Grammar skeleton": {
+    "prefix": "grammar",
+    "body": [
+      "grammar ${1:Name};",
+      "",
+      "use operators::${2|core,c_style,c_strict,none|};",
+      "",
+      "skip WHITESPACE = \" \" | \"\\\\t\" | \"\\\\r\" | \"\\\\n\";",
+      "",
+      "token DIGIT  = @ \"0\"..\"9\";",
+      "token ALPHA  = @ \"a\"..\"z\" | \"A\"..\"Z\";",
+      "token NUMBER = @ DIGIT+ (\".\" DIGIT+)?;",
+      "token IDENT  = @ (ALPHA | \"_\") (ALPHA | DIGIT | \"_\")*;",
+      "",
+      "// SOI/EOI anchor the entry rule. Without them a program that opens with a",
+      "// blank line or a comment will not parse.",
+      "rule program = SOI ${3:stmt}* EOI;",
+      "",
+      "rule atom = ${4:primary};",
+      "$0"
+    ],
+    "description": "A complete grammar skeleton, anchored and with an atom rule."
+  },
+  "Rule with alternatives": {
+    "prefix": "rule",
+    "body": [
+      "rule ${1:name}",
+      "  = ${2:body} -> ${3:label}",
+      "  | ${4:body} -> ${5:label}",
+      "  ;$0"
+    ],
+    "description": "A rule with two labelled alternatives."
+  },
+  "Atomic token": {
+    "prefix": "token",
+    "body": "token ${1:NAME} = @ ${2:body};$0",
+    "description": "An atomic token: no inner nodes, no whitespace skipping."
+  },
+  "Skip rule": {
+    "prefix": "skip",
+    "body": "skip ${1:COMMENT} = ${2:\"//\" (!\"\\\\n\" ANY)*};$0",
+    "description": "Trivia matched implicitly between elements."
+  },
+  "Reserved words": {
+    "prefix": "reserved",
+    "body": "reserved from ${1:IDENT} { ${2:\"let\" \"if\"} }$0",
+    "description": "Boundary-guard keywords and reject them as identifiers."
+  },
+  "Contextual keywords": {
+    "prefix": "guard",
+    "body": "guard from ${1:IDENT} { ${2:\"atom\"} }$0",
+    "description": "Boundary-guard without reserving — a word that is also a valid name."
+  },
+  "Precedence table": {
+    "prefix": "precedence",
+    "body": [
+      "precedence {                    // loosest first",
+      "    left    ${1:\"+\" | \"-\"};",
+      "    left    ${2:\"*\" | \"/\"};",
+      "    prefix  ${3:\"-\"};",
+      "    atom    ${4:atom};",
+      "}$0"
+    ],
+    "description": "An operator table written from scratch."
+  },
+  "Precedence override": {
+    "prefix": "override",
+    "body": [
+      "precedence override {",
+      "    ${1:right \"**\" above \"*\" -> pow};",
+      "}$0"
+    ],
+    "description": "Adjust a preset rather than replacing it."
+  },
+  "Error recovery": {
+    "prefix": "recover",
+    "body": "recover ${1:stmt} sync ${2:\";\"};$0",
+    "description": "Resynchronise so one bad statement does not hide the rest."
+  },
+  "Expected-token message": {
+    "prefix": "expect",
+    "body": "expect ${1:\")\"} in ${2:primary} as \"${3:closing parenthesis}\";$0",
+    "description": "Replace a rule-name parse error with a sentence."
+  },
+  "Lazy binding": {
+    "prefix": "lazy",
+    "body": "lazy ${1:body}:${2:stmt}$0",
+    "description": "Hand the handler the node instead of the evaluated value."
+  }
+}

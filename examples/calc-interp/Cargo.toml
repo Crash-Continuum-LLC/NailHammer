@@ -1,0 +1,18 @@
+[package]
+name = "calc-interp"
+description = "Worked NailHammer interpreter exercising the operator driver"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "calc_interp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "calc-interp"
+path = "src/main.rs"
+
+[dependencies]
+nh-runtime = { path = "../../crates/nh-runtime" }
+pest = "2.8"
+pest_derive = { version = "2.8", features = ["grammar-extras"] }

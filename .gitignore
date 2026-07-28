@@ -1,0 +1,15 @@
+# Rust build output. 2.7G of it, and reproducible from source.
+/target/
+
+# Node dependencies for the VS Code extension. Restore with `npm install`.
+node_modules/
+
+# Packaged extensions are build output.
+*.vsix
+
+# macOS
+.DS_Store
+
+# Editor scratch
+*.swp
+*~

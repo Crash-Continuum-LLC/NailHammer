@@ -1,0 +1,29 @@
+[workspace]
+members = ["crates/nh-syntax", "crates/nh-operators", "crates/nh-lower", "crates/nh-analysis", "crates/nh-codegen", "crates/nh-build", "crates/nh-runtime", "crates/nh-cli", "examples/config", "examples/calc-interp", "examples/basic-interp"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+authors = ["Crash Continuum LLC"]
+license = "MIT"
+repository = "https://github.com/danielbrame/NailHammer"
+homepage = "https://github.com/danielbrame/NailHammer"
+readme = "README.md"
+keywords = ["parser", "grammar", "peg", "pest", "codegen"]
+categories = ["parsing", "development-tools", "compilers"]
+
+[workspace.dependencies]
+pest = "2.8"
+# `grammar-extras` is NOT a default feature, and node tags (`#name = expr`) do
+# not exist without it. The entire named-accessor design in DESIGN.md §2 depends
+# on tags, so this is a hard requirement rather than an optimisation.
+pest_derive = { version = "2.8", features = ["grammar-extras"] }
+nh-syntax = { path = "crates/nh-syntax", version = "0.1.0" }
+nh-operators = { path = "crates/nh-operators", version = "0.1.0" }
+nh-lower = { path = "crates/nh-lower", version = "0.1.0" }
+nh-analysis = { path = "crates/nh-analysis", version = "0.1.0" }
+nh-codegen = { path = "crates/nh-codegen", version = "0.1.0" }
+nh-build = { path = "crates/nh-build", version = "0.1.0" }
+nh-runtime = { path = "crates/nh-runtime", version = "0.1.0" }

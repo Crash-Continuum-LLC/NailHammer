@@ -1,0 +1,268 @@
+// nh.pest — the NailHammer meta-grammar.
+//
+// This file is hand-written and hand-maintained. It is the bootstrap: it parses
+// the .nh language that NailHammer itself compiles to .pest. DESIGN.md M6 (a
+// stretch goal) is to have nh.nh reproduce this file.
+//
+// Two things here are deliberate dogfooding of DESIGN.md:
+//
+//   * Every keyword carries an explicit `!ident_cont` guard, written out by
+//     hand. This is exactly the boilerplate that `reserved from` (DESIGN.md
+//     §5.3) generates for .nh users. Writing it manually here is the argument
+//     for that feature.
+//   * Optional markers are given their own rules (`atomic_marker`,
+//     `place_marker`, ...) rather than bare literals, so the lowerer can detect
+//     them by rule kind instead of by child position. A bare string literal in
+//     a non-atomic rule produces no Pair and therefore cannot carry a tag.
+
+// ---------------------------------------------------------------------------
+// Trivia
+// ---------------------------------------------------------------------------
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT    = _{ line_comment | block_comment }
+
+line_comment  = _{ "//" ~ (!NEWLINE ~ ANY)* }
+block_comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+// ---------------------------------------------------------------------------
+// Lexical primitives
+// ---------------------------------------------------------------------------
+
+ident_start = _{ ASCII_ALPHA | "_" }
+ident_cont  = _{ ASCII_ALPHANUMERIC | "_" }
+ident       = @{ ident_start ~ ident_cont* }
+
+// Case-insensitive literal, e.g. ^"AND".
+string_ci = ${ "^" ~ "\"" ~ str_inner ~ "\"" }
+string    = ${ "\"" ~ str_inner ~ "\"" }
+str_inner = @{ str_char* }
+str_char  = _{ !("\"" | "\\") ~ ANY | "\\" ~ escape }
+escape    = _{ "\"" | "\\" | "/" | "n" | "r" | "t" | "0" | unicode_escape }
+unicode_escape = _{ "u" ~ "{" ~ ASCII_HEX_DIGIT{1, 6} ~ "}" }
+
+// ---------------------------------------------------------------------------
+// Keywords
+//
+// Each is guarded so `ruleX` never lexes as `rule X`. Nothing is globally
+// reserved: `atom` is both a precedence-block keyword and a legal rule name,
+// and ordered choice over distinct leading keywords resolves it.
+//
+// These MUST be atomic (`@`), not silent (`_`). A silent rule is still
+// *non-atomic*, so pest inserts implicit WHITESPACE between its sequence
+// terms — which turns `"grammar" ~ !ident_cont` into
+// `"grammar" ~ WHITESPACE* ~ !ident_cont`. The guard then skips the space and
+// tests the following identifier, matches it, and the lookahead fails. Every
+// keyword-led rule silently stops parsing.
+//
+// This is the strongest argument in the repo for DESIGN.md §5.3: hand-written
+// boundary guards are subtly wrong by default, and users should not have to
+// know this. `reserved from` generates them correctly.
+//
+// Being atomic means these produce pairs, so lowering skips them by rule kind.
+// ---------------------------------------------------------------------------
+
+kw_grammar    = @{ "grammar"    ~ !ident_cont }
+kw_import     = @{ "import"     ~ !ident_cont }
+kw_use        = @{ "use"        ~ !ident_cont }
+kw_operators  = @{ "operators"  ~ !ident_cont }
+kw_keywords   = @{ "keywords"   ~ !ident_cont }
+kw_precedence = @{ "precedence" ~ !ident_cont }
+kw_override   = @{ "override"   ~ !ident_cont }
+kw_skip       = @{ "skip"       ~ !ident_cont }
+kw_token      = @{ "token"      ~ !ident_cont }
+kw_reserved   = @{ "reserved"   ~ !ident_cont }
+kw_guard      = @{ "guard"      ~ !ident_cont }
+kw_boundary   = @{ "boundary"   ~ !ident_cont }
+kw_silent     = @{ "silent"     ~ !ident_cont }
+kw_from       = @{ "from"       ~ !ident_cont }
+kw_rule       = @{ "rule"       ~ !ident_cont }
+kw_recover    = @{ "recover"    ~ !ident_cont }
+kw_sync       = @{ "sync"       ~ !ident_cont }
+kw_expect     = @{ "expect"     ~ !ident_cont }
+kw_in         = @{ "in"         ~ !ident_cont }
+kw_allow      = @{ "allow"      ~ !ident_cont }
+kw_as         = @{ "as"         ~ !ident_cont }
+kw_atom       = @{ "atom"       ~ !ident_cont }
+kw_remove     = @{ "remove"     ~ !ident_cont }
+kw_word       = @{ "word"       ~ !ident_cont }
+kw_place      = @{ "place"      ~ !ident_cont }
+kw_lazy       = @{ "lazy"       ~ !ident_cont }
+kw_above      = @{ "above"      ~ !ident_cont }
+kw_below      = @{ "below"      ~ !ident_cont }
+kw_left       = @{ "left"       ~ !ident_cont }
+kw_right      = @{ "right"      ~ !ident_cont }
+kw_prefix     = @{ "prefix"     ~ !ident_cont }
+kw_postfix    = @{ "postfix"    ~ !ident_cont }
+
+kw_case_insensitive = @{ "case-insensitive" ~ !ident_cont }
+kw_case_sensitive   = @{ "case-sensitive"   ~ !ident_cont }
+
+// ---------------------------------------------------------------------------
+// File structure
+//
+// grammar_decl is optional so a file can be a pure fragment (shared tokens, a
+// precedence table). Exactly one declaration across a merged import set is
+// required, but that is an import-resolution check, not a syntactic one.
+// ---------------------------------------------------------------------------
+
+file = { SOI ~ grammar_decl? ~ item* ~ EOI }
+
+grammar_decl = { kw_grammar ~ #name = ident ~ ";" }
+
+item = _{
+      import_item
+    | use_item
+    | keywords_item
+    | precedence_item
+    | skip_item
+    | token_item
+    | reserved_item
+    | guard_item
+    | boundary_item
+    | rule_item
+    | recover_item
+    | expect_item
+    | allow_item
+}
+
+// ---------------------------------------------------------------------------
+// Items
+// ---------------------------------------------------------------------------
+
+import_item = { kw_import ~ #path = string ~ ";" }
+
+use_item = { kw_use ~ kw_operators ~ "::" ~ #preset = ident ~ ";" }
+
+keywords_item = { kw_keywords ~ #mode = case_mode ~ ";" }
+case_mode     = { kw_case_insensitive | kw_case_sensitive }
+
+skip_item = { kw_skip ~ #name = ident ~ "=" ~ #body = alt ~ ";" }
+
+token_item = {
+    kw_token ~ #name = ident ~ "="
+    ~ atomic_marker?
+    ~ ci_marker?
+    ~ #body = alt ~ ";"
+}
+atomic_marker = { "@" }
+ci_marker     = { kw_case_insensitive }
+
+reserved_item = { kw_reserved ~ kw_from ~ #token = ident ~ "{" ~ string* ~ "}" }
+
+// `guard from IDENT { "atom" }` — boundary-guard these literals, but leave them
+// usable as identifiers.
+//
+// `reserved from` does two things at once, and a grammar with *contextual*
+// keywords wants only the first. `.nh` itself is the example: `atom` is both a
+// precedence-block keyword and an ordinary rule name.
+guard_item = { kw_guard ~ kw_from ~ #token = ident ~ "{" ~ string* ~ "}" }
+
+// `boundary IDENT = ALNUM | "_";` — state what may continue an identifier.
+//
+// A keyword guard is `"let" ~ !<boundary>`, and the boundary is normally
+// derived from the token's own shape. This says it outright, for tokens whose
+// shape the derivation cannot read.
+boundary_item = { kw_boundary ~ #token = ident ~ "=" ~ #body = alt ~ ";" }
+
+// `silent rule x = ...;` matches without producing a node.
+//
+// The marker leads, like every other item keyword, so it needs no lookahead to
+// disambiguate — and `silent` stays usable as an ordinary name.
+rule_item = { silent_marker? ~ kw_rule ~ #name = ident ~ "=" ~ #body = alternatives ~ ";" }
+silent_marker = { kw_silent }
+
+recover_item = { kw_recover ~ #rule = ident ~ kw_sync ~ #sync = alt ~ ";" }
+
+// `allow shadow in stmt;` — states that an analysis warning is intentional.
+//
+// A determinism warning nobody can silence is a warning people learn to
+// ignore, which is worse than not reporting it.
+allow_item = { kw_allow ~ #lint = ident ~ kw_in ~ #rule = ident ~ ";" }
+
+expect_item = {
+    kw_expect ~ #lit = string
+    ~ kw_in ~ #target = target_path
+    ~ kw_as ~ #msg = string ~ ";"
+}
+target_path = { ident ~ ("." ~ ident)* }
+
+// ---------------------------------------------------------------------------
+// Rule bodies
+//
+// `alternatives` is the annotated form used by `rule`; `alt` is the plain form
+// used inside groups and by token/skip bodies, which take no annotations.
+// ---------------------------------------------------------------------------
+
+alternatives = { alternative ~ ("|" ~ alternative)* }
+
+// `place` is only reachable after `-> label`, which removes the ambiguity
+// between the marker and a rule reference named `place` in a sequence.
+alternative = { #body = seq ~ arrow? }
+arrow       = { "->" ~ #label = ident ~ place_marker? }
+place_marker = { kw_place }
+
+alt = { seq ~ ("|" ~ seq)* }
+seq = { labeled+ }
+
+// `lazy value:expr` — the handler receives this unevaluated.
+//
+// Bottom-up evaluation is what lets a handler take plain parameters, but it
+// would run both branches of an `if`. `lazy` is the escape, and it is the same
+// concept the operator table already uses for `&&`.
+labeled = { lazy_marker? ~ (#name = ident ~ ":")? ~ rep }
+// Compound-atomic and guarded on `:` so `lazy:something` is a *binding named
+// `lazy`*, not the marker. Without this, adding the keyword would have quietly
+// taken a name users are allowed to pick — `examples/selfhost/nh.nh` binds one.
+lazy_marker = ${ kw_lazy ~ !":" }
+rep     = { pre ~ rep_op? }
+rep_op  = { "*" | "+" | "?" }
+pre     = { pre_op? ~ term }
+pre_op  = { "!" | "&" }
+
+// char_range is tried first: it starts with a string, so a bare string only
+// wins when no `..` follows.
+term = _{ group | char_range | string_ci | string | rule_ref }
+
+group      = { "(" ~ alt ~ ")" }
+char_range = { #lo = string ~ ".." ~ #hi = string }
+rule_ref   = { ident }
+
+// ---------------------------------------------------------------------------
+// Precedence blocks
+//
+// Entries are distinguished by their leading keyword, so `atom`, `remove`, and
+// the fixity words never collide with each other or with rule names.
+// ---------------------------------------------------------------------------
+
+precedence_item = {
+    kw_precedence ~ override_marker? ~ "{" ~ prec_entry* ~ "}"
+}
+override_marker = { kw_override }
+
+prec_entry = _{ atom_entry | remove_entry | op_entry }
+
+atom_entry   = { kw_atom ~ #rule = ident ~ ";" }
+remove_entry = { kw_remove ~ op_ref+ ~ ";" }
+
+op_entry = {
+    #fixity = fixity
+    ~ #ops = op_list
+    ~ placement?
+    ~ lazy_spec?
+    ~ role?
+    ~ ";"
+}
+
+fixity = { kw_left | kw_right | kw_prefix | kw_postfix }
+
+op_list = { op_ref ~ ("|" ~ op_ref)* }
+op_ref  = { word_marker? ~ #lit = string }
+word_marker = { kw_word }
+
+placement = { #dir = direction ~ #anchor = string }
+direction = { kw_above | kw_below }
+
+lazy_spec = { kw_lazy ~ "(" ~ ident ~ ("," ~ ident)* ~ ")" }
+
+role = { "->" ~ #name = ident }

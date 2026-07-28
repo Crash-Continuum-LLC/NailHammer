@@ -1,0 +1,4 @@
+grammar Dup;
+import "dup_base.nh";
+token IDENT = @ "A".."Z";
+rule start = IDENT;

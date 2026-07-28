@@ -1,0 +1,7 @@
+/target
+Cargo.lock
+
+# `src/{{name}}.pest` is generated, but it IS checked in on purpose: it makes
+# the parser reviewable in diffs and buildable without the `nh` tool installed.
+# Delete this comment and add the path below if you would rather generate it in
+# CI instead.

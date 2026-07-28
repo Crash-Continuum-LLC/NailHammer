@@ -1,0 +1,2 @@
+import "shared.nh";
+token RIGHT_ONLY = @ "R";

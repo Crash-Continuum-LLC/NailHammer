@@ -1,0 +1,43 @@
+// The smallest useful NailHammer grammar: a four-function calculator.
+//
+// Run it with:
+//
+//     cargo run -p nh-cli -- check example.nh
+//
+// There is no `expr` rule here. `expr` comes from the operator prelude, and the
+// grammar supplies `atom` for the operator driver to fold over. That inversion
+// is the point: operator handling is boilerplate, so the toolkit ships it.
+//
+// For larger grammars see examples/calc.nh (imports, suffix chains, recovery)
+// and examples/basic.nh (word operators, a from-scratch precedence table).
+
+grammar Example;
+
+use operators::core;
+
+skip WHITESPACE = " " | "\t" | "\r" | "\n";
+
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
+
+reserved from IDENT { "let" }
+
+// SOI/EOI anchor the entry rule. Whitespace is skipped *between* elements and
+// never before the first one, so without SOI a program that opens with a blank
+// line or a comment does not parse — silently, and only for some inputs.
+rule program = SOI stmt+ EOI;
+
+rule stmt
+  = "let" name:IDENT "=" value:expr ";" -> let
+  | value:expr ";"                      -> eval
+  ;
+
+rule atom = primary;
+
+rule primary
+  = value:NUMBER       -> num
+  | name:IDENT         -> var place
+  | "(" inner:expr ")" -> pass
+  ;

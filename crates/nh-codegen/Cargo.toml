@@ -1,0 +1,18 @@
+[package]
+name = "nh-codegen"
+description = "Generates Rust views, dispatch, and handler stubs for NailHammer grammars"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+nh-syntax.workspace = true
+nh-operators.workspace = true
+nh-lower.workspace = true

@@ -1,0 +1,137 @@
+// A mini BASIC: PRINT, LET, and a real FOR/NEXT loop.
+//
+// The loop is why this example exists. A `FOR` body has to run *many times*,
+// which is impossible if the handler receives it already evaluated — so `body`
+// is marked `lazy` and arrives as a list of unevaluated lines that the handler
+// forces once per iteration.
+
+grammar Basic;
+
+use operators::none;
+
+// BASIC does not care about case: `for i` and `FOR I` are the same program.
+keywords case-insensitive;
+
+// Written from scratch rather than adjusted from a preset, because BASIC has
+// almost nothing in common with C: `=` is comparison, `<>` is inequality, and
+// the logical operators are words.
+precedence {                    // loosest first
+    left    word "OR";
+    left    word "AND";
+    prefix  word "NOT";
+    left    "=" | "<>" | "<=" | ">=" | "<" | ">" -> compare;
+    left    "+" | "-";
+    // `MOD` binds looser than `*` and `/`, as it does in every BASIC dialect
+    // that has it. A `-> role` applies to the whole tier, so it gets its own.
+    left    word "MOD" -> rem;
+    left    "*" | "/";
+    prefix  "-";
+    atom    atom;
+}
+
+// BASIC is line-oriented, so a newline is a **token**, not trivia. Without
+// that, `NEXT` at the end of one line would take the identifier starting the
+// next one as its closing variable — `NEXT` followed by `Total = 0` parsed as
+// `NEXT Total`, and the assignment then failed with an error pointing at `=`.
+skip WHITESPACE = " " | "\t";
+skip COMMENT    = ^"REM" (!"\n" ANY)*;
+
+token EOL    = @ "\r"? "\n";
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token STRING = @ "\"" (!"\"" ANY)* "\"";
+token IDENT  = @ case-insensitive ALPHA (ALPHA | DIGIT)*;
+
+reserved from IDENT { "LET" "PRINT" "FOR" "TO" "STEP" "NEXT" "WHILE" "WEND" "SUB" "END" "CALL" "GOTO" "IF" "THEN" "EXIT" "CONTINUE" "FUNCTION" "RETURN" "REM" }
+
+// `lazy lines:line*` is what makes `GOTO` possible: the handler receives the
+// whole program unevaluated and drives it itself, so it can jump. Everything
+// else in this grammar could get its lines already evaluated.
+rule program = SOI EOL* lazy lines:line* EOI -> doc;
+
+// One statement and the newlines after it. The trailing `EOL*` also absorbs
+// blank lines and comment-only lines, since `REM ...` is trivia and only its
+// newline survives.
+// The optional line number is read **without running the line**, which is how
+// the jump table gets built. That inspection is only possible because the AST
+// is typed data rather than an opaque handle.
+rule line = label:NUMBER? body:stmt EOL* -> line;
+
+rule stmt
+  // `lazy body:line*` is the whole point: the handler gets the body
+  // unevaluated and forces it once per iteration. Without `lazy`, the body
+  // would have run exactly once, before the loop started.
+  = "FOR" var:IDENT "=" from:expr "TO" to:expr step:step_clause? EOL*
+      lazy body:line*
+    "NEXT" closing:IDENT?                 -> loop
+  // A `WHILE` needs its **condition** deferred too, not just its body: the
+  // test has to be re-evaluated every iteration. `FOR` does not — its bounds
+  // are computed once, which is why only its body is lazy.
+  | "WHILE" lazy cond:expr EOL*
+      lazy body:line*
+    "WEND"                                -> while
+  // A named subroutine. Its body is `lazy` **and kept**: the handler clones
+  // it onto the interpreter at definition time and runs it at every later
+  // `CALL`. That is only possible because the tree is owned — a body that
+  // borrowed the parse could not outlive the handler that received it.
+  | "SUB" name:IDENT EOL*
+      lazy body:line*
+    "END" "SUB"                           -> define
+  | "CALL" target:IDENT                   -> call
+  // A function: parameters, a return value, and callable from inside an
+  // expression. `lazy params:..` is not about deferring evaluation — parameter
+  // *names* are not expressions at all — it is how a handler asks for the
+  // node's structure rather than its value.
+  | "FUNCTION" name:IDENT "(" lazy params:param_list? ")" EOL*
+      lazy body:line*
+    "END" "FUNCTION"                      -> function
+  | "RETURN" value:expr                   -> ret
+  | "GOTO" target:NUMBER                  -> goto
+  // Loop and subroutine exits. Each raises a signal named after the construct
+  // it leaves, so nesting resolves itself: a `WHILE` inside a `FOR` ignores
+  // `EXIT FOR` and lets it through to the loop that owns it.
+  | "EXIT" "FOR"                          -> exit_for
+  | "EXIT" "WHILE"                        -> exit_while
+  | "EXIT" "SUB"                          -> exit_sub
+  | "CONTINUE" "FOR"                      -> continue_for
+  | "CONTINUE" "WHILE"                    -> continue_while
+  // `lazy body:stmt` again, on a single statement: the body must not run when
+  // the condition is false. This is what makes a backward `GOTO` terminate.
+  | "IF" cond:expr "THEN" lazy body:stmt  -> iff
+  | "PRINT" head:expr tail:more_print*    -> print
+  | "PRINT"                               -> blank
+  | "LET"? target:IDENT "=" value:expr    -> let
+  ;
+
+rule step_clause = "STEP" value:expr -> step;
+
+rule param_list = head:IDENT tail:more_param* -> params;
+rule more_param = "," name:IDENT -> next;
+
+rule arg_list  = head:expr tail:more_arg* -> args;
+rule more_arg  = "," value:expr -> next;
+rule more_print  = "," value:expr    -> next;
+
+rule atom = primary;
+
+rule primary
+  // Before `name:IDENT`, because ordered choice takes the first match and
+  // `f(1)` must not parse as the variable `f`. A call is a suffix in most
+  // languages; here it is an ordinary alternative, which is what DESIGN.md
+  // §6.7 means by keeping call out of the operator table.
+  = name:IDENT "(" args:arg_list? ")" -> call_fn
+  | value:NUMBER       -> num
+  | text:STRING        -> str
+  | name:IDENT         -> var
+  | "(" inner:expr ")" -> pass
+  ;
+
+// No `recover` here, and that is deliberate rather than an oversight. An error
+// rule matches *any* text up to its sync point, so a recovering `line` used
+// inside `body:line*` above would swallow the `NEXT` that ends the loop and the
+// repetition would never terminate. Recovery and block-structured rules do not
+// currently compose; `examples/calc-interp` shows recovery on a flat statement
+// list, which is where it works.
+
+expect ")" in primary as "closing parenthesis";

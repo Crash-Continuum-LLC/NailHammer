@@ -1,0 +1,233 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "NailHammer",
+  "scopeName": "source.nh",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#declaration" },
+    { "include": "#precedence-block" },
+    { "include": "#label" },
+    { "include": "#binding" },
+    { "include": "#string" },
+    { "include": "#keyword" },
+    { "include": "#builtin" },
+    { "include": "#token-ref" },
+    { "include": "#operator" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.nh",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.nh",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+
+    "string": {
+      "patterns": [
+        {
+          "comment": "A case-insensitive literal. The caret is part of the literal, so it is highlighted with it.",
+          "name": "string.quoted.double.nh",
+          "begin": "\\^?\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.nh",
+              "match": "\\\\(u\\{[0-9A-Fa-f]{1,6}\\}|[nrt0\\\\\"'])"
+            },
+            {
+              "name": "invalid.illegal.unknown-escape.nh",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+
+    "declaration": {
+      "patterns": [
+        {
+          "comment": "`grammar Name;` — the name is the language being defined.",
+          "match": "\\b(grammar)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.nh" },
+            "2": { "name": "entity.name.type.nh" }
+          }
+        },
+        {
+          "comment": "`rule name` and `silent rule name`.",
+          "match": "\\b(silent\\s+)?(rule)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.nh" },
+            "2": { "name": "keyword.control.nh" },
+            "3": { "name": "entity.name.function.nh" }
+          }
+        },
+        {
+          "comment": "`token NAME` and `skip NAME` define lexical things.",
+          "match": "\\b(token|skip|boundary)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.nh" },
+            "2": { "name": "entity.name.class.nh" }
+          }
+        },
+        {
+          "comment": "`use operators::core;`",
+          "match": "\\b(use)\\s+(operators)\\s*(::)\\s*(c_style|c_strict|core|none)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.import.nh" },
+            "2": { "name": "support.class.nh" },
+            "3": { "name": "punctuation.separator.nh" },
+            "4": { "name": "constant.language.nh" }
+          }
+        },
+        {
+          "comment": "`reserved from IDENT { .. }` and `guard from IDENT { .. }`",
+          "match": "\\b(reserved|guard)\\s+(from)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.nh" },
+            "2": { "name": "keyword.control.nh" },
+            "3": { "name": "entity.name.class.nh" }
+          }
+        },
+        {
+          "comment": "`allow <lint> in <rule>;` — the lint name is not a rule.",
+          "match": "\\b(allow)\\s+([a-z-]+)\\s+(in)\\b",
+          "captures": {
+            "1": { "name": "keyword.control.nh" },
+            "2": { "name": "constant.language.nh" },
+            "3": { "name": "keyword.control.nh" }
+          }
+        },
+        {
+          "name": "keyword.control.import.nh",
+          "match": "\\b(import)\\b"
+        }
+      ]
+    },
+
+    "precedence-block": {
+      "comment": "Fixity words only mean fixity inside a precedence block, but they are reserved everywhere, so matching them globally is safe.",
+      "patterns": [
+        {
+          "name": "storage.type.nh",
+          "match": "\\b(left|right|prefix|postfix)\\b"
+        },
+        {
+          "name": "keyword.other.nh",
+          "match": "\\b(precedence|override|remove|above|below|atom|word)\\b"
+        }
+      ]
+    },
+
+    "label": {
+      "comment": "`-> label` names the handler for an alternative. `-> pass` is transparent and worth telling apart at a glance.",
+      "patterns": [
+        {
+          "match": "(->)\\s*(pass)\\b",
+          "captures": {
+            "1": { "name": "keyword.operator.arrow.nh" },
+            "2": { "name": "constant.language.nh" }
+          }
+        },
+        {
+          "match": "(->)\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.operator.arrow.nh" },
+            "2": { "name": "entity.name.tag.nh" }
+          }
+        }
+      ]
+    },
+
+    "binding": {
+      "comment": "`name:rule` becomes a handler parameter, so it reads as a variable.",
+      "patterns": [
+        {
+          "match": "\\b(lazy)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "storage.modifier.nh" },
+            "2": { "name": "variable.parameter.nh" },
+            "3": { "name": "punctuation.separator.nh" }
+          }
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\s*(:)(?!:)",
+          "captures": {
+            "1": { "name": "variable.parameter.nh" },
+            "2": { "name": "punctuation.separator.nh" }
+          }
+        }
+      ]
+    },
+
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.nh",
+          "match": "\\b(recover|sync|expect|in|as|from|keywords|lazy|silent)\\b"
+        },
+        {
+          "name": "storage.modifier.nh",
+          "match": "\\b(place|case-insensitive|case-sensitive)\\b"
+        }
+      ]
+    },
+
+    "builtin": {
+      "comment": "Pest builtins that pass straight through. SOI/EOI anchor the entry rule and are worth spotting.",
+      "patterns": [
+        {
+          "name": "support.function.builtin.nh",
+          "match": "\\b(SOI|EOI|ANY|NEWLINE|PUSH|POP|PEEK|DROP)\\b"
+        }
+      ]
+    },
+
+    "token-ref": {
+      "comment": "An ALL_CAPS name is a token by convention throughout NailHammer's own grammars.",
+      "patterns": [
+        {
+          "name": "entity.name.class.nh",
+          "match": "\\b([A-Z][A-Z0-9_]*)\\b"
+        }
+      ]
+    },
+
+    "operator": {
+      "patterns": [
+        {
+          "comment": "`@` marks a token atomic — a single character with real meaning.",
+          "name": "storage.modifier.atomic.nh",
+          "match": "(?<==)\\s*@"
+        },
+        {
+          "name": "keyword.operator.range.nh",
+          "match": "\\.\\."
+        },
+        {
+          "name": "keyword.operator.repetition.nh",
+          "match": "[*+?]"
+        },
+        {
+          "name": "keyword.operator.lookahead.nh",
+          "match": "[!&]"
+        },
+        {
+          "name": "keyword.operator.choice.nh",
+          "match": "\\|"
+        },
+        {
+          "name": "punctuation.separator.nh",
+          "match": "[;=]"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,61 @@
+// A small expression language, to exercise the operator driver.
+//
+// Note what is NOT here: no `expr` rule, no precedence ladder, no operator
+// handling of any kind. `use operators::core` supplies all of it, and the
+// interpreter implements only the roles it actually has.
+
+grammar Calc;
+
+use operators::core;
+
+precedence override {
+    // `&&` and `||` come from `core` already, complete with short-circuiting.
+    right "**" above "*" -> pow;
+    // `+=` is not in `core`; adding it here is all that is needed for compound
+    // assignment to work, because the default is written in terms of `add`.
+    right "+=" | "-=" below "=" -> assign;
+}
+
+skip WHITESPACE = " " | "\t" | "\r" | "\n";
+skip COMMENT    = "#" (!"\n" ANY)*;
+
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+
+reserved from IDENT { "let" "if" "then" "true" "false" "trace" }
+
+rule program = SOI stmts:stmt* EOI -> doc;
+
+rule stmt
+  = "let" name:IDENT "=" value:expr ";" -> bind
+  // `lazy` is what makes a conditional possible. Without it `body` would be
+  // evaluated before the handler ran, and `if false then trace(1);` would
+  // still call `trace`. The handler decides.
+  | "if" cond:expr "then" lazy body:stmt -> iff
+  | value:expr ";"                       -> eval
+  ;
+
+rule atom = primary;
+
+rule primary
+  = digits:NUMBER      -> num
+  // An indexed slot. `index` is an expression, so the place resolver evaluates
+  // it exactly once — which is what `a[trace(0)] += 1` checks.
+  | name:IDENT "[" index:expr "]" -> elem place
+  | "true"             -> yes
+  | "false"            -> no
+  // `trace(x)` records that it ran, so a test can prove `&&` never called it.
+  | "trace" "(" inner:expr ")" -> trace
+  | name:IDENT         -> var place
+  | "(" inner:expr ")" -> pass
+  ;
+
+// Error recovery. A statement that does not parse is skipped to the next `;`
+// and the parse carries on, so one typo does not hide every later error.
+recover stmt sync ";";
+
+// Without this, a missing `)` reports pest's rule names. With it, it reports
+// something a user of *this* language can act on.
+expect ")" in primary as "closing parenthesis";
