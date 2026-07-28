@@ -24,7 +24,11 @@ jobs:
       matrix:
         include:
           - { os: macos-latest,  target: aarch64-apple-darwin,      label: macos-arm64 }
-          - { os: macos-13,      target: x86_64-apple-darwin,       label: macos-x86_64 }
+          # Cross-compiled from the arm64 runner. `macos-13` is the last Intel
+          # runner and GitHub is retiring it — a v0.1.0 build sat queued on it
+          # for ten minutes while every other target finished. Apple's SDK
+          # targets both architectures, so this needs nothing but the target.
+          - { os: macos-latest,  target: x86_64-apple-darwin,       label: macos-x86_64, cross: true }
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu,  label: linux-x86_64 }
           - { os: windows-latest, target: x86_64-pc-windows-msvc,   label: windows-x86_64 }
     steps:
@@ -42,7 +46,9 @@ jobs:
         run: cargo build --release --locked -p nh-cli --target ${{ matrix.target }}
 
       # A binary that cannot check a grammar is not worth shipping.
+      # A cross-built binary does not run on the machine that built it.
       - name: Smoke test
+        if: ${{ !matrix.cross }}
         shell: bash
         run: |
           bin="target/${{ matrix.target }}/release/nh"
