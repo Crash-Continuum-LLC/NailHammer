@@ -340,6 +340,19 @@ fn emit_method(
             } else if lazy_rhs(e.op) {
                 // The lazy signature is the point of the whole OpTree detour:
                 // `rhs` arrives unevaluated, so the handler decides.
+                // **Required, not defaulted.** Every other role defaults to
+                // `unsupported`, which is right for them: a host that never
+                // uses `%` simply never calls `rem`. This one is different.
+                // `&&` is *in the grammar*, so the language has it, and a
+                // default would mean a host that forgot to say what it means
+                // compiles clean and fails at runtime — the exact failure this
+                // toolkit exists to eliminate.
+                //
+                // There cannot be a default: the obvious body needs
+                // `Values::truthy`, and a Rust default cannot require a bound
+                // its trait lacks (`Operators: Values` would force it on a
+                // compiler, which has no values to inspect). So instead of a
+                // wrong default, no default — and rustc names the method.
                 let _ = writeln!(
                     out,
                     "\n    /// `{}` — **lazy in its right operand**.\n\
@@ -347,10 +360,13 @@ fn emit_method(
                     \x20   /// `rhs` is unevaluated. Running it is what evaluates it; not\n\
                     \x20   /// running it is what makes this short-circuit.\n\
                     \x20   ///\n\
-                    \x20   /// Defaulted to unsupported rather than to truthiness, because\n\
-                    \x20   /// only a host with values can answer that. An interpreter gets\n\
-                    \x20   /// the standard body from `nh_value_operators!`; a compiler\n\
-                    \x20   /// writes its own, emitting a jump.\n\
+                    \x20   /// **You must write this.** There is no default, because a\n\
+                    \x20   /// wrong one would be silent:\n\
+                    \x20   ///\n\
+                    \x20   /// * An interpreter writes `nh_value_operators!();` once,\n\
+                    \x20   ///   inside its `Operators` impl, and is done.\n\
+                    \x20   /// * A compiler writes its own, emitting a jump — for it,\n\
+                    \x20   ///   short-circuiting is control flow, not a decision.\n\
                     \x20   fn {m}(\n\
                     \x20       &mut self,\n\
                     \x20       lhs: Self::Out,\n\
@@ -358,12 +374,7 @@ fn emit_method(
                     \x20       cx: &mut Ctx,\n\
                     \x20   ) -> Result<Self::Out>\n\
                     \x20   where\n\
-                    \x20       Self: Handlers + Sized,\n\
-                    \x20   {{\n\
-                    \x20       let _ = (&lhs, &rhs, &mut *cx);\n\
-                    \x20       Err(Error::unsupported(\"{}\"))\n\
-                    \x20   }}",
-                    e.op.literal,
+                    \x20       Self: Handlers + Sized;",
                     e.op.literal,
                 );
             } else {

@@ -39,9 +39,14 @@ pub enum Op {
     Neg,
     Print,
     Pop,
+    /// Copies the top of the stack. Short-circuiting needs it: `a && b` has to
+    /// test `a` and, if it wins, still leave `a` behind as the result.
+    Dup,
     /// Jump if the top of the stack is zero, consuming it. The target is
-    /// patched once the body's length is known.
+    /// patched once the length of whatever is being skipped is known.
     JumpIfFalse(usize),
+    /// Jump if the top of the stack is non-zero, consuming it.
+    JumpIfTrue(usize),
 }
 
 /// The compiler.
@@ -63,17 +68,28 @@ impl Interp {
     pub fn emit_print(&mut self) { self.emit(Op::Print) }
     pub fn emit_pop(&mut self) { self.emit(Op::Pop) }
 
-    /// Emits a jump with an unknown target and returns its index, so the
-    /// handler that knows where the body ends can fill it in.
+    pub fn emit_dup(&mut self) { self.emit(Op::Dup) }
+
+    /// Emits a jump with an unknown target and returns its index, so whoever
+    /// finds out where the jump lands can fill it in.
+    ///
+    /// This — not a signal — is how a compiler does non-local control flow.
+    /// See `README.md`.
     pub fn emit_jump_if_false(&mut self) -> usize {
         self.emit(Op::JumpIfFalse(usize::MAX));
         self.code.len() - 1
     }
 
+    pub fn emit_jump_if_true(&mut self) -> usize {
+        self.emit(Op::JumpIfTrue(usize::MAX));
+        self.code.len() - 1
+    }
+
     pub fn patch_to_here(&mut self, at: usize) {
         let here = self.code.len();
-        if let Op::JumpIfFalse(target) = &mut self.code[at] {
-            *target = here;
+        match &mut self.code[at] {
+            Op::JumpIfFalse(target) | Op::JumpIfTrue(target) => *target = here,
+            other => panic!("{other:?} at {at} is not a jump"),
         }
     }
 
@@ -102,8 +118,14 @@ impl Interp {
                 Op::Neg => { let a = stack.pop().unwrap(); stack.push(-a) }
                 Op::Print => out.push(format!("{}", stack.pop().unwrap())),
                 Op::Pop => { stack.pop(); }
+                Op::Dup => { let top = *stack.last().unwrap(); stack.push(top) }
                 Op::JumpIfFalse(t) => {
                     if stack.pop().unwrap() == 0.0 {
+                        pc = *t;
+                    }
+                }
+                Op::JumpIfTrue(t) => {
+                    if stack.pop().unwrap() != 0.0 {
                         pc = *t;
                     }
                 }
@@ -134,6 +156,50 @@ impl generated::dispatch::Operators for Interp {
     fn mul(&mut self, _: (), _: ()) -> nh_runtime::Result<()> { self.emit(Op::Mul); Ok(()) }
     fn div(&mut self, _: (), _: ()) -> nh_runtime::Result<()> { self.emit(Op::Div); Ok(()) }
     fn neg(&mut self, _: ()) -> nh_runtime::Result<()> { self.emit(Op::Neg); Ok(()) }
+
+    // `&&` and `||` are lazy in their right operand, so unlike every method
+    // above, `rhs` arrives **unemitted** and this decides where it goes.
+    //
+    // These are *required* — the generated trait gives them no default, because
+    // `&&` is in the grammar and a host that quietly did the wrong thing with
+    // it would compile clean and misbehave at runtime. An interpreter satisfies
+    // them with `nh_value_operators!();`. A compiler cannot: there is no value
+    // to test at build time, so it emits the test instead.
+    //
+    //     a && b   ->   <a> · Dup · JumpIfFalse end · Pop · <b> · end:
+    //
+    // `Dup` is there because if `a` is falsy it *is* the result, so the test
+    // must not consume it.
+    fn and_then(
+        &mut self,
+        _lhs: (),
+        rhs: std::rc::Rc<generated::ast::Expr>,
+        cx: &mut nh_runtime::Ctx,
+    ) -> nh_runtime::Result<()> {
+        use generated::dispatch::Eval;
+        self.emit_dup();
+        let skip = self.emit_jump_if_false();
+        self.emit_pop();
+        rhs.eval(self, cx)?;
+        self.patch_to_here(skip);
+        Ok(())
+    }
+
+    /// `a || b` — the mirror image: keep `a` when it is *truthy*.
+    fn or_else(
+        &mut self,
+        _lhs: (),
+        rhs: std::rc::Rc<generated::ast::Expr>,
+        cx: &mut nh_runtime::Ctx,
+    ) -> nh_runtime::Result<()> {
+        use generated::dispatch::Eval;
+        self.emit_dup();
+        let skip = self.emit_jump_if_true();
+        self.emit_pop();
+        rhs.eval(self, cx)?;
+        self.patch_to_here(skip);
+        Ok(())
+    }
 
     fn assign(
         &mut self,

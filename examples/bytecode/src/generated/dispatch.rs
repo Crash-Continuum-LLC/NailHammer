@@ -103,10 +103,13 @@ pub trait Operators: Semantics {
     /// `rhs` is unevaluated. Running it is what evaluates it; not
     /// running it is what makes this short-circuit.
     ///
-    /// Defaulted to unsupported rather than to truthiness, because
-    /// only a host with values can answer that. An interpreter gets
-    /// the standard body from `nh_value_operators!`; a compiler
-    /// writes its own, emitting a jump.
+    /// **You must write this.** There is no default, because a
+    /// wrong one would be silent:
+    ///
+    /// * An interpreter writes `nh_value_operators!();` once,
+    ///   inside its `Operators` impl, and is done.
+    /// * A compiler writes its own, emitting a jump — for it,
+    ///   short-circuiting is control flow, not a decision.
     fn or_else(
         &mut self,
         lhs: Self::Out,
@@ -114,21 +117,20 @@ pub trait Operators: Semantics {
         cx: &mut Ctx,
     ) -> Result<Self::Out>
     where
-        Self: Handlers + Sized,
-    {
-        let _ = (&lhs, &rhs, &mut *cx);
-        Err(Error::unsupported("||"))
-    }
+        Self: Handlers + Sized;
 
     /// `&&` — **lazy in its right operand**.
     ///
     /// `rhs` is unevaluated. Running it is what evaluates it; not
     /// running it is what makes this short-circuit.
     ///
-    /// Defaulted to unsupported rather than to truthiness, because
-    /// only a host with values can answer that. An interpreter gets
-    /// the standard body from `nh_value_operators!`; a compiler
-    /// writes its own, emitting a jump.
+    /// **You must write this.** There is no default, because a
+    /// wrong one would be silent:
+    ///
+    /// * An interpreter writes `nh_value_operators!();` once,
+    ///   inside its `Operators` impl, and is done.
+    /// * A compiler writes its own, emitting a jump — for it,
+    ///   short-circuiting is control flow, not a decision.
     fn and_then(
         &mut self,
         lhs: Self::Out,
@@ -136,11 +138,7 @@ pub trait Operators: Semantics {
         cx: &mut Ctx,
     ) -> Result<Self::Out>
     where
-        Self: Handlers + Sized,
-    {
-        let _ = (&lhs, &rhs, &mut *cx);
-        Err(Error::unsupported("&&"))
-    }
+        Self: Handlers + Sized;
 
     /// `==`
     fn compare(&mut self, lhs: Self::Out, op: CompareOp, rhs: Self::Out) -> Result<Self::Out> {

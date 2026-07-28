@@ -682,7 +682,47 @@ fn short_circuiting_is_opt_in_rather_than_defaulted() {
         !trait_body.contains("self.truthy"),
         "a default cannot call `Values`; not every host has it:\n{trait_body}"
     );
-    assert!(trait_body.contains("Error::unsupported"), "{trait_body}");
+}
+
+/// **A lazy role has no default at all.**
+///
+/// Every other role defaults to `unsupported`, which is right for them: a host
+/// that never uses `%` never calls `rem`. A lazy role is different. `&&` is in
+/// the grammar, so the language has it, and a default would let a host that
+/// never said what it means compile clean and misbehave at runtime. Measured:
+/// with a default, deleting `nh_value_operators!()` from `examples/calc-interp`
+/// built without a murmur and failed eight tests.
+///
+/// There cannot be a *correct* default — the obvious body needs
+/// `Values::truthy`, and a Rust default cannot require a bound its trait lacks.
+/// So: no default, and rustc names the missing method.
+#[test]
+fn a_lazy_role_has_no_default_so_forgetting_it_is_a_compile_error() {
+    let g = gen(DOCS);
+    let dispatch = file(&g, "generated/dispatch.rs");
+
+    let trait_body = &dispatch[dispatch.find("pub trait Operators").unwrap()
+        ..dispatch.find("macro_rules! nh_value_operators").unwrap()];
+
+    for role in ["and_then", "or_else"] {
+        let at = trait_body
+            .find(&format!("fn {role}("))
+            .unwrap_or_else(|| panic!("`{role}` is missing:\n{trait_body}"));
+        let decl = &trait_body[at..];
+        let end = decl.find(';').unwrap_or(usize::MAX);
+        let body = decl.find('{').unwrap_or(usize::MAX);
+        assert!(
+            end < body,
+            "`{role}` must be declared, not defaulted — a host that forgets it \
+             has to hear about it from rustc, not from a user:\n{decl}"
+        );
+    }
+
+    // The strict roles keep their defaults: not using `%` is not an error.
+    assert!(
+        trait_body.contains("Error::unsupported"),
+        "strict roles still default:\n{trait_body}"
+    );
 }
 
 /// A grammar with no lazy operators needs no macro at all.
