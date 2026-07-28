@@ -37,6 +37,7 @@ const ENTRY_POINTS: &[(&str, &str, &str)] = &[
     ("examples/config/config.nh", "document", "\n# a comment\nname = 1;\n"),
     ("examples/calc-interp/calc.nh", "program", "\n# a comment\nlet a = 1;\n"),
     ("examples/basic-interp/basic.nh", "program", "\nREM a comment\nPRINT 1\n"),
+    ("examples/bytecode/bc.nh", "program", "\n// a comment\nlet a = 1;\n"),
     ("examples/selfhost/nh.nh", "file", "\n// a comment\ngrammar G;\n"),
     // `nh init`'s template is not listed: it holds `{{name}}` placeholders and
     // is not valid `.nh` until scaffolded. `nh-cli`'s

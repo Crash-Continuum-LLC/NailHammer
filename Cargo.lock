@@ -12,6 +12,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bc-compiler"
+version = "0.1.0"
+dependencies = [
+ "nh-runtime",
+ "pest",
+ "pest_derive",
+]
+
+[[package]]
 name = "calc-interp"
 version = "0.1.0"
 dependencies = [

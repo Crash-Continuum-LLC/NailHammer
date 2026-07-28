@@ -166,6 +166,7 @@ $ nh check mylang.nh --json
 | `examples/config/` | A complete interpreter. Nine handlers, two or three lines each |
 | `examples/calc-interp/` | Operators end to end, proved by tests |
 | `examples/basic-interp/` | Mini BASIC: loops, subroutines, functions, `GOTO` |
+| `examples/bytecode/` | The same idea compiled instead of interpreted — `type Out = ()` |
 | `examples/selfhost/` | `.nh` describing `.nh` |
 
 ---

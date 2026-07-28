@@ -1,0 +1,22 @@
+// A sample Bc program. `cargo run` prints the bytecode, then runs it.
+
+let width  = 4;
+let height = 7;
+
+print width * height;
+print (width + height) * 2;
+
+// Assignment works because `-> var place` marks it assignable. In emitted code
+// that is the difference between a Store and a Load.
+width = width + 1;
+print width;
+
+// Precedence comes from `use operators::core`, and in a compiler it shows up as
+// instruction *order*: Push 2 · Push 3 · Push 4 · Mul · Add.
+print 2 + 3 * 4;
+
+// `if` is where `lazy` earns its keep. The body is emitted once, in place, with
+// a JumpIfFalse in front of it whose target is patched once the body's length
+// is known. Only the second of these prints.
+if width - 5 then print 999;
+if width then print 111;

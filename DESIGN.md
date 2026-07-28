@@ -295,20 +295,29 @@ produced.
 
 ### 4.1 The trait stack
 
-One associated `Out` flows through all three traits, so an interpreter, a
-bytecode emitter, and a typechecker are three impls over one grammar.
+One associated `Out` flows through the stack, so an interpreter, a bytecode
+emitter, and a typechecker are three impls over one grammar.
 
 ```rust
 pub trait Semantics {
-    type Out;
-    type Error;
+    type Out;                                    // the only thing every host must supply
+}
+
+pub trait Values: Semantics {                    // §10 — an interpreter; not a compiler
     fn truthy(&self, v: &Self::Out) -> bool;
+    fn is_null(&self, v: &Self::Out) -> bool { false }
 }
 
 pub trait Operators: Semantics { /* §6.2 — all defaulted */ }
 
 pub trait Handlers: Operators { /* one method per labeled alternative */ }
 ```
+
+`Semantics` is deliberately one line. Every method that inspects an `Out` lives
+on `Values`, because a compiler's `Out` is not a value — it stands for something
+the target machine computes later. The split is recorded in §10; the working
+proof is `examples/bytecode`, which implements `Semantics`, `Operators` and
+`Handlers` and no `Values` at all.
 
 ---
 
@@ -1632,11 +1641,16 @@ and records its index for patching. That is host state rather than a signal, and
 no shared mechanism would serve both — patching is not unwinding. Nothing in the
 generated code forces either choice.
 
-Verified by building both from the same grammar: `2 + 3 * 4` compiles to
-`Push 2 · Push 3 · Push 4 · Mul · Add`, and `if x then print 100` to a
-`JumpIfFalse` patched once the body's length is known. Eager parameters give a
-compiler stack order for free, because "already evaluated" reads as "already
-emitted".
+Both shapes are now built from the same grammar and shipped:
+`examples/bytecode` is the scaffold grammar, unchanged, with `type Out = ()`.
+`2 + 3 * 4` compiles to `Push 2 · Push 3 · Push 4 · Mul · Add`, and
+`if x then print 100` to a `JumpIfFalse` patched once the body's length is
+known. Eager parameters give a compiler stack order for free, because "already
+evaluated" reads as "already emitted".
+
+That it lives in `examples/` rather than a scratch directory is the point:
+`tests/compile.rs` asserts on the instruction stream, so the next change that
+assumes an interpreter fails in CI rather than in somebody's project.
 
 ---
 
