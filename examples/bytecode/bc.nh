@@ -1,0 +1,72 @@
+// Bc — a small language compiled to bytecode.
+//
+// This grammar is *unremarkable*, and that is the point: it is the scaffold
+// grammar `nh init` writes, unchanged. What differs from the interpreter
+// examples is entirely in `src/`, where the host says `type Out = ()` and the
+// handlers emit instructions instead of returning values.
+//
+// See `README.md` for what changes and what does not.
+
+grammar Bc;
+
+// Precedence and associativity, in one line. A compiler gets these for free in
+// the most literal sense: operands are emitted before the handler runs, so
+// precedence ends up in the *order* of the instruction stream.
+use operators::core;
+
+// Implicit skipping. Declare as many as you like under any names; they are
+// unioned together.
+skip WHITESPACE = " " | "\t" | "\r" | "\n";
+skip COMMENT    = "//" (!"\n" ANY)*;
+
+// `@` marks a token atomic — no inner structure, which is what you want for
+// anything lexical.
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
+
+// Declare keywords here instead of hand-writing lookaheads. This guards BOTH
+// directions: `let` will not match inside `letter`, and `let` cannot be used as
+// a variable name. Getting this right by hand is genuinely hard.
+reserved from IDENT { "let" "print" "if" "then" }
+
+// ---------------------------------------------------------------------------
+// Rules
+// ---------------------------------------------------------------------------
+
+// ANCHOR YOUR ENTRY RULE. Implicit skipping happens *between* elements, never
+// before the first one, so without `SOI` a program starting with a blank line
+// or a comment will not parse. `SOI`/`EOI` are pest builtins.
+rule program = SOI stmts:stmt* EOI -> doc;
+
+// `lazy` on the `if` body is the one thing this example could not do without.
+// Every other binding is emitted before its handler runs; a `lazy` one is
+// handed over unemitted, so `stmt_iff` can put a jump in front of it and patch
+// the target once the body's length is known.
+rule stmt
+  = "let" name:IDENT "=" value:expr ";" -> bind
+  | "print" value:expr ";"              -> print
+  | "if" cond:expr "then" lazy body:stmt -> iff
+  | value:expr ";"                      -> eval
+  ;
+
+// The rule the operator driver folds over.
+rule atom = primary;
+
+// `place` marks an alternative as assignable. In a compiler this is what keeps
+// `x` from being *loaded* when it is the target of an assignment — `assign`
+// gets the resolved place and emits a Store, where `place_read` emits a Load.
+rule primary
+  = digits:NUMBER      -> num
+  | name:IDENT         -> var place
+  | "(" inner:expr ")" -> pass
+  ;
+
+// A statement that does not parse is skipped to the next `;` and the parse
+// carries on, so one typo does not hide every later error.
+recover stmt sync ";";
+
+// Without this, a missing `)` reports pest's internal rule names. With it, it
+// reports something a user of *your* language can act on.
+expect ")" in primary as "closing parenthesis";

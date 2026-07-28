@@ -95,6 +95,26 @@
       "cwd": "${workspaceFolder}/examples/basic-interp"
     },
     {
+      "name": "Run bc-compiler on sample.bc",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=bc-compiler",
+          "--package=bc-compiler"
+        ],
+        "filter": {
+          "name": "bc-compiler",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "sample.bc"
+      ],
+      "cwd": "${workspaceFolder}/examples/bytecode"
+    },
+    {
       "name": "Run calc-interp on sample.calc",
       "type": "lldb",
       "request": "launch",
@@ -191,7 +211,8 @@
         "nh-cli",
         "config-example",
         "calc-interp",
-        "basic-interp"
+        "basic-interp",
+        "bc-compiler"
       ],
       "default": "nh-codegen"
     }

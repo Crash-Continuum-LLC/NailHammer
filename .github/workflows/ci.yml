@@ -67,7 +67,7 @@ jobs:
       - name: Generated output is current
         run: |
           set -euo pipefail
-          for e in config calc-interp basic-interp; do
+          for e in config calc-interp basic-interp bytecode; do
             g=$(ls examples/$e/*.nh)
             ./target/debug/nh build "$g" \
               -o "examples/$e/src/$(basename "$g" .nh).pest" --rust "examples/$e/src"
