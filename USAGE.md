@@ -1226,6 +1226,11 @@ It shells out rather than depending on the generator as a crate, which is what
 keeps a generated project's dependency list down to pest. Set `NH` if the binary
 is not on your `PATH`.
 
+**`nh` is only needed to change the grammar.** The generated code is part of the
+project, so somebody who clones it can build and run with nothing installed. If
+the `.nh` has been edited and `nh` is missing, the build stops and says so —
+rather than quietly compiling the previous grammar.
+
 ### Removing an alternative
 
 Deleting an alternative from the grammar leaves its handler file behind.
