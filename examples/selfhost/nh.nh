@@ -1,0 +1,238 @@
+// nh.nh — the NailHammer intermediate language, described in itself.
+//
+// DESIGN.md's M6 stretch goal was "`nh.nh` reproduces `nh.pest`". That framing
+// turns out to be unreachable, and the reason is the interesting part — see
+// README.md in this directory. What this file achieves is the meaningful
+// version: a `.nh` grammar that **accepts the same language** the hand-written
+// `nh.pest` accepts, verified against every `.nh` file in the repository.
+//
+// It is also the most demanding grammar the toolkit has been given, which is
+// the point: writing it is what surfaced what `.nh` cannot yet say.
+
+grammar NhSelf;
+
+// `.nh` has no operators at all. Every construct is a rule.
+use operators::none;
+
+skip WHITESPACE   = " " | "\t" | "\r" | "\n";
+skip LINE_COMMENT = "//" (!"\n" ANY)*;
+skip BLOCK_COMMENT = "/*" (!"*/" ANY)* "*/";
+
+token ALPHA = @ "a".."z" | "A".."Z";
+token DIGIT = @ "0".."9";
+
+token IDENT = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
+
+// The one keyword that needs more than a boundary guard: `lazy` must not match
+// the `lazy` in `lazy:something`, where it is an ordinary binding name. Line
+// 206 of this file binds one.
+token LAZY  = @ "lazy" !(ALPHA | DIGIT | "_") !":";
+
+// Strings are fully atomic, unlike `nh.pest`'s compound-atomic `${ }` which
+// exposes the inner text as a child. `.nh` cannot express that distinction, so
+// a self-hosted lowerer would strip the quotes itself.
+token STRING    = @ "\"" (!("\"" | "\\") ANY | "\\" ANY)* "\"";
+token STRING_CI = @ "^" STRING;
+
+// NOTHING is reserved, and that is not an oversight — it mirrors `nh.pest`.
+// `.nh` has no global keywords: `atom` is both a precedence-block keyword and a
+// perfectly good rule name, and every `.nh` file in this repo contains
+// `rule atom = ...`. Ordered choice over distinct leading keywords resolves it.
+//
+// `guard from` is exactly the half of `reserved from` that is wanted here: it
+// appends an identifier-boundary lookahead to each literal, so `importx` does
+// not lex as `import` + `x`, while leaving every one of these usable as a rule
+// or token name.
+//
+// This block replaced 29 hand-written `token "x" = @ "x" !IDENT_TAIL;` rules.
+// The natural way to write those by hand — as *rules* rather than tokens — is
+// silently wrong, because a rule is non-atomic and pest inserts whitespace
+// between the literal and the lookahead. See README.md.
+guard from IDENT {
+  "grammar"
+  "import"
+  "use"
+  "operators"
+  "keywords"
+  "precedence"
+  "override"
+  "skip"
+  "token"
+  "reserved"
+  "guard"
+  "boundary"
+  "silent"
+  "from"
+  "rule"
+  "recover"
+  "sync"
+  "expect"
+  "in"
+  "allow"
+  "as"
+  "atom"
+  "remove"
+  "word"
+  "place"
+  "lazy"
+  "above"
+  "below"
+  "left"
+  "right"
+  "prefix"
+  "postfix"
+}
+
+// ---------------------------------------------------------------------------
+// File structure
+// ---------------------------------------------------------------------------
+
+rule file = SOI decl:grammar_decl? items:item* EOI -> file;
+
+rule grammar_decl = "grammar" name:IDENT ";" -> decl;
+
+rule item
+  = import_item
+  | use_item
+  | keywords_item
+  | precedence_item
+  | skip_item
+  | token_item
+  | reserved_item
+  | guard_item
+  | boundary_item
+  | rule_item
+  | recover_item
+  | expect_item
+  | allow_item
+  ;
+
+// ---------------------------------------------------------------------------
+// Declarations
+// ---------------------------------------------------------------------------
+
+rule import_item = "import" path:STRING ";" -> import;
+
+rule use_item = "use" "operators" "::" preset:IDENT ";" -> use_preset;
+
+rule keywords_item = "keywords" mode:case_mode ";" -> keywords;
+
+rule case_mode = "case-insensitive" -> insensitive | "case-sensitive" -> sensitive;
+
+rule skip_item = "skip" name:IDENT "=" body:alt ";" -> skip;
+
+rule token_item =
+  "token" name:IDENT "=" atomic:atomic_marker? folds:ci_marker? body:alt ";" -> token;
+
+rule atomic_marker = "@" -> at;
+rule ci_marker     = "case-insensitive" -> ci;
+
+rule reserved_item =
+  "reserved" "from" token:IDENT "{" words:STRING* "}" -> reserved;
+
+rule guard_item =
+  "guard" "from" token:IDENT "{" words:STRING* "}" -> guard;
+
+rule boundary_item = "boundary" token:IDENT "=" body:alt ";" -> boundary;
+
+// Note what cannot be written here: `silent rule item = ...` for the pure
+// alternations below. A silent rule produces no node, so nothing can bind it —
+// and this grammar binds almost everything, because it is meant to be usable
+// for code generation and not only for recognition. Silence and bindings are
+// mutually exclusive by construction.
+rule rule_item =
+  quiet:silent_marker? "rule" name:IDENT "=" body:alternatives ";" -> rule_def;
+
+rule silent_marker = "silent" -> is_silent;
+
+rule recover_item = "recover" target:IDENT "sync" sync:alt ";" -> recover;
+
+rule allow_item = "allow" lint:IDENT "in" target:IDENT ";" -> allow;
+
+rule expect_item =
+  "expect" lit:STRING "in" target:target_path "as" msg:STRING ";" -> expect;
+
+rule target_path = head:IDENT tail:dotted* -> path;
+rule dotted = "." name:IDENT -> segment;
+
+// ---------------------------------------------------------------------------
+// Rule bodies
+// ---------------------------------------------------------------------------
+
+rule alternatives = head:alternative tail:more_alternative* -> alts;
+rule more_alternative = "|" body:alternative -> next;
+
+rule alternative = body:seq arrow:arrow? -> alt;
+rule arrow = "->" label:IDENT marker:place_marker? -> arrow;
+rule place_marker = "place" -> place;
+
+rule alt = head:seq tail:more_seq* -> choice;
+rule more_seq = "|" body:seq -> next;
+
+rule seq = parts:labeled+ -> sequence;
+
+// `LAZY` is a token, not a literal, because it must not match the `lazy` in
+// `lazy:something` — there, `lazy` is an ordinary binding name, and this file
+// contains one. See `lazy_marker` in `crates/nh-syntax/src/nh.pest`.
+rule labeled = mark:LAZY? binding:binding? body:rep -> labeled;
+rule binding = name:IDENT ":" -> bind;
+
+rule rep = body:pre suffix:rep_op? -> rep;
+rule rep_op = "*" -> many | "+" -> some | "?" -> opt;
+
+rule pre = op:pre_op? body:term -> pre;
+rule pre_op = "!" -> negative | "&" -> positive;
+
+rule term
+  = group
+  | char_range
+  | ci_literal
+  | literal
+  | rule_ref
+  ;
+
+rule group      = "(" body:alt ")" -> group;
+rule char_range = lo:STRING ".." hi:STRING -> range;
+rule ci_literal = value:STRING_CI -> ci_literal;
+rule literal    = value:STRING -> literal;
+rule rule_ref   = name:IDENT -> reference;
+
+// ---------------------------------------------------------------------------
+// Precedence blocks
+// ---------------------------------------------------------------------------
+
+rule precedence_item =
+  "precedence" over:override_marker? "{" entries:prec_entry* "}" -> precedence;
+rule override_marker = "override" -> is_override;
+
+rule prec_entry = atom_entry | remove_entry | op_entry;
+
+rule atom_entry   = "atom" target:IDENT ";" -> atom_entry;
+rule remove_entry = "remove" ops:op_ref+ ";" -> remove;
+
+rule op_entry =
+  fixity:fixity ops:op_list place:placement? lazy:lazy_spec? role:role? ";" -> op;
+
+rule fixity
+  = "left"    -> left
+  | "right"   -> right
+  | "prefix"  -> prefix
+  | "postfix" -> postfix
+  ;
+
+rule op_list = head:op_ref tail:more_op* -> ops;
+rule more_op = "|" op:op_ref -> next;
+rule op_ref  = word:word_marker? lit:STRING -> op_ref;
+rule word_marker = "word" -> is_word;
+
+rule placement = dir:direction anchor:STRING -> placement;
+rule direction = "above" -> above | "below" -> below;
+
+rule lazy_spec = LAZY "(" head:IDENT tail:more_lazy* ")" -> lazy;
+rule more_lazy = "," name:IDENT -> next;
+
+rule role = "->" name:IDENT -> role;
+
+// `file` is the entry point, so nothing references it. The `unused` lint
+// exempts the *first* rule by convention, and `file` is not first here.
+allow unused in file;

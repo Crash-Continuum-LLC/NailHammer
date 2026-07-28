@@ -1,0 +1,5 @@
+{
+  // `nh` is not published yet, so point the extension at the built binary.
+  // `cargo build -p nh-cli` produces it.
+  "nailhammer.executable": "${workspaceFolder}/target/debug/nh"
+}

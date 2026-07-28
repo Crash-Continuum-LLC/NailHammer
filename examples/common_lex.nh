@@ -1,0 +1,19 @@
+// A shared lexical fragment.
+//
+// This file has no `grammar` declaration, which makes it a fragment: it is only
+// meaningful when imported. Exactly one `grammar` declaration is required
+// across a merged import set, and it belongs to the entry file.
+//
+// Character classes are spelled out as ranges rather than assumed builtins, so
+// this file depends on nothing but `ANY`.
+
+skip WHITESPACE = " " | "\t" | "\r" | "\n";
+skip COMMENT    = "//" (!"\n" ANY)*;
+
+token DIGIT = @ "0".."9";
+token ALPHA = @ "a".."z" | "A".."Z";
+token ALNUM = @ DIGIT | ALPHA;
+
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token IDENT  = @ (ALPHA | "_") (ALNUM | "_")*;
+token STRING = @ "\"" (!"\"" ANY)* "\"";

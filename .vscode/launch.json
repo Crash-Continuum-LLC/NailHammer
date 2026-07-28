@@ -1,0 +1,199 @@
+{
+  // Debugging NailHammer itself. The first entry is what F5 runs, so it is the
+  // one wanted most often: check whichever grammar is open.
+  //
+  // Debugging the *VS Code extension* lives in `editors/vscode/.vscode/`. It
+  // launches a second editor window, which is never what you want from this
+  // workspace — having it here made F5 open a second VS Code instead of
+  // building anything.
+
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "nh check (the open grammar)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=nh",
+          "--package=nh-cli"
+        ],
+        "filter": {
+          "name": "nh",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "check",
+        "${file}"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "nh build (the open grammar, prompts for output)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=nh",
+          "--package=nh-cli"
+        ],
+        "filter": {
+          "name": "nh",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "build",
+        "${file}",
+        "--rust",
+        "${input:rustOut}"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "nh <command> <file>",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=nh",
+          "--package=nh-cli"
+        ],
+        "filter": {
+          "name": "nh",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "${input:nhCommand}",
+        "${input:nhFile}"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Run basic-interp on sample.bas",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=basic-interp",
+          "--package=basic-interp"
+        ],
+        "filter": {
+          "name": "basic-interp",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "sample.bas"
+      ],
+      "cwd": "${workspaceFolder}/examples/basic-interp"
+    },
+    {
+      "name": "Run calc-interp on sample.calc",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=calc-interp",
+          "--package=calc-interp"
+        ],
+        "filter": {
+          "name": "calc-interp",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "sample.calc"
+      ],
+      "cwd": "${workspaceFolder}/examples/calc-interp"
+    },
+    {
+      "name": "Run config-example on sample.conf",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=config-example",
+          "--package=config-example"
+        ],
+        "filter": {
+          "name": "config-example",
+          "kind": "bin"
+        }
+      },
+      "args": [
+        "sample.conf"
+      ],
+      "cwd": "${workspaceFolder}/examples/config"
+    },
+    {
+      "name": "Debug one crate's tests",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--package=${input:crate}"
+        ],
+        "filter": {
+          "kind": "test"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "nhCommand",
+      "type": "pickString",
+      "description": "Which nh subcommand?",
+      "options": [
+        "check",
+        "explain",
+        "build"
+      ],
+      "default": "check"
+    },
+    {
+      "id": "nhFile",
+      "type": "promptString",
+      "description": "Grammar file",
+      "default": "example.nh"
+    },
+    {
+      "id": "rustOut",
+      "type": "promptString",
+      "description": "Directory to generate Rust into",
+      "default": "${fileDirname}/src"
+    },
+    {
+      "id": "crate",
+      "type": "pickString",
+      "description": "Which crate's tests?",
+      "options": [
+        "nh-syntax",
+        "nh-operators",
+        "nh-lower",
+        "nh-analysis",
+        "nh-codegen",
+        "nh-runtime",
+        "nh-build",
+        "nh-cli",
+        "config-example",
+        "calc-interp",
+        "basic-interp"
+      ],
+      "default": "nh-codegen"
+    }
+  ]
+}

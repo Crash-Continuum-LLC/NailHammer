@@ -1,0 +1,2 @@
+import "shared.nh";
+token LEFT_ONLY = @ "L";

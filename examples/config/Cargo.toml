@@ -1,0 +1,25 @@
+[package]
+name = "config-example"
+description = "Worked NailHammer interpreter: one handler file per grammar rule"
+version = "0.1.0"
+edition = "2021"
+
+build = "build.rs"
+
+[lib]
+name = "config_example"
+path = "src/lib.rs"
+
+[[bin]]
+name = "config-example"
+path = "src/main.rs"
+
+[dependencies]
+nh-runtime = { path = "../../crates/nh-runtime" }
+pest = "2.8"
+# Without `grammar-extras` every node tag is silently ignored and every
+# generated accessor returns nothing.
+pest_derive = { version = "2.8", features = ["grammar-extras"] }
+
+[build-dependencies]
+nh-build = { path = "../../crates/nh-build" }

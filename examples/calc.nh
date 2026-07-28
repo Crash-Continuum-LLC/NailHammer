@@ -1,0 +1,63 @@
+// A small C-flavoured language.
+//
+// Demonstrates the common path: take a preset operator table, adjust it, and
+// write only the grammar that is actually yours. Note there is no `expr` rule
+// anywhere in this file — `expr` is supplied by the operator prelude, and the
+// grammar provides `atom` for it to fold over.
+
+grammar Calc;
+
+import "common_lex.nh";
+
+use operators::c_style;
+
+precedence override {
+    remove "," "->";              // no comma operator, no C arrow
+    right  "**" above "*" -> pow; // exponentiation
+    left   "|>" below "||" lazy(rhs) -> pipe;
+}
+
+reserved from IDENT { "let" "if" "else" "return" "true" "false" }
+
+// SOI/EOI are pest builtins and pass straight through. Anchoring the entry
+// rule is the grammar author's job, exactly as in hand-written pest: implicit
+// skipping happens *between* elements, so without a leading SOI a program that
+// starts with a blank line will not parse.
+rule program = SOI stmt+ EOI;
+
+rule stmt
+  = "let" name:IDENT "=" value:expr ";"        -> let
+  | "if" cond:expr body:block tail:else_tail?  -> if
+  | "return" value:expr? ";"                   -> return
+  | value:expr ";"                             -> eval
+  ;
+
+rule else_tail = "else" body:block -> pass;
+
+rule block = "{" body:stmt* "}" -> pass;
+
+// The fold target for the operator driver. Postfix access is a grammar suffix
+// chain rather than an operator, so `-a.b` is `-(a.b)` by construction.
+rule atom = primary suffix*;
+
+rule suffix
+  = "(" args:arg_list? ")" -> call
+  | "[" index:expr "]"     -> index place
+  | "." name:IDENT         -> field place
+  ;
+
+rule arg_list = expr ("," expr)*;
+
+rule primary
+  = value:NUMBER       -> num
+  | text:STRING        -> str
+  | "true"             -> true
+  | "false"            -> false
+  | name:IDENT         -> var place
+  | "(" inner:expr ")" -> pass
+  ;
+
+recover stmt sync ";" | "}";
+
+expect "(" in suffix.call as "opening parenthesis of call arguments";
+expect "}" in block     as "closing brace of block";

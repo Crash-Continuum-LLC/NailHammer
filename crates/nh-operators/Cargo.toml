@@ -1,0 +1,16 @@
+[package]
+name = "nh-operators"
+description = "Operator tables, presets, and role bindings for NailHammer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+nh-syntax.workspace = true

@@ -1,0 +1,14 @@
+// A sample {{Name}} program.
+
+let width  = 4;
+let height = 7;
+
+print width * height;
+print (width + height) * 2;
+
+// Assignment works because `-> var place` marks it assignable.
+width = width + 1;
+print width;
+
+// Precedence comes from `use operators::core` — this is 14, not 20.
+print 2 + 3 * 4;

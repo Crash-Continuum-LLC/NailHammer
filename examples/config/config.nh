@@ -1,0 +1,38 @@
+// A small configuration language.
+//
+// This grammar backs the worked interpreter in `examples/config/`, which exists
+// to validate DESIGN.md's central claim: that a language can be implemented
+// across many small files with no positional access to the parse tree.
+//
+// It deliberately declares NO operator table. The operator driver arrives at
+// M3, and an example that needed it could not run yet — so this exercises
+// views, dispatch, spans, and one-file-per-rule on their own.
+
+grammar Config;
+
+use operators::none;
+
+skip WHITESPACE = " " | "\t" | "\r" | "\n";
+skip COMMENT    = "#" (!"\n" ANY)*;
+
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_" | "-")*;
+token NUMBER = @ "-"? DIGIT+ ("." DIGIT+)?;
+token STRING = @ "\"" (!"\"" ANY)* "\"";
+
+reserved from IDENT { "true" "false" "null" }
+
+rule document = SOI entries:entry* EOI -> doc;
+
+rule entry = key:IDENT "=" value:value ";" -> entry;
+
+rule value
+  = raw:STRING                     -> string
+  | digits:NUMBER                  -> number
+  | "true"                         -> yes
+  | "false"                        -> no
+  | "null"                         -> null
+  | "[" items:value* "]"           -> list
+  | "{" fields:entry* "}"          -> table
+  ;

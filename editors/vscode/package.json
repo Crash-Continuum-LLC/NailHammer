@@ -1,0 +1,188 @@
+{
+  "name": "nailhammer",
+  "displayName": "NailHammer",
+  "description": "Grammar authoring for NailHammer: syntax highlighting, live diagnostics, scaffolding, and tasks for .nh files.",
+  "version": "0.1.0",
+  "publisher": "crash-continuum",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Snippets"
+  ],
+  "keywords": [
+    "nailhammer",
+    "nh",
+    "grammar",
+    "parser",
+    "pest",
+    "peg"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "nh",
+        "aliases": [
+          "NailHammer",
+          "nh"
+        ],
+        "extensions": [
+          ".nh"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nh",
+        "scopeName": "source.nh",
+        "path": "./syntaxes/nh.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "nh",
+        "path": "./snippets/nh.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "nailhammer.newProject",
+        "title": "NailHammer: New Project\u2026",
+        "category": "NailHammer"
+      },
+      {
+        "command": "nailhammer.check",
+        "title": "NailHammer: Check Grammar",
+        "category": "NailHammer"
+      },
+      {
+        "command": "nailhammer.build",
+        "title": "NailHammer: Build (.pest + Rust)",
+        "category": "NailHammer"
+      },
+      {
+        "command": "nailhammer.explain",
+        "title": "NailHammer: Explain Operator Table",
+        "category": "NailHammer"
+      },
+      {
+        "command": "nailhammer.addColors",
+        "title": "NailHammer: Add Syntax Colours for This Theme",
+        "category": "NailHammer"
+      },
+      {
+        "command": "nailhammer.removeColors",
+        "title": "NailHammer: Remove Syntax Colours for This Theme",
+        "category": "NailHammer"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "resourceLangId == nh",
+          "command": "nailhammer.explain",
+          "group": "nailhammer@1"
+        },
+        {
+          "when": "resourceLangId == nh",
+          "command": "nailhammer.build",
+          "group": "nailhammer@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "NailHammer",
+      "properties": {
+        "nailhammer.executable": {
+          "type": "string",
+          "default": "nh",
+          "markdownDescription": "Path to the `nh` binary. If `nh` is not on your `PATH`, point this at the built binary \u2014 for example `${workspaceFolder}/target/debug/nh`."
+        },
+        "nailhammer.checkOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Re-check the grammar as you type. Turn this off to check only on save."
+        },
+        "nailhammer.checkDelay": {
+          "type": "number",
+          "default": 400,
+          "description": "Milliseconds to wait after a keystroke before re-checking."
+        },
+        "nailhammer.denyWarnings": {
+          "type": "boolean",
+          "default": false,
+          "description": "Report determinism warnings as errors, matching `nh check --deny-warnings` in CI."
+        },
+        "nailhammer.rustOutDir": {
+          "type": "string",
+          "default": "src",
+          "description": "Directory that `NailHammer: Build` generates Rust into, relative to the grammar."
+        }
+      }
+    },
+    "taskDefinitions": [
+      {
+        "type": "nailhammer",
+        "required": [
+          "command"
+        ],
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "check",
+              "build"
+            ],
+            "description": "Which nh subcommand to run."
+          },
+          "file": {
+            "type": "string",
+            "description": "Grammar file, relative to the workspace folder."
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "nh",
+        "owner": "nh",
+        "source": "nh",
+        "fileLocation": "autoDetect",
+        "pattern": [
+          {
+            "regexp": "^(error|warning): (.*)$",
+            "severity": 1,
+            "message": 2
+          },
+          {
+            "regexp": "^\\s*-->\\s+(.*):(\\d+):(\\d+)$",
+            "file": 1,
+            "line": 2,
+            "column": 3
+          }
+        ]
+      }
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "@types/vscode": "^1.75.0",
+    "typescript": "5.6",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Crash-Continuum-LLC/NailHammer.git"
+  },
+  "scripts": {
+    "test": "node test/grammar.test.js && node test/language.test.js && node test/colors.test.js && tsc --noEmit -p jsconfig.json",
+    "typecheck": "tsc --noEmit -p jsconfig.json",
+    "package": "vsce package --no-dependencies"
+  }
+}

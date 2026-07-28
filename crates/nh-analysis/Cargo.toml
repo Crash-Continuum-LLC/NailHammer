@@ -1,0 +1,19 @@
+[package]
+name = "nh-analysis"
+description = "Determinism analysis for NailHammer grammars"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+nh-syntax.workspace = true
+
+[dev-dependencies]
+nh-operators.workspace = true
