@@ -1,0 +1,120 @@
+name: Release
+
+# Tag a commit to cut a release:
+#
+#     git tag v0.1.0 && git push origin v0.1.0
+#
+# Produces a prebuilt `nh` for each platform, so installing the tool does not
+# mean compiling the toolkit. On a private repository the assets need auth to
+# download, which `gh release download` supplies from an existing login.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: nh — ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest,  target: aarch64-apple-darwin,      label: macos-arm64 }
+          - { os: macos-13,      target: x86_64-apple-darwin,       label: macos-x86_64 }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu,  label: linux-x86_64 }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,   label: windows-x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked -p nh-cli --target ${{ matrix.target }}
+
+      # A binary that cannot check a grammar is not worth shipping.
+      - name: Smoke test
+        shell: bash
+        run: |
+          bin="target/${{ matrix.target }}/release/nh"
+          [ "${{ runner.os }}" = "Windows" ] && bin="$bin.exe"
+          "$bin" --version
+          "$bin" check example.nh --quiet
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="nh-${{ matrix.label }}"
+          mkdir -p "dist/$name"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/nh.exe" "dist/$name/"
+          else
+            cp "target/${{ matrix.target }}/release/nh" "dist/$name/"
+          fi
+          cp README.md USAGE.md LICENSE "dist/$name/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "$name.zip" "$name"
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nh-${{ matrix.label }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+  extension:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+        working-directory: editors/vscode
+      - run: npm test
+        working-directory: editors/vscode
+      - run: npx --yes @vscode/vsce@latest package --no-dependencies --allow-missing-repository
+        working-directory: editors/vscode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nh-vsix
+          path: editors/vscode/*.vsix
+
+  publish:
+    name: Attach to the release
+    needs: [build, extension]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -R artifacts
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*
