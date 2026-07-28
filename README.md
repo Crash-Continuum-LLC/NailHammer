@@ -109,18 +109,24 @@ Install the tool once:
 $ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
 ```
 
-That puts `nh` in `~/.cargo/bin`. Or take a prebuilt binary from a
-[release](https://github.com/Crash-Continuum-LLC/NailHammer/releases) and skip
-the build.
-
-The repository is private, so `cargo install` needs an account with access and
-one cargo setting — cargo's built-in git client cannot use `gh`'s credential
-helper:
+That puts `nh` in `~/.cargo/bin`. The repository is private, so it needs an
+account with access and one cargo setting — cargo's built-in git client cannot
+use `gh`'s credential helper:
 
 ```toml
 # ~/.cargo/config.toml
 [net]
 git-fetch-with-cli = true
+```
+
+**Or skip the build entirely** and take a prebuilt binary. Releases carry `nh`
+for macOS (arm64 and x86_64), Linux, and Windows:
+
+```console
+$ gh release download v0.1.0 --repo Crash-Continuum-LLC/NailHammer \
+    --pattern '*macos-arm64*'
+$ tar xzf nh-macos-arm64.tar.gz
+$ sudo mv nh-macos-arm64/nh /usr/local/bin/
 ```
 
 Then:
@@ -138,6 +144,12 @@ $ cargo run
 Then edit `mylang.nh`. The scaffolded project has a `build.rs`, so `cargo build`
 regenerates on its own.
 
+That project depends on **pest and nothing else** — `nh init` vendors the
+runtime into it. So you can hand it to somebody, or build it in CI, without
+installing anything: `nh` is needed to *change* the grammar, not to build what
+it produced. Edit the `.nh` without `nh` available and the build stops and says
+so, rather than quietly compiling the previous grammar.
+
 > **Working on NailHammer itself?** Use `cargo run -p nh-cli -- <args>` from a
 > clone instead, or `cargo install --path crates/nh-cli` to put your working
 > copy on the `PATH`.
@@ -149,7 +161,7 @@ record of what went wrong and what that taught.
 ## Editor support
 
 ```console
-$ cd editors/vscode && npm run package
+$ gh release download v0.1.0 --repo Crash-Continuum-LLC/NailHammer --pattern '*.vsix'
 $ code --install-extension nailhammer-0.1.0.vsix
 ```
 
@@ -157,7 +169,8 @@ Highlighting, live diagnostics in the Problems panel, `nh init` from the command
 palette, and tasks for check/build/explain. It shells out to `nh check --json`,
 so the lint you see in the editor is the lint CI runs.
 
-See [editors/vscode](editors/vscode).
+Or build it from source with `cd editors/vscode && npm run package`. See
+[editors/vscode](editors/vscode).
 
 ## Examples
 
@@ -174,7 +187,7 @@ See [editors/vscode](editors/vscode).
 Every planned milestone is complete: parsing, lowering, code generation, the
 operator driver, determinism analysis, error recovery, self-hosting, and an
 owned AST that makes subroutines, stored code, and non-local jumps
-expressible. 294 tests.
+expressible. 317 tests.
 
 **Not published, and it does not need to be.** `nh init` vendors the runtime
 into the project it creates, so a generated project depends on pest and nothing
