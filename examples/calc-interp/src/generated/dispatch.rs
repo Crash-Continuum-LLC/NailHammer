@@ -29,12 +29,25 @@ use crate::Rule;
 pub trait Semantics {
     /// What evaluating a node produces.
     type Out;
+}
 
-    /// Truthiness, used by the short-circuit operator defaults.
+/// A host whose `Out` is a **value it can ask questions about**.
+///
+/// An interpreter implements this: `Out` is a value, and truthiness is
+/// a question it can answer. A compiler does not: its `Out` is a
+/// placeholder for something the *target machine* will compute later,
+/// so there is nothing to inspect at build time.
+///
+/// It is separate from [`Semantics`] for exactly that reason. Requiring
+/// it of every host would force a bytecode emitter to write a `truthy`
+/// it can never answer and must never be asked.
+pub trait Values: Semantics {
+    /// Used by the short-circuit operator bodies in
+    /// `nh_value_operators!`.
     fn truthy(&self, value: &Self::Out) -> bool;
 
-    /// Nullness, used by the `??` default. Languages without a null
-    /// need not override it.
+    /// Used by the `??` body. Languages without a null need not
+    /// override it.
     fn is_null(&self, value: &Self::Out) -> bool {
         let _ = value;
         false
@@ -108,8 +121,13 @@ pub trait Operators: Semantics {
 
     /// `||` — **lazy in its right operand**.
     ///
-    /// `rhs` is unevaluated. Forcing it is what evaluates it; not
-    /// forcing it is what makes this short-circuit.
+    /// `rhs` is unevaluated. Running it is what evaluates it; not
+    /// running it is what makes this short-circuit.
+    ///
+    /// Defaulted to unsupported rather than to truthiness, because
+    /// only a host with values can answer that. An interpreter gets
+    /// the standard body from `nh_value_operators!`; a compiler
+    /// writes its own, emitting a jump.
     fn or_else(
         &mut self,
         lhs: Self::Out,
@@ -119,16 +137,19 @@ pub trait Operators: Semantics {
     where
         Self: Handlers + Sized,
     {
-        if self.truthy(&lhs) {
-            return Ok(lhs);
-        }
-        rhs.eval(self, cx)
+        let _ = (&lhs, &rhs, &mut *cx);
+        Err(Error::unsupported("||"))
     }
 
     /// `&&` — **lazy in its right operand**.
     ///
-    /// `rhs` is unevaluated. Forcing it is what evaluates it; not
-    /// forcing it is what makes this short-circuit.
+    /// `rhs` is unevaluated. Running it is what evaluates it; not
+    /// running it is what makes this short-circuit.
+    ///
+    /// Defaulted to unsupported rather than to truthiness, because
+    /// only a host with values can answer that. An interpreter gets
+    /// the standard body from `nh_value_operators!`; a compiler
+    /// writes its own, emitting a jump.
     fn and_then(
         &mut self,
         lhs: Self::Out,
@@ -138,10 +159,8 @@ pub trait Operators: Semantics {
     where
         Self: Handlers + Sized,
     {
-        if !self.truthy(&lhs) {
-            return Ok(lhs);
-        }
-        rhs.eval(self, cx)
+        let _ = (&lhs, &rhs, &mut *cx);
+        Err(Error::unsupported("&&"))
     }
 
     /// `==`
@@ -781,6 +800,54 @@ impl Eval for Expr {
     fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
         eval_expr(host, self, cx)
     }
+}
+
+/// The standard short-circuit bodies, for a host that implements
+/// [`Values`].
+///
+/// Paste it inside your `Operators` impl:
+///
+/// ```ignore
+/// impl Operators for Interp {
+///     nh_value_operators!();
+///     fn add(&mut self, l: Value, r: Value) -> Result<Value> { .. }
+/// }
+/// ```
+///
+/// A bytecode emitter skips this and writes its own, because
+/// short-circuiting compiles to a jump rather than to a decision.
+#[macro_export]
+macro_rules! nh_value_operators {
+    () => {
+        fn or_else(
+            &mut self,
+            lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
+            rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,
+            cx: &mut ::nh_runtime::Ctx,
+        ) -> ::nh_runtime::Result<
+            <Self as $crate::generated::dispatch::Semantics>::Out,
+        > {
+            use $crate::generated::dispatch::{Eval, Values};
+            if self.truthy(&lhs) {
+                return Ok(lhs);
+            }
+            rhs.eval(self, cx)
+        }
+        fn and_then(
+            &mut self,
+            lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
+            rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,
+            cx: &mut ::nh_runtime::Ctx,
+        ) -> ::nh_runtime::Result<
+            <Self as $crate::generated::dispatch::Semantics>::Out,
+        > {
+            use $crate::generated::dispatch::{Eval, Values};
+            if !self.truthy(&lhs) {
+                return Ok(lhs);
+            }
+            rhs.eval(self, cx)
+        }
+    };
 }
 
 /// Writes the delegating `Handlers` impl for your type.

@@ -132,6 +132,9 @@ impl Interp {
 
 impl generated::dispatch::Semantics for Interp {
     type Out = Value;
+}
+
+impl generated::dispatch::Values for Interp {
 
     /// BASIC's own convention: zero and the empty string are false.
     fn truthy(&self, value: &Value) -> bool {
@@ -210,7 +213,7 @@ impl generated::dispatch::Operators for Interp {
     }
 
     fn not(&mut self, operand: Value) -> nh_runtime::Result<Value> {
-        let t = <Self as generated::dispatch::Semantics>::truthy(self, &operand);
+        let t = <Self as generated::dispatch::Values>::truthy(self, &operand);
         Ok(Self::flag(!t))
     }
 
@@ -219,12 +222,12 @@ impl generated::dispatch::Operators for Interp {
     // they been bound to `and_then`/`or_else`, the generated defaults would
     // short-circuit instead. The table records the choice; the role enforces it.
     fn bit_and(&mut self, lhs: Value, rhs: Value) -> nh_runtime::Result<Value> {
-        use generated::dispatch::Semantics as _;
+        use generated::dispatch::Values as _;
         Ok(Self::flag(self.truthy(&lhs) && self.truthy(&rhs)))
     }
 
     fn bit_or(&mut self, lhs: Value, rhs: Value) -> nh_runtime::Result<Value> {
-        use generated::dispatch::Semantics as _;
+        use generated::dispatch::Values as _;
         Ok(Self::flag(self.truthy(&lhs) || self.truthy(&rhs)))
     }
 

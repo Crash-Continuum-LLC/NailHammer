@@ -344,8 +344,13 @@ fn emit_method(
                     out,
                     "\n    /// `{}` — **lazy in its right operand**.\n\
                     \x20   ///\n\
-                    \x20   /// `rhs` is unevaluated. Forcing it is what evaluates it; not\n\
-                    \x20   /// forcing it is what makes this short-circuit.\n\
+                    \x20   /// `rhs` is unevaluated. Running it is what evaluates it; not\n\
+                    \x20   /// running it is what makes this short-circuit.\n\
+                    \x20   ///\n\
+                    \x20   /// Defaulted to unsupported rather than to truthiness, because\n\
+                    \x20   /// only a host with values can answer that. An interpreter gets\n\
+                    \x20   /// the standard body from `nh_value_operators!`; a compiler\n\
+                    \x20   /// writes its own, emitting a jump.\n\
                     \x20   fn {m}(\n\
                     \x20       &mut self,\n\
                     \x20       lhs: Self::Out,\n\
@@ -355,13 +360,11 @@ fn emit_method(
                     \x20   where\n\
                     \x20       Self: Handlers + Sized,\n\
                     \x20   {{\n\
-                    \x20       if {condition} {{\n\
-                    \x20           return Ok(lhs);\n\
-                    \x20       }}\n\
-                    \x20       rhs.eval(self, cx)\n\
+                    \x20       let _ = (&lhs, &rhs, &mut *cx);\n\
+                    \x20       Err(Error::unsupported(\"{}\"))\n\
                     \x20   }}",
                     e.op.literal,
-                    condition = short_circuit_when(&e.role)
+                    e.op.literal,
                 );
             } else {
                 let _ = writeln!(
@@ -480,6 +483,88 @@ pub fn emit_driver(out: &mut String, ops: &[Emitted<'_>], atom: &str) {
         \x20   }}\n\
          }}\n"
     );
+}
+
+/// The short-circuit bodies, as a macro pasted into an `Operators` impl.
+///
+/// These cannot be trait defaults any more: they need `Values::truthy`, and a
+/// bytecode emitter has no values to inspect. So an interpreter opts in with
+/// one line inside its impl, and a compiler writes jump-emitting versions
+/// instead. Same roles, same signatures, two shapes.
+pub fn emit_value_operators(out: &mut String, ops: &[Emitted<'_>]) {
+    let grouped = grouped_roles(ops);
+    let lazy: Vec<&Emitted<'_>> = ops
+        .iter()
+        .filter(|e| lazy_rhs(e.op) && !lazy_lhs(e.op))
+        .collect();
+
+    if lazy.is_empty() {
+        return;
+    }
+
+    let _ = writeln!(
+        out,
+        "/// The standard short-circuit bodies, for a host that implements\n\
+         /// [`Values`].\n\
+         ///\n\
+         /// Paste it inside your `Operators` impl:\n\
+         ///\n\
+         /// ```ignore\n\
+         /// impl Operators for Interp {{\n\
+         ///     nh_value_operators!();\n\
+         ///     fn add(&mut self, l: Value, r: Value) -> Result<Value> {{ .. }}\n\
+         /// }}\n\
+         /// ```\n\
+         ///\n\
+         /// A bytecode emitter skips this and writes its own, because\n\
+         /// short-circuiting compiles to a jump rather than to a decision.\n\
+         #[macro_export]\n\
+         macro_rules! nh_value_operators {{\n\
+        \x20   () => {{"
+    );
+
+    let mut seen: Vec<String> = Vec::new();
+    for e in &lazy {
+        let m = ident(&e.role);
+        if seen.contains(&m) {
+            continue;
+        }
+        seen.push(m.clone());
+
+        let arg = discriminant_arg(e, &grouped);
+        let arg_ty = if arg.is_empty() {
+            String::new()
+        } else {
+            // `op: CompareOp,` -> spelled through `$crate` inside a macro.
+            format!(
+                "op: $crate::generated::dispatch::{}Op,\n\x20           ",
+                type_name(&e.role)
+            )
+        };
+        let arg_use = if arg.is_empty() { "" } else { "let _ = op;\n\x20           " };
+
+        let _ = writeln!(
+            out,
+            "        fn {m}(\n\
+            \x20           &mut self,\n\
+            \x20           lhs: <Self as $crate::generated::dispatch::Semantics>::Out,\n\
+            \x20           {arg_ty}rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,\n\
+            \x20           cx: &mut ::nh_runtime::Ctx,\n\
+            \x20       ) -> ::nh_runtime::Result<\n\
+            \x20           <Self as $crate::generated::dispatch::Semantics>::Out,\n\
+            \x20       > {{\n\
+            \x20           {arg_use}use $crate::generated::dispatch::{{Eval, Values}};\n\
+            \x20           if {condition} {{\n\
+            \x20               return Ok(lhs);\n\
+            \x20           }}\n\
+            \x20           rhs.eval(self, cx)\n\
+            \x20       }}",
+            // `Values` is in scope from the `use` above, so method syntax works.
+            condition = short_circuit_when(&e.role),
+        );
+    }
+
+    let _ = writeln!(out, "    }};\n}}\n");
 }
 
 /// Prefix readings of literals that are also infix operators.

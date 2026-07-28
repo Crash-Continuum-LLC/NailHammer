@@ -30,6 +30,9 @@ pub struct Interp;
 
 impl generated::dispatch::Semantics for Interp {
     type Out = Value;
+}
+
+impl generated::dispatch::Values for Interp {
 
     fn truthy(&self, value: &Value) -> bool {
         !matches!(value, Value::Bool(false) | Value::Null)

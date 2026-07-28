@@ -1592,6 +1592,54 @@ fail — a green test that has never been seen red proves nothing.
 
 ---
 
+### The trait stack leaned interpreter-shaped
+
+§4.1 claimed an interpreter, a bytecode emitter, and a typechecker were three
+impls over one grammar. Building the second one is what showed the claim was
+only nearly true.
+
+A bytecode emitter's `Out` is not a value — it stands for something the *target
+machine* will compute later — so any trait method that inspects an `Out` is
+meaningless to it. There were exactly two, `truthy` and `is_null`, and they were
+**required** on `Semantics`. A compiler had to write:
+
+```rust
+fn truthy(&self, _: &()) -> bool {
+    unreachable!("truthiness is a runtime question, not a compile-time one")
+}
+```
+
+A method it can never answer and must never be asked. It existed only because
+the short-circuit defaults for `&&`, `||` and `??` used it.
+
+**The fix is a split.** `Semantics` is now `type Out` alone — the minimum every
+host can meet — and `Values: Semantics` carries the two questions only a host
+with values can answer. A compiler simply does not implement it.
+
+That forces one consequence: a Rust default body cannot require a bound its
+trait does not have, so the short-circuit bodies cannot stay trait defaults.
+They moved to `nh_value_operators!()`, pasted into an `Operators` impl. The
+lazy roles now default to `unsupported` like every other role.
+
+The cost is one line in an interpreter. What it buys is that the second shape
+does not have to lie about the first.
+
+### What stayed different, and should
+
+Not everything that differs is a defect. Non-local control flow legitimately
+diverges: an interpreter unwinds with `Error::Signal`, a compiler emits a jump
+and records its index for patching. That is host state rather than a signal, and
+no shared mechanism would serve both — patching is not unwinding. Nothing in the
+generated code forces either choice.
+
+Verified by building both from the same grammar: `2 + 3 * 4` compiles to
+`Push 2 · Push 3 · Push 4 · Mul · Add`, and `if x then print 100` to a
+`JumpIfFalse` patched once the body's length is known. Eager parameters give a
+compiler stack order for free, because "already evaluated" reads as "already
+emitted".
+
+---
+
 ## 11. Resolved questions and residual risks
 
 **All open design questions are closed.** Resolved across v0–v0.4: handler return

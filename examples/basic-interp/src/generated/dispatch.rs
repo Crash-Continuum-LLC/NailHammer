@@ -29,12 +29,25 @@ use crate::Rule;
 pub trait Semantics {
     /// What evaluating a node produces.
     type Out;
+}
 
-    /// Truthiness, used by the short-circuit operator defaults.
+/// A host whose `Out` is a **value it can ask questions about**.
+///
+/// An interpreter implements this: `Out` is a value, and truthiness is
+/// a question it can answer. A compiler does not: its `Out` is a
+/// placeholder for something the *target machine* will compute later,
+/// so there is nothing to inspect at build time.
+///
+/// It is separate from [`Semantics`] for exactly that reason. Requiring
+/// it of every host would force a bytecode emitter to write a `truthy`
+/// it can never answer and must never be asked.
+pub trait Values: Semantics {
+    /// Used by the short-circuit operator bodies in
+    /// `nh_value_operators!`.
     fn truthy(&self, value: &Self::Out) -> bool;
 
-    /// Nullness, used by the `??` default. Languages without a null
-    /// need not override it.
+    /// Used by the `??` body. Languages without a null need not
+    /// override it.
     fn is_null(&self, value: &Self::Out) -> bool {
         let _ = value;
         false

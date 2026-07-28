@@ -12,7 +12,7 @@ use std::rc::Rc;
 use nh_runtime::{Ctx, Result};
 
 use crate::generated::ast::Stmt;
-use crate::generated::dispatch::{Eval, Semantics};
+use crate::generated::dispatch::{Eval, Values};
 use crate::{Interp, Value};
 
 pub fn run(host: &mut Interp, cond: Value, body: &Rc<Stmt>, cx: &mut Ctx) -> Result<Value> {

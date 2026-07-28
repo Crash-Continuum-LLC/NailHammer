@@ -15,7 +15,7 @@ use std::rc::Rc;
 use nh_runtime::{Ctx, Result};
 
 use crate::generated::ast::{Expr, Line};
-use crate::generated::dispatch::{Eval, Semantics};
+use crate::generated::dispatch::{Eval, Values};
 use crate::{Interp, Value};
 
 pub fn run(

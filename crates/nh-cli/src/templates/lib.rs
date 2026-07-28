@@ -43,6 +43,9 @@ pub struct Interp {
 
 impl generated::dispatch::Semantics for Interp {
     type Out = Value;
+}
+
+impl generated::dispatch::Values for Interp {
 
     /// Used by the short-circuit operator defaults. Supplying this is the only
     /// thing `&&` and `||` need from you.
@@ -72,6 +75,12 @@ impl Interp {
 /// all work — `%` will report itself honestly if used, and the short-circuit
 /// operators already behave correctly from `truthy` alone.
 impl generated::dispatch::Operators for Interp {
+    // The standard short-circuit bodies for `&&`, `||` and friends. They live
+    // in a macro rather than in trait defaults because they need `Values`, and
+    // a bytecode emitter has no values to inspect — it compiles these to jumps
+    // instead and writes its own.
+    crate::nh_value_operators!();
+
     fn add(&mut self, lhs: Value, rhs: Value) -> nh_runtime::Result<Value> {
         let (a, b) = self.nums(&lhs, &rhs, "+")?;
         Ok(Value::Num(a + b))
