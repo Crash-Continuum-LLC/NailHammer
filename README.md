@@ -109,9 +109,13 @@ Install the tool once:
 $ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
 ```
 
-That puts `nh` in `~/.cargo/bin`. The repository is private, so this needs an
-account with access and one cargo setting — cargo's built-in git client cannot
-use `gh`'s credential helper:
+That puts `nh` in `~/.cargo/bin`. Or take a prebuilt binary from a
+[release](https://github.com/Crash-Continuum-LLC/NailHammer/releases) and skip
+the build.
+
+The repository is private, so `cargo install` needs an account with access and
+one cargo setting — cargo's built-in git client cannot use `gh`'s credential
+helper:
 
 ```toml
 # ~/.cargo/config.toml
