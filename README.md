@@ -103,14 +103,40 @@ for CI, `allow <lint> in <rule>;` for the deliberate cases.
 
 ## Getting started
 
+Install the tool once:
+
 ```console
-$ cargo run -p nh-cli -- init mylang
+$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
+```
+
+That puts `nh` in `~/.cargo/bin`. The repository is private, so this needs an
+account with access and one cargo setting — cargo's built-in git client cannot
+use `gh`'s credential helper:
+
+```toml
+# ~/.cargo/config.toml
+[net]
+git-fetch-with-cli = true
+```
+
+Then:
+
+```console
+$ nh init mylang
 $ cd mylang
 $ cargo run
+28
+22
+5
+14
 ```
 
 Then edit `mylang.nh`. The scaffolded project has a `build.rs`, so `cargo build`
 regenerates on its own.
+
+> **Working on NailHammer itself?** Use `cargo run -p nh-cli -- <args>` from a
+> clone instead, or `cargo install --path crates/nh-cli` to put your working
+> copy on the `PATH`.
 
 Read [USAGE.md](USAGE.md) for the language reference, and
 [DESIGN.md](DESIGN.md) for why it is built this way — including a running

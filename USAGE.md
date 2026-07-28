@@ -20,6 +20,37 @@ to write and why. For the reasoning behind the design, see
 
 ## Start here
 
+### Getting `nh`
+
+```console
+$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
+$ nh --version
+nh 0.1.0
+```
+
+This puts `nh` in `~/.cargo/bin`, which `rustup` already adds to your `PATH`.
+Because the repository is private you also need one cargo setting, since
+cargo's built-in git client cannot use `gh`'s credential helper:
+
+```toml
+# ~/.cargo/config.toml
+[net]
+git-fetch-with-cli = true
+```
+
+Without it you get `failed to acquire username/password`, which does not say
+what to do about it.
+
+To skip the Rust toolchain entirely, take a prebuilt binary from a release —
+once one has been cut. Tagging `v*` builds them for macOS, Linux, and Windows:
+
+```console
+$ gh release download --repo Crash-Continuum-LLC/NailHammer --pattern '*macos-arm64*'
+$ tar xzf nh-macos-arm64.tar.gz && sudo mv nh-macos-arm64/nh /usr/local/bin/
+```
+
+### Your first project
+
 Run `nh init`. It creates a project that already works:
 
 ```console
