@@ -14,10 +14,15 @@
 
 use nh_lower::{Lowered, LoweredAlternative, LoweredRule, LoweredVariant, RuleShape};
 use nh_operators::OperatorTable;
+
+use crate::operators::Emitted;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use crate::operators::{emit_discriminants, emit_driver, emit_trait, emit_value_operators, emitted};
+use crate::operators::{
+    emit_discriminants, emit_driver, emit_short_circuit_impl, emit_short_circuit_trait,
+    emit_trait, emitted, has_short_circuit,
+};
 use crate::params::{params, Param};
 use crate::{ident, type_name, Options, HEADER};
 
@@ -61,6 +66,7 @@ pub fn generate(lowered: &Lowered, table: &OperatorTable, opts: &Options) -> Str
 
     emit_semantics(&mut out);
     emit_discriminants(&mut out, &ops);
+    emit_short_circuit_trait(&mut out, &ops);
     emit_trait(&mut out, &ops);
     emit_handlers(&mut out, lowered);
     emit_eval(&mut out, lowered);
@@ -78,9 +84,8 @@ pub fn generate(lowered: &Lowered, table: &OperatorTable, opts: &Options) -> Str
             })
             .unwrap_or_else(|| "atom".to_string());
         emit_driver(&mut out, &ops, &atom);
-        emit_value_operators(&mut out, &ops);
     }
-    emit_macro(&mut out, lowered, opts);
+    emit_macro(&mut out, lowered, opts, &ops);
 
     out
 }
@@ -109,8 +114,8 @@ fn emit_semantics(out: &mut String) {
          /// it of every host would force a bytecode emitter to write a `truthy`\n\
          /// it can never answer and must never be asked.\n\
          pub trait Values: Semantics {{\n\
-        \x20   /// Used by the short-circuit operator bodies in\n\
-        \x20   /// `nh_value_operators!`.\n\
+        \x20   /// The one host-specific part of short-circuiting. Give us this\n\
+        \x20   /// and `nh_handlers!` writes `&&`, `||` and `??` for you.\n\
         \x20   fn truthy(&self, value: &Self::Out) -> bool;\n\n\
         \x20   /// Used by the `??` body. Languages without a null need not\n\
         \x20   /// override it.\n\
@@ -359,7 +364,35 @@ fn macro_path(path: &str) -> String {
 }
 
 /// The delegating impl, as a macro so the user names their type once.
-fn emit_macro(out: &mut String, lowered: &Lowered, opts: &Options) {
+///
+/// It also writes the `ShortCircuit` impl, which is boilerplate rather than a
+/// decision: `if truthy(lhs) { rhs } else { lhs }` is what `&&` *means* for a
+/// host with values, and `truthy` — the only host-specific part — is already on
+/// the user's `Values` impl. A host that is not value-shaped opts out with
+/// `nh_handlers!(Interp without short_circuit)` and writes its own.
+fn emit_macro(out: &mut String, lowered: &Lowered, opts: &Options, ops: &[Emitted<'_>]) {
+    let sc = has_short_circuit(ops);
+
+    let (doc_extra, arms) = if sc {
+        (
+            "///\n\
+             /// It also writes your `ShortCircuit` impl — the standard\n\
+             /// short-circuit bodies, built on the `truthy` you gave to\n\
+             /// [`Values`]. That is not a choice anybody makes, so you are not\n\
+             /// asked to make it.\n\
+             ///\n\
+             /// A host that emits code rather than producing values has no\n\
+             /// `truthy` to build them on. It says so, and writes its own:\n\
+             ///\n\
+             /// ```ignore\n\
+             /// nh_handlers!(Compiler, without short_circuit);\n\
+             /// ```\n",
+            2,
+        )
+    } else {
+        ("", 1)
+    };
+
     let _ = writeln!(
         out,
         "/// Writes the delegating `Handlers` impl for your type.\n\
@@ -371,11 +404,42 @@ fn emit_macro(out: &mut String, lowered: &Lowered, opts: &Options) {
          /// Each method body does nothing but call into `{}::<alternative>::run`,\n\
          /// so every handler is its own small file and the trait's exhaustiveness\n\
          /// still guarantees none is missing.\n\
+         {doc_extra}\
          #[macro_export]\n\
-         macro_rules! nh_handlers {{\n\
-        \x20   ($host:ty) => {{\n\
-        \x20       impl $crate::generated::dispatch::Handlers for $host {{",
+         macro_rules! nh_handlers {{",
         macro_path(&opts.handlers_path)
+    );
+
+    // The `Handlers` impl is identical in both arms, so build it once.
+    let mut handlers = String::new();
+    emit_handlers_impl(&mut handlers, lowered);
+
+    for arm in 0..arms {
+        // Arm 0 is the default and writes `ShortCircuit` too; arm 1 is the
+        // opt-out, reached only by a host that said `without short_circuit`.
+        let head = if arm == 0 {
+            "    ($host:ty) => {"
+        } else {
+            // The comma is not decoration: Rust's macro follow-set forbids a
+            // bare word after a `ty` fragment.
+            "    ($host:ty, without short_circuit) => {"
+        };
+        let _ = writeln!(out, "{head}");
+        out.push_str(&handlers);
+        if arm == 0 {
+            emit_short_circuit_impl(out, ops, "        ");
+        }
+        let _ = writeln!(out, "    }};");
+    }
+
+    let _ = writeln!(out, "}}\n");
+}
+
+/// The `impl Handlers for $host` block, indented for a macro arm.
+fn emit_handlers_impl(out: &mut String, lowered: &Lowered) {
+    let _ = writeln!(
+        out,
+        "        impl $crate::generated::dispatch::Handlers for $host {{"
     );
 
     for alt in &lowered.alternatives {
@@ -387,13 +451,7 @@ fn emit_macro(out: &mut String, lowered: &Lowered, opts: &Options) {
         // `Self::Out` becomes an explicit qualified path.
         let sig: String = ps
             .iter()
-            .map(|p| {
-                format!(
-                    ",\n\x20               {}: {}",
-                    ident(&p.name),
-                    macro_ty(&p.ty)
-                )
-            })
+            .map(|p| format!(",\n                {}: {}", ident(&p.name), macro_ty(&p.ty)))
             .collect();
         let args: Vec<String> = ps.iter().map(|p| ident(&p.name)).collect();
         let forward = if args.is_empty() {
@@ -413,5 +471,5 @@ fn emit_macro(out: &mut String, lowered: &Lowered, opts: &Options) {
         );
     }
 
-    let _ = writeln!(out, "        }}\n    }};\n}}\n");
+    let _ = writeln!(out, "        }}");
 }

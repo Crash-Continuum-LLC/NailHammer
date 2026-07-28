@@ -42,8 +42,8 @@ pub trait Semantics {
 /// it of every host would force a bytecode emitter to write a `truthy`
 /// it can never answer and must never be asked.
 pub trait Values: Semantics {
-    /// Used by the short-circuit operator bodies in
-    /// `nh_value_operators!`.
+    /// The one host-specific part of short-circuiting. Give us this
+    /// and `nh_handlers!` writes `&&`, `||` and `??` for you.
     fn truthy(&self, value: &Self::Out) -> bool;
 
     /// Used by the `??` body. Languages without a null need not
@@ -91,25 +91,31 @@ impl CompareOp {
     }
 }
 
-/// Operator semantics.
+/// Operators that are **lazy in their right operand**.
 ///
-/// Every method is defaulted to an `unsupported` error, so a language
-/// implements only the operators it actually has and gets the rest of the
-/// table's parsing, precedence, and short-circuiting for free (§6.4).
-pub trait Operators: Semantics {
+/// Separate from [`Operators`] because their meaning is the one thing
+/// that genuinely differs between an interpreter and a compiler:
+/// short-circuiting is a *decision* to one and *control flow* to the
+/// other.
+///
+/// **You almost certainly do not implement this.** `nh_handlers!` writes
+/// the interpreter's version from your [`Values`] impl. Write it yourself
+/// only if you are emitting code rather than producing values, and then
+/// say so:
+///
+/// ```ignore
+/// nh_handlers!(Interp, without short_circuit);
+/// ```
+pub trait ShortCircuit: Semantics {
 
     /// `||` — **lazy in its right operand**.
     ///
     /// `rhs` is unevaluated. Running it is what evaluates it; not
     /// running it is what makes this short-circuit.
     ///
-    /// **You must write this.** There is no default, because a
-    /// wrong one would be silent:
-    ///
-    /// * An interpreter writes `nh_value_operators!();` once,
-    ///   inside its `Operators` impl, and is done.
-    /// * A compiler writes its own, emitting a jump — for it,
-    ///   short-circuiting is control flow, not a decision.
+    /// An interpreter gets this written for it by `nh_handlers!`. A
+    /// compiler writes it, emitting a jump — short-circuiting is
+    /// control flow to it, not a decision.
     fn or_else(
         &mut self,
         lhs: Self::Out,
@@ -124,13 +130,9 @@ pub trait Operators: Semantics {
     /// `rhs` is unevaluated. Running it is what evaluates it; not
     /// running it is what makes this short-circuit.
     ///
-    /// **You must write this.** There is no default, because a
-    /// wrong one would be silent:
-    ///
-    /// * An interpreter writes `nh_value_operators!();` once,
-    ///   inside its `Operators` impl, and is done.
-    /// * A compiler writes its own, emitting a jump — for it,
-    ///   short-circuiting is control flow, not a decision.
+    /// An interpreter gets this written for it by `nh_handlers!`. A
+    /// compiler writes it, emitting a jump — short-circuiting is
+    /// control flow to it, not a decision.
     fn and_then(
         &mut self,
         lhs: Self::Out,
@@ -139,6 +141,14 @@ pub trait Operators: Semantics {
     ) -> Result<Self::Out>
     where
         Self: Handlers + Sized;
+}
+
+/// Operator semantics.
+///
+/// Every method is defaulted to an `unsupported` error, so a language
+/// implements only the operators it actually has and gets the rest of the
+/// table's parsing, precedence, and short-circuiting for free (§6.4).
+pub trait Operators: ShortCircuit {
 
     /// `==`
     fn compare(&mut self, lhs: Self::Out, op: CompareOp, rhs: Self::Out) -> Result<Self::Out> {
@@ -642,54 +652,6 @@ impl Eval for Expr {
     }
 }
 
-/// The standard short-circuit bodies, for a host that implements
-/// [`Values`].
-///
-/// Paste it inside your `Operators` impl:
-///
-/// ```ignore
-/// impl Operators for Interp {
-///     nh_value_operators!();
-///     fn add(&mut self, l: Value, r: Value) -> Result<Value> { .. }
-/// }
-/// ```
-///
-/// A bytecode emitter skips this and writes its own, because
-/// short-circuiting compiles to a jump rather than to a decision.
-#[macro_export]
-macro_rules! nh_value_operators {
-    () => {
-        fn or_else(
-            &mut self,
-            lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
-            rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,
-            cx: &mut ::nh_runtime::Ctx,
-        ) -> ::nh_runtime::Result<
-            <Self as $crate::generated::dispatch::Semantics>::Out,
-        > {
-            use $crate::generated::dispatch::{Eval, Values};
-            if self.truthy(&lhs) {
-                return Ok(lhs);
-            }
-            rhs.eval(self, cx)
-        }
-        fn and_then(
-            &mut self,
-            lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
-            rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,
-            cx: &mut ::nh_runtime::Ctx,
-        ) -> ::nh_runtime::Result<
-            <Self as $crate::generated::dispatch::Semantics>::Out,
-        > {
-            use $crate::generated::dispatch::{Eval, Values};
-            if !self.truthy(&lhs) {
-                return Ok(lhs);
-            }
-            rhs.eval(self, cx)
-        }
-    };
-}
-
 /// Writes the delegating `Handlers` impl for your type.
 ///
 /// ```ignore
@@ -699,9 +661,106 @@ macro_rules! nh_value_operators {
 /// Each method body does nothing but call into `$crate::handlers::<alternative>::run`,
 /// so every handler is its own small file and the trait's exhaustiveness
 /// still guarantees none is missing.
+///
+/// It also writes your `ShortCircuit` impl — the standard
+/// short-circuit bodies, built on the `truthy` you gave to
+/// [`Values`]. That is not a choice anybody makes, so you are not
+/// asked to make it.
+///
+/// A host that emits code rather than producing values has no
+/// `truthy` to build them on. It says so, and writes its own:
+///
+/// ```ignore
+/// nh_handlers!(Compiler, without short_circuit);
+/// ```
 #[macro_export]
 macro_rules! nh_handlers {
     ($host:ty) => {
+        impl $crate::generated::dispatch::Handlers for $host {
+            fn program(
+                &mut self,
+                stmts: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::program::run(self, stmts, cx)
+            }
+            fn stmt_bind(
+                &mut self,
+                name: &str,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_bind::run(self, name, value, cx)
+            }
+            fn stmt_print(
+                &mut self,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_print::run(self, value, cx)
+            }
+            fn stmt_iff(
+                &mut self,
+                cond: <Self as $crate::generated::dispatch::Semantics>::Out,
+                body: &::std::rc::Rc<$crate::generated::ast::Stmt>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_iff::run(self, cond, body, cx)
+            }
+            fn stmt_eval(
+                &mut self,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_eval::run(self, value, cx)
+            }
+            fn primary_num(
+                &mut self,
+                digits: &str,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_num::run(self, digits, cx)
+            }
+            fn primary_var(
+                &mut self,
+                name: &str,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_var::run(self, name, cx)
+            }
+        }
+        impl $crate::generated::dispatch::ShortCircuit for $host {
+            fn or_else(
+                &mut self,
+                lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
+                rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<
+                <Self as $crate::generated::dispatch::Semantics>::Out,
+            > {
+                use $crate::generated::dispatch::{Eval, Values};
+                if self.truthy(&lhs) {
+                    return Ok(lhs);
+                }
+                rhs.eval(self, cx)
+            }
+            fn and_then(
+                &mut self,
+                lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
+                rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<
+                <Self as $crate::generated::dispatch::Semantics>::Out,
+            > {
+                use $crate::generated::dispatch::{Eval, Values};
+                if !self.truthy(&lhs) {
+                    return Ok(lhs);
+                }
+                rhs.eval(self, cx)
+            }
+        }
+    };
+    ($host:ty, without short_circuit) => {
         impl $crate::generated::dispatch::Handlers for $host {
             fn program(
                 &mut self,

@@ -42,8 +42,8 @@ pub trait Semantics {
 /// it of every host would force a bytecode emitter to write a `truthy`
 /// it can never answer and must never be asked.
 pub trait Values: Semantics {
-    /// Used by the short-circuit operator bodies in
-    /// `nh_value_operators!`.
+    /// The one host-specific part of short-circuiting. Give us this
+    /// and `nh_handlers!` writes `&&`, `||` and `??` for you.
     fn truthy(&self, value: &Self::Out) -> bool;
 
     /// Used by the `??` body. Languages without a null need not

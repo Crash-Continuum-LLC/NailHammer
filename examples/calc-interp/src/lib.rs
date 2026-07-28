@@ -47,8 +47,12 @@ impl generated::dispatch::Semantics for Interp {
     type Out = Value;
 }
 
+/// The only thing this language has to say about short-circuiting.
+///
+/// Given `truthy`, `nh_handlers!` writes `&&`, `||` and `??`. Their bodies are
+/// not a decision anybody makes — `if truthy(lhs) { rhs } else { lhs }` is what
+/// `&&` *means* for a host with values — so nothing here mentions them.
 impl generated::dispatch::Values for Interp {
-
     fn truthy(&self, value: &Value) -> bool {
         match value {
             Value::Bool(b) => *b,
@@ -71,12 +75,6 @@ impl Interp {
 // Only the roles this language has. `assign`, `rem`, and the rest keep their
 // defaulted errors, and nothing had to be written to decline them.
 impl generated::dispatch::Operators for Interp {
-    // The standard short-circuit bodies for `&&`, `||` and friends. They live
-    // in a macro rather than in trait defaults because they need `Values`, and
-    // a bytecode emitter has no values to inspect — it compiles these to jumps
-    // instead and writes its own.
-    crate::nh_value_operators!();
-
     fn add(&mut self, lhs: Value, rhs: Value) -> nh_runtime::Result<Value> {
         let (a, b) = self.nums(&lhs, &rhs, "+")?;
         Ok(Value::Num(a + b))
@@ -133,9 +131,9 @@ impl generated::dispatch::Operators for Interp {
             C::EqEq | C::BangEq => unreachable!("handled above"),
         }))
     }
-    // `and_then` and `or_else` are NOT implemented here. Their generated
-    // defaults short-circuit correctly using `truthy`, which is the only thing
-    // this language had to supply.
+    // `and_then` and `or_else` are not here, and not in any file you own.
+    // `nh_handlers!(Interp)` wrote them from `truthy`. See
+    // `examples/bytecode` for the host that has to write them itself.
 
     /// Stores a value at a place.
     ///

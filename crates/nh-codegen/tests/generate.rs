@@ -661,79 +661,135 @@ fn semantics_does_not_demand_what_a_compiler_cannot_answer() {
     assert!(dispatch.contains("fn truthy(&self, value: &Self::Out) -> bool;"), "{dispatch}");
 }
 
-/// The short-circuit bodies move to an opt-in macro, because a trait default
-/// cannot require a bound the trait does not have.
+/// **The interpreter writes nothing.**
+///
+/// `if truthy(lhs) { rhs } else { lhs }` is not a decision anybody makes — it
+/// is what `&&` *means* for a host with values. The only host-specific part is
+/// `truthy`, which is already on `Values`. So `nh_handlers!` writes the rest,
+/// and a user who never thinks about short-circuiting gets it right.
 #[test]
-fn short_circuiting_is_opt_in_rather_than_defaulted() {
+fn short_circuiting_is_written_for_you() {
     let g = gen(DOCS);
     let dispatch = file(&g, "generated/dispatch.rs");
 
-    assert!(dispatch.contains("macro_rules! nh_value_operators"), "{dispatch}");
-    assert!(
-        dispatch.contains("if self.truthy(&lhs)") && dispatch.contains("if !self.truthy(&lhs)"),
-        "`||` stops on a truthy left and `&&` on a falsy one; getting that \
-         backwards is silent:\n{dispatch}"
-    );
+    let macro_at = dispatch
+        .find("macro_rules! nh_handlers")
+        .expect("the handler macro");
+    let default_arm = &dispatch[macro_at..dispatch[macro_at..]
+        .find("($host:ty, without short_circuit)")
+        .map(|i| macro_at + i)
+        .expect("an opt-out arm")];
 
-    // The trait default must not reach for truthiness.
-    let trait_body = &dispatch[dispatch.find("pub trait Operators").unwrap()
-        ..dispatch.find("macro_rules! nh_value_operators").unwrap()];
     assert!(
-        !trait_body.contains("self.truthy"),
-        "a default cannot call `Values`; not every host has it:\n{trait_body}"
+        default_arm.contains("impl $crate::generated::dispatch::ShortCircuit for $host"),
+        "`nh_handlers!(Interp)` must write this so nobody else has to:\n{default_arm}"
+    );
+    assert!(
+        default_arm.contains("if self.truthy(&lhs)") && default_arm.contains("if !self.truthy(&lhs)"),
+        "`||` stops on a truthy left and `&&` on a falsy one; getting that \
+         backwards is silent:\n{default_arm}"
     );
 }
 
-/// **A lazy role has no default at all.**
+/// A host that is not value-shaped opts out, and then must supply its own.
 ///
-/// Every other role defaults to `unsupported`, which is right for them: a host
-/// that never uses `%` never calls `rem`. A lazy role is different. `&&` is in
-/// the grammar, so the language has it, and a default would let a host that
-/// never said what it means compile clean and misbehave at runtime. Measured:
-/// with a default, deleting `nh_value_operators!()` from `examples/calc-interp`
-/// built without a murmur and failed eight tests.
-///
-/// There cannot be a *correct* default — the obvious body needs
-/// `Values::truthy`, and a Rust default cannot require a bound its trait lacks.
-/// So: no default, and rustc names the missing method.
+/// This is the *only* place the two shapes diverge, and it is one phrase long.
 #[test]
-fn a_lazy_role_has_no_default_so_forgetting_it_is_a_compile_error() {
+fn a_host_without_values_can_opt_out_and_write_its_own() {
     let g = gen(DOCS);
     let dispatch = file(&g, "generated/dispatch.rs");
 
-    let trait_body = &dispatch[dispatch.find("pub trait Operators").unwrap()
-        ..dispatch.find("macro_rules! nh_value_operators").unwrap()];
+    let at = dispatch
+        .find("($host:ty, without short_circuit) => {")
+        .unwrap_or_else(|| panic!("no opt-out arm:\n{dispatch}"));
+    let arm = &dispatch[at..];
+
+    assert!(
+        arm.contains("impl $crate::generated::dispatch::Handlers for $host"),
+        "the opt-out arm still writes the handlers:\n{arm}"
+    );
+    assert!(
+        !arm.contains("ShortCircuit for $host"),
+        "opting out must actually leave it out, or the compiler's own impl \
+         collides with a generated one:\n{arm}"
+    );
+    assert!(
+        !arm.contains("truthy"),
+        "the whole point of opting out is having no `truthy`:\n{arm}"
+    );
+}
+
+/// The lazy roles live on their own trait, and are declared rather than
+/// defaulted.
+///
+/// Two separate properties, and both matter:
+///
+/// * **Own trait**, so `nh_handlers!` can write the impl in its own block
+///   without touching the `Operators` impl the user hand-writes.
+/// * **Declared**, so a host that opted out and then forgot hears it from
+///   rustc. There cannot be a correct default anyway: the body needs
+///   `Values::truthy`, and a Rust default cannot require a bound its trait
+///   lacks.
+#[test]
+fn a_lazy_role_is_declared_on_its_own_trait() {
+    let g = gen(DOCS);
+    let dispatch = file(&g, "generated/dispatch.rs");
+
+    let sc_at = dispatch
+        .find("pub trait ShortCircuit: Semantics {")
+        .unwrap_or_else(|| panic!("no `ShortCircuit`:\n{dispatch}"));
+    let sc = &dispatch[sc_at..dispatch[sc_at..].find("\n}").unwrap() + sc_at];
 
     for role in ["and_then", "or_else"] {
-        let at = trait_body
+        let at = sc
             .find(&format!("fn {role}("))
-            .unwrap_or_else(|| panic!("`{role}` is missing:\n{trait_body}"));
-        let decl = &trait_body[at..];
+            .unwrap_or_else(|| panic!("`{role}` is not on `ShortCircuit`:\n{sc}"));
+        let decl = &sc[at..];
         let end = decl.find(';').unwrap_or(usize::MAX);
         let body = decl.find('{').unwrap_or(usize::MAX);
         assert!(
             end < body,
-            "`{role}` must be declared, not defaulted — a host that forgets it \
-             has to hear about it from rustc, not from a user:\n{decl}"
+            "`{role}` must be declared, not defaulted:\n{decl}"
         );
     }
 
-    // The strict roles keep their defaults: not using `%` is not an error.
+    // The driver reaches them through the bound it already has.
     assert!(
-        trait_body.contains("Error::unsupported"),
-        "strict roles still default:\n{trait_body}"
+        dispatch.contains("pub trait Operators: ShortCircuit {"),
+        "{dispatch}"
+    );
+
+    // And the strict roles keep their defaults: not using `%` is not an error.
+    let ops_at = dispatch.find("pub trait Operators: ShortCircuit {").unwrap();
+    let ops = &dispatch[ops_at..];
+    assert!(
+        ops.contains("Error::unsupported"),
+        "strict roles still default:\n{ops}"
+    );
+    assert!(
+        !ops[..ops.find("pub trait Handlers").unwrap()].contains("fn and_then"),
+        "a lazy role must not also be on `Operators`:\n{ops}"
     );
 }
 
-/// A grammar with no lazy operators needs no macro at all.
+/// A grammar with nothing lazy gets no trait, no impl, and no opt-out arm.
 #[test]
-fn a_table_without_lazy_operators_emits_no_macro() {
+fn a_table_without_lazy_operators_gets_none_of_this() {
     let g = gen(BASIC);
     let dispatch = file(&g, "generated/dispatch.rs");
-    // The name appears in `Values`'s own doc comment, so this checks for the
-    // macro itself rather than any mention of it.
+
     assert!(
-        !dispatch.contains("macro_rules! nh_value_operators"),
+        !dispatch.contains("pub trait ShortCircuit"),
         "nothing short-circuits here:\n{dispatch}"
+    );
+    assert!(
+        dispatch.contains("pub trait Operators: Semantics {"),
+        "no lazy roles means no supertrait:\n{dispatch}"
+    );
+    // Offering `without short_circuit` where there is nothing to opt out of
+    // would be a phrase that parses and means nothing.
+    assert!(
+        !dispatch.contains("without short_circuit"),
+        "{dispatch}"
     );
 }
