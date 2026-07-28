@@ -41,13 +41,18 @@ git-fetch-with-cli = true
 Without it you get `failed to acquire username/password`, which does not say
 what to do about it.
 
-To skip the Rust toolchain entirely, take a prebuilt binary from a release —
-once one has been cut. Tagging `v*` builds them for macOS, Linux, and Windows:
+To skip the Rust toolchain entirely, take a prebuilt binary from a release.
+Builds exist for macOS (arm64 and x86_64), Linux, and Windows:
 
 ```console
-$ gh release download --repo Crash-Continuum-LLC/NailHammer --pattern '*macos-arm64*'
-$ tar xzf nh-macos-arm64.tar.gz && sudo mv nh-macos-arm64/nh /usr/local/bin/
+$ gh release download v0.1.0 --repo Crash-Continuum-LLC/NailHammer \
+    --pattern '*macos-arm64*'
+$ tar xzf nh-macos-arm64.tar.gz
+$ sudo mv nh-macos-arm64/nh /usr/local/bin/
 ```
+
+You still need cargo to *build* the project `nh init` creates — it is a Rust
+program — but not to run the tool itself.
 
 ### Your first project
 
