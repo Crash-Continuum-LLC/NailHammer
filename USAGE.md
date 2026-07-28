@@ -102,7 +102,8 @@ nh explain <file.nh> [--source]
 
 **`nh init`** writes into `dir`, defaulting to the current directory. It refuses
 a non-empty directory unless you pass `--force`. The project name comes from the
-directory name; `--ext` sets the file extension for your language's source files.
+directory name; `--ext` sets the file extension for your language's source files. `--async` adds tokio and a helper for awaiting from inside a handler — see
+[Async work in a handler](#async-work-in-a-handler).
 
 **`nh check`** parses and reports without writing anything. It runs lowering
 internally and throws the result away, so it will not accept a grammar that
@@ -748,6 +749,52 @@ help: reorder the parameters to match the grammar
 If you rewrite a handler's signature into a shape the check cannot read, it says
 nothing rather than guessing. A false alarm on your own code would be worse than
 the drift it is looking for.
+
+### Async work in a handler
+
+Handlers are synchronous, because the evaluator is. Making it async would mean
+every `eval_*` returned a boxed future — a heap allocation per node — whether or
+not a language ever awaits anything.
+
+So async work is **blocked on** rather than awaited. `nh init --async` sets that
+up: tokio with the right features, a multi-thread `#[tokio::main]`, and a helper
+on your interpreter.
+
+```rust
+pub fn run(host: &mut Interp, value: Value, cx: &mut Ctx) -> Result<Value> {
+    let body = host.block_on(fetch(url))?;
+    Ok(Value::Str(body))
+}
+```
+
+The obvious spelling of that does not work:
+
+```rust
+Handle::current().block_on(fut)
+// panics: Cannot start a runtime from within a runtime
+```
+
+The thread is already driving the executor. The generated helper uses
+`block_in_place`, which hands that thread's other work to a sibling worker
+first:
+
+```rust
+pub fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
+    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))
+}
+```
+
+That is why `--async` pins `rt-multi-thread` and the multi-thread flavour:
+`block_in_place` panics on the current-thread runtime.
+
+**What this costs.** A tokio worker thread is held for the duration of the call.
+That is the right trade for a handler that occasionally reaches the network. It
+is the wrong one if your *language* has async semantics of its own — an `await`
+keyword whose interpreter must yield to a scheduler and interleave with other
+tasks. That needs an async evaluator, which does not exist today.
+
+Without `--async` nothing changes: a plain scaffold has no tokio dependency at
+all.
 
 ### Errors locate themselves
 

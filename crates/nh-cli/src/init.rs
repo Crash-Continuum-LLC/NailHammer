@@ -44,6 +44,48 @@ const HANDLERS: &[(&str, &str)] = &[
     ("primary_var", include_str!("templates/handlers/primary_var.rs")),
 ];
 
+/// Added to `Cargo.toml` by `--async`.
+const TOKIO_DEP: &str = r#"
+# Added by `nh init --async`. `rt-multi-thread` is not optional: the helper in
+# `src/lib.rs` uses `block_in_place`, which panics on the current-thread
+# runtime.
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+"#;
+
+/// The helper `--async` adds to the host, and the reason it exists.
+const ASYNC_SUPPORT: &str = r#"
+impl Interp {
+    /// Runs a future from inside a handler.
+    ///
+    /// Handlers are synchronous, because the evaluator is: making it async
+    /// would mean every `eval_*` returned a boxed future — a heap allocation
+    /// per node — whether or not a language ever awaits anything.
+    ///
+    /// So async work is *blocked on* instead. The obvious spelling of that,
+    ///
+    /// ```ignore
+    /// Handle::current().block_on(fut)   // panics
+    /// ```
+    ///
+    /// fails with "Cannot start a runtime from within a runtime", because the
+    /// thread is already driving the executor. `block_in_place` hands the
+    /// thread's other work to a sibling worker first, which is what makes the
+    /// block legal.
+    ///
+    /// ```ignore
+    /// let body = host.block_on(reqwest::get(url));
+    /// ```
+    ///
+    /// The cost is a tokio worker thread for the duration of the call. That is
+    /// the right trade for a handler that occasionally reaches the network; it
+    /// is the wrong one if the *language* has async semantics of its own, where
+    /// the interpreter would need to yield to a scheduler rather than block.
+    pub fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
+        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))
+    }
+}
+"#;
+
 /// Kept in step with the workspace version.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -59,10 +101,15 @@ pub struct Options {
     /// Source file extension for the target language.
     pub ext: String,
     pub force: bool,
+    /// Set up the project for async work in handlers.
+    ///
+    /// The evaluator stays synchronous — see `ASYNC_NOTE` for why, and for the
+    /// one trap this exists to remove.
+    pub is_async: bool,
 }
 
 impl Options {
-    pub fn new(dir: PathBuf, name: Option<String>, ext: Option<String>, force: bool) -> Result<Self, String> {
+    pub fn new(dir: PathBuf, name: Option<String>, ext: Option<String>, force: bool, is_async: bool) -> Result<Self, String> {
         let derived = match &name {
             Some(n) => n.clone(),
             None => dir
@@ -95,6 +142,7 @@ impl Options {
             grammar,
             ext,
             force,
+            is_async,
         })
     }
 }
@@ -149,6 +197,10 @@ fn render(template: &str, opts: &Options) -> String {
         .replace("{{name}}", &opts.name)
         .replace("{{Name}}", &opts.grammar)
         .replace("{{ext}}", &opts.ext)
+        .replace("{{tokiodep}}", if opts.is_async { TOKIO_DEP } else { "" })
+        .replace("{{tokiomain}}", if opts.is_async { "#[tokio::main(flavor = \"multi_thread\")]\n" } else { "" })
+        .replace("{{mainasync}}", if opts.is_async { "async " } else { "" })
+        .replace("{{asyncsupport}}", if opts.is_async { ASYNC_SUPPORT } else { "" })
 
 }
 
@@ -243,7 +295,7 @@ mod tests {
     #[test]
     fn a_scaffold_depends_only_on_pest_and_the_vendored_runtime() {
         let toml = render(CARGO_TOML, &Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false,
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false,
         ).unwrap());
 
         assert!(
@@ -263,7 +315,7 @@ mod tests {
     #[test]
     fn the_build_script_shells_out_rather_than_depending_on_the_generator() {
         let build = render(BUILD_RS, &Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false,
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false,
         ).unwrap());
 
         assert!(build.contains("Command::new"), "{build}");
@@ -275,7 +327,7 @@ mod tests {
     #[test]
     fn a_keyword_name_is_refused() {
         // `nh init pub` would generate `use pub::...`, which does not compile.
-        let err = Options::new(PathBuf::from("/tmp/pub"), Some("pub".into()), None, false)
+        let err = Options::new(PathBuf::from("/tmp/pub"), Some("pub".into()), None, false, false)
             .expect_err("a Rust keyword cannot name a crate");
         assert!(err.contains("Rust keyword"), "{err}");
         assert!(err.contains("--name"), "{err}");
@@ -289,7 +341,7 @@ mod tests {
 
     #[test]
     fn templates_have_no_unreplaced_placeholders() {
-        let opts = Options::new(PathBuf::from("/tmp/x"), Some("demo".into()), None, false).unwrap();
+        let opts = Options::new(PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false).unwrap();
         for t in [GRAMMAR, CARGO_TOML, MAIN_RS, README, GITIGNORE, SAMPLE] {
             let out = render(t, &opts);
             assert!(

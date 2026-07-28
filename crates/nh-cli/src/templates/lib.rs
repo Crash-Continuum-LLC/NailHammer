@@ -160,4 +160,5 @@ impl generated::dispatch::Operators for Interp {
 // Writes the `Handlers` impl: one delegating method per grammar alternative.
 // Add an alternative to `{{name}}.nh` and this stops compiling until a handler
 // exists — Rust's own trait exhaustiveness does the checking.
+{{asyncsupport}}
 crate::nh_handlers!(Interp);

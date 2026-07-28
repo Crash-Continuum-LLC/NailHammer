@@ -4,7 +4,7 @@ use nh_runtime::{Ctx, SourceMap};
 use pest::Parser;
 use {{name}}::{generated, Interp, Rule, {{Name}}Parser};
 
-fn main() -> std::process::ExitCode {
+{{tokiomain}}{{mainasync}}fn main() -> std::process::ExitCode {
     let path = std::env::args().nth(1).unwrap_or_else(|| "sample.{{ext}}".into());
 
     let mut sources = SourceMap::new();
