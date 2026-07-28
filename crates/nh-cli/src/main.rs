@@ -11,6 +11,7 @@ use nh_syntax::{render, resolve, Ast, Errors, SourceMap};
 
 mod init;
 mod json;
+mod vendor;
 
 const USAGE: &str = "\
 nh — NailHammer grammar toolkit

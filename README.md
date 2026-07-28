@@ -146,11 +146,11 @@ operator driver, determinism analysis, error recovery, self-hosting, and an
 owned AST that makes subroutines, stored code, and non-local jumps
 expressible. 294 tests.
 
-**Not yet published.** `nh-runtime` is a dependency of every generated project,
-so a scaffolded project currently points at whatever checkout built the `nh`
-binary. Metadata and packaging are ready; see [PUBLISHING.md](PUBLISHING.md) for
-the dependency order. That upload is the one thing standing between this and
-someone else using it.
+**Not published, and it does not need to be.** `nh init` vendors the runtime
+into the project it creates, so a generated project depends on pest and nothing
+else — no credentials, no cargo configuration, no registry. Install the tool
+with `cargo install --git`, or take a prebuilt binary from a release. See
+[PUBLISHING.md](PUBLISHING.md).
 
 Known gaps are tracked in [DESIGN.md §11](DESIGN.md), openly — including the
 ones found by using the tool on itself.

@@ -1,41 +1,74 @@
 # Publishing
 
-`nh-runtime` is a dependency of every generated project, so nothing else here is
-usable by another person until it is on crates.io. Everything is packaged and
-metadata-complete; what remains is the upload.
+**Nothing needs publishing for NailHammer to be usable.** That was not true
+before the runtime was vendored, so this document used to describe a required
+step. It now describes an optional one.
 
-Crates depend on each other, and cargo resolves a versioned path dependency
-against the registry — so they publish in dependency order, waiting for each to
-become available before the next:
+## How people get it today
 
 ```console
-$ cargo publish -p nh-syntax
-$ cargo publish -p nh-operators
-$ cargo publish -p nh-analysis
-$ cargo publish -p nh-lower
-$ cargo publish -p nh-codegen
-$ cargo publish -p nh-build
-$ cargo publish -p nh-cli
-$ cargo publish -p nh-runtime
+$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
 ```
 
-`cargo package -p <crate> --no-verify` succeeds for a crate whose dependencies
-are already published; it fails with `no matching package named ...` for one
-whose are not. That failure is the expected state before the first publish, not
-a defect.
+The repository is private, so this needs an account with access and one cargo
+setting, because cargo's built-in git client cannot use `gh`'s credential
+helper:
 
-## Before the first publish
+```toml
+# ~/.cargo/config.toml
+[net]
+git-fetch-with-cli = true
+```
 
-- [x] Copyright holder: **Crash Continuum LLC**.
-- [x] Starting version: **0.1.0** for all eight crates.
-- [ ] **After the last `cargo publish` above**, set `PUBLISHED = true` in
-      `crates/nh-cli/src/init.rs` and release `nh-cli` again.
+Or, with no Rust toolchain at all, take a prebuilt binary from a release:
 
-      That one constant switches a scaffolded `Cargo.toml` from
-      `{ version, path }` to a plain `version`. Until then the path points into
-      whatever checkout built the `nh` binary, so a scaffolded project only
-      builds on that machine.
+```console
+$ gh release download v0.1.0 --repo Crash-Continuum-LLC/NailHammer --pattern '*macos-arm64*'
+```
 
-      **Order matters.** Flipping it before the crates exist would make every
-      scaffolded project fail to build — worse than the current limitation, not
-      better.
+Tagging `v*` builds those for macOS (arm64 and x86_64), Linux, and Windows, and
+attaches the VS Code extension alongside them.
+
+## What a generated project needs
+
+Nothing but pest.
+
+```toml
+[dependencies]
+nh-runtime = { path = "vendor/nh-runtime" }
+pest = "2.8"
+pest_derive = { version = "2.8", features = ["grammar-extras"] }
+```
+
+`nh init` writes the runtime into `vendor/nh-runtime/` — 1,130 lines, one
+dependency — and `build.rs` shells out to the `nh` binary rather than linking
+the generator. So a scaffolded project builds with no credentials, no cargo
+configuration, and no access to this repository.
+
+The vendored copy is pinned to the `nh` that generated it. That is the right
+coupling rather than a limitation: generated code and its runtime have to agree,
+and a floating dependency on `main` can break a project that has not changed.
+To take a newer runtime, re-run `nh init` in a scratch directory and copy
+`vendor/` across.
+
+## If you ever go public
+
+crates.io is a **public** registry — there is no private publishing — so this
+only applies if the project stops being private.
+
+Publish in dependency order, since each crate must exist before the next can
+reference it:
+
+```
+nh-runtime → nh-syntax → nh-operators → nh-lower → nh-analysis
+           → nh-codegen → nh-build → nh-cli
+```
+
+Then `cargo install nh-cli` replaces the `--git` form, and the vendoring in
+`nh init` could become a `--vendor` flag rather than the default. Neither is
+required: vendoring keeps working, and a project that vendors needs nothing
+from a registry.
+
+A private registry (Cloudsmith, Artifactory) is the middle path if versioned
+dependencies are wanted without going public. Users would need registry
+credentials, which is the burden vendoring exists to remove.
