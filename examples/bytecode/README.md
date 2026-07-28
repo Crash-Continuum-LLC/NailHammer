@@ -95,9 +95,15 @@ is what found that, and `tests/compile.rs` is what keeps it found.
 a host **must** write itself — the generated trait gives them no default,
 because a wrong one would be silent.
 
-An interpreter satisfies them with one line, `nh_value_operators!();`, whose
-bodies ask `Values::truthy`. A compiler has no value to ask about at build
-time, so it emits the question:
+An interpreter writes nothing at all: `nh_handlers!(Interp)` writes its
+`ShortCircuit` impl from `Values::truthy`. A compiler has no value to ask about
+at build time, so it opts out —
+
+```rust
+crate::nh_handlers!(Interp, without short_circuit);
+```
+
+— and emits the question instead of asking it:
 
 ```
 a && b     →     <a> · Dup · JumpIfFalse end · Pop · <b> · end:
@@ -110,13 +116,21 @@ This is the same trade as `if`, one level down: short-circuiting is a *decision*
 to an interpreter and *control flow* to a compiler, and `lazy` is what lets one
 signature mean both.
 
-## Why `&&` is required rather than defaulted
+## Why the opt-out, rather than making everyone write it
 
-A default would be silent. Measured: with one, deleting `nh_value_operators!()`
-from `examples/calc-interp` compiled without a murmur and failed eight tests at
-runtime — the exact failure mode this toolkit exists to eliminate. Now rustc
-says `missing: or_else, and_then` and points at a doc comment telling you which
-of the two lines to write.
+Two earlier designs are worth knowing about, because both were defensible and
+both were wrong.
+
+**A macro to paste** (`nh_value_operators!()`). Measured: deleting that line from
+`examples/calc-interp` compiled without a murmur and failed eight tests at
+runtime — the exact failure this toolkit exists to eliminate.
+
+**No default, so rustc names the missing methods.** Safe, but it billed every
+interpreter author for a decision nobody makes.
+
+The rule (DESIGN §0) is: *do not bill the tool writer for a decision that always
+goes the same way.* An interpreter's `&&` always means the same thing. So the
+generator writes it, and the exception — this file — says one phrase.
 
 ## What legitimately differs
 

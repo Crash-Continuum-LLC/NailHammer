@@ -155,9 +155,74 @@ pub fn emit_discriminants(out: &mut String, ops: &[Emitted<'_>]) {
     out.push('\n');
 }
 
+/// Is any role lazy in its right operand? Those live on `ShortCircuit`.
+pub fn has_short_circuit(ops: &[Emitted<'_>]) -> bool {
+    ops.iter().any(|e| lazy_rhs(e.op) && !lazy_lhs(e.op))
+}
+
+/// `ShortCircuit`: the roles whose meaning depends on what kind of host you are.
+///
+/// These are split out of [`emit_trait`] for one reason: `nh_handlers!` can then
+/// write the interpreter's version for you, in its own impl block, without
+/// touching the `Operators` impl you hand-write. See `emit_short_circuit_impl`.
+pub fn emit_short_circuit_trait(out: &mut String, ops: &[Emitted<'_>]) {
+    let lazy = lazy_roles(ops);
+    if lazy.is_empty() {
+        return;
+    }
+
+    let _ = writeln!(
+        out,
+        "/// Operators that are **lazy in their right operand**.\n\
+         ///\n\
+         /// Separate from [`Operators`] because their meaning is the one thing\n\
+         /// that genuinely differs between an interpreter and a compiler:\n\
+         /// short-circuiting is a *decision* to one and *control flow* to the\n\
+         /// other.\n\
+         ///\n\
+         /// **You almost certainly do not implement this.** `nh_handlers!` writes\n\
+         /// the interpreter's version from your [`Values`] impl. Write it yourself\n\
+         /// only if you are emitting code rather than producing values, and then\n\
+         /// say so:\n\
+         ///\n\
+         /// ```ignore\n\
+         /// nh_handlers!(Interp, without short_circuit);\n\
+         /// ```\n\
+         pub trait ShortCircuit: Semantics {{"
+    );
+
+    let grouped = grouped_roles(ops);
+    let mut seen = std::collections::BTreeSet::new();
+    for e in &lazy {
+        if !seen.insert(e.role.clone()) {
+            continue;
+        }
+        emit_lazy_method(out, e, &grouped);
+    }
+
+    let _ = writeln!(out, "}}\n");
+}
+
+/// The roles that belong on `ShortCircuit`, deduplicated by role.
+fn lazy_roles<'a, 'b>(ops: &'b [Emitted<'a>]) -> Vec<&'b Emitted<'a>> {
+    let mut seen = std::collections::BTreeSet::new();
+    ops.iter()
+        .filter(|e| lazy_rhs(e.op) && !lazy_lhs(e.op))
+        .filter(|e| seen.insert(e.role.clone()))
+        .collect()
+}
+
 /// The `Operators` trait: one defaulted method per role.
 pub fn emit_trait(out: &mut String, ops: &[Emitted<'_>]) {
     let grouped = grouped_roles(ops);
+
+    // A grammar with `&&` gets `Operators: ShortCircuit`, so the driver can
+    // reach the lazy roles through the bound it already has.
+    let base = if has_short_circuit(ops) {
+        "ShortCircuit"
+    } else {
+        "Semantics"
+    };
 
     let _ = writeln!(
         out,
@@ -166,7 +231,7 @@ pub fn emit_trait(out: &mut String, ops: &[Emitted<'_>]) {
          /// Every method is defaulted to an `unsupported` error, so a language\n\
          /// implements only the operators it actually has and gets the rest of the\n\
          /// table's parsing, precedence, and short-circuiting for free (§6.4).\n\
-         pub trait Operators: Semantics {{"
+         pub trait Operators: {base} {{"
     );
 
     if ops.is_empty() {
@@ -185,6 +250,50 @@ pub fn emit_trait(out: &mut String, ops: &[Emitted<'_>]) {
     emit_assignment(out, ops, &grouped);
 
     let _ = writeln!(out, "}}\n");
+}
+
+/// One lazy role, **declared** rather than defaulted, on `ShortCircuit`.
+///
+/// There is no default because there is no correct one: the interpreter's body
+/// needs `Values::truthy`, and a Rust default cannot require a bound its trait
+/// lacks — `ShortCircuit: Values` would force a compiler to answer a question
+/// about a value it does not have.
+///
+/// Nobody pays for that, though. `nh_handlers!` writes this impl for any host
+/// with `Values`, so the bare declaration is only ever met by someone who said
+/// `, without short_circuit` — for whom "write it yourself" is the whole point.
+fn emit_lazy_method(
+    out: &mut String,
+    e: &Emitted<'_>,
+    grouped: &BTreeMap<String, Vec<(String, String)>>,
+) {
+    let m = ident(&e.role);
+    let arg = if grouped.contains_key(&e.role) {
+        format!("op: {}Op, ", type_name(&e.role))
+    } else {
+        String::new()
+    };
+
+    let _ = writeln!(
+        out,
+        "\n    /// `{}` — **lazy in its right operand**.\n\
+        \x20   ///\n\
+        \x20   /// `rhs` is unevaluated. Running it is what evaluates it; not\n\
+        \x20   /// running it is what makes this short-circuit.\n\
+        \x20   ///\n\
+        \x20   /// An interpreter gets this written for it by `nh_handlers!`. A\n\
+        \x20   /// compiler writes it, emitting a jump — short-circuiting is\n\
+        \x20   /// control flow to it, not a decision.\n\
+        \x20   fn {m}(\n\
+        \x20       &mut self,\n\
+        \x20       lhs: Self::Out,\n\
+        \x20       {arg}rhs: Rc<Expr>,\n\
+        \x20       cx: &mut Ctx,\n\
+        \x20   ) -> Result<Self::Out>\n\
+        \x20   where\n\
+        \x20       Self: Handlers + Sized;",
+        e.op.literal,
+    );
 }
 
 /// `assign` and `compound_assign`.
@@ -338,45 +447,11 @@ fn emit_method(
                 // place-taking signature, so a per-operator method would be
                 // both wrong and duplicated.
             } else if lazy_rhs(e.op) {
-                // The lazy signature is the point of the whole OpTree detour:
-                // `rhs` arrives unevaluated, so the handler decides.
-                // **Required, not defaulted.** Every other role defaults to
-                // `unsupported`, which is right for them: a host that never
-                // uses `%` simply never calls `rem`. This one is different.
-                // `&&` is *in the grammar*, so the language has it, and a
-                // default would mean a host that forgot to say what it means
-                // compiles clean and fails at runtime — the exact failure this
-                // toolkit exists to eliminate.
-                //
-                // There cannot be a default: the obvious body needs
-                // `Values::truthy`, and a Rust default cannot require a bound
-                // its trait lacks (`Operators: Values` would force it on a
-                // compiler, which has no values to inspect). So instead of a
-                // wrong default, no default — and rustc names the method.
-                let _ = writeln!(
-                    out,
-                    "\n    /// `{}` — **lazy in its right operand**.\n\
-                    \x20   ///\n\
-                    \x20   /// `rhs` is unevaluated. Running it is what evaluates it; not\n\
-                    \x20   /// running it is what makes this short-circuit.\n\
-                    \x20   ///\n\
-                    \x20   /// **You must write this.** There is no default, because a\n\
-                    \x20   /// wrong one would be silent:\n\
-                    \x20   ///\n\
-                    \x20   /// * An interpreter writes `nh_value_operators!();` once,\n\
-                    \x20   ///   inside its `Operators` impl, and is done.\n\
-                    \x20   /// * A compiler writes its own, emitting a jump — for it,\n\
-                    \x20   ///   short-circuiting is control flow, not a decision.\n\
-                    \x20   fn {m}(\n\
-                    \x20       &mut self,\n\
-                    \x20       lhs: Self::Out,\n\
-                    \x20       {arg}rhs: Rc<Expr>,\n\
-                    \x20       cx: &mut Ctx,\n\
-                    \x20   ) -> Result<Self::Out>\n\
-                    \x20   where\n\
-                    \x20       Self: Handlers + Sized;",
-                    e.op.literal,
-                );
+                // Emitted on `ShortCircuit` instead — see
+                // `emit_short_circuit_trait`. It is the one role whose meaning
+                // depends on the *shape* of the host rather than on the
+                // language, and keeping it out of `Operators` is what lets
+                // `nh_handlers!` write the common case for you.
             } else {
                 let _ = writeln!(
                     out,
@@ -501,81 +576,64 @@ pub fn emit_driver(out: &mut String, ops: &[Emitted<'_>], atom: &str) {
 /// These cannot be trait defaults any more: they need `Values::truthy`, and a
 /// bytecode emitter has no values to inspect. So an interpreter opts in with
 /// one line inside its impl, and a compiler writes jump-emitting versions
-/// instead. Same roles, same signatures, two shapes.
-pub fn emit_value_operators(out: &mut String, ops: &[Emitted<'_>]) {
+/// The interpreter's `ShortCircuit` impl, written into `nh_handlers!`.
+///
+/// **This is the point of the whole `ShortCircuit` split.** `if truthy(lhs) {
+/// rhs } else { lhs }` is not a decision anybody makes — it is what `&&` *means*
+/// for a host that has values. The only host-specific part is `truthy`, which
+/// the user already wrote on [`Values`]. So we write the rest.
+///
+/// Emitted inside the default `nh_handlers!($host)` arm, as its own impl block
+/// so it does not collide with the `Operators` impl the user hand-writes.
+pub fn emit_short_circuit_impl(out: &mut String, ops: &[Emitted<'_>], indent: &str) {
     let grouped = grouped_roles(ops);
-    let lazy: Vec<&Emitted<'_>> = ops
-        .iter()
-        .filter(|e| lazy_rhs(e.op) && !lazy_lhs(e.op))
-        .collect();
-
+    let lazy = lazy_roles(ops);
     if lazy.is_empty() {
         return;
     }
 
     let _ = writeln!(
         out,
-        "/// The standard short-circuit bodies, for a host that implements\n\
-         /// [`Values`].\n\
-         ///\n\
-         /// Paste it inside your `Operators` impl:\n\
-         ///\n\
-         /// ```ignore\n\
-         /// impl Operators for Interp {{\n\
-         ///     nh_value_operators!();\n\
-         ///     fn add(&mut self, l: Value, r: Value) -> Result<Value> {{ .. }}\n\
-         /// }}\n\
-         /// ```\n\
-         ///\n\
-         /// A bytecode emitter skips this and writes its own, because\n\
-         /// short-circuiting compiles to a jump rather than to a decision.\n\
-         #[macro_export]\n\
-         macro_rules! nh_value_operators {{\n\
-        \x20   () => {{"
+        "{indent}impl $crate::generated::dispatch::ShortCircuit for $host {{"
     );
 
-    let mut seen: Vec<String> = Vec::new();
     for e in &lazy {
         let m = ident(&e.role);
-        if seen.contains(&m) {
-            continue;
-        }
-        seen.push(m.clone());
-
         let arg = discriminant_arg(e, &grouped);
-        let arg_ty = if arg.is_empty() {
-            String::new()
+        let (arg_ty, arg_use) = if arg.is_empty() {
+            (String::new(), "")
         } else {
-            // `op: CompareOp,` -> spelled through `$crate` inside a macro.
-            format!(
-                "op: $crate::generated::dispatch::{}Op,\n\x20           ",
-                type_name(&e.role)
+            (
+                format!(
+                    "op: $crate::generated::dispatch::{}Op,\n{indent}        ",
+                    type_name(&e.role)
+                ),
+                "let _ = op;\n\x20           ",
             )
         };
-        let arg_use = if arg.is_empty() { "" } else { "let _ = op;\n\x20           " };
 
         let _ = writeln!(
             out,
-            "        fn {m}(\n\
-            \x20           &mut self,\n\
-            \x20           lhs: <Self as $crate::generated::dispatch::Semantics>::Out,\n\
-            \x20           {arg_ty}rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,\n\
-            \x20           cx: &mut ::nh_runtime::Ctx,\n\
-            \x20       ) -> ::nh_runtime::Result<\n\
-            \x20           <Self as $crate::generated::dispatch::Semantics>::Out,\n\
-            \x20       > {{\n\
-            \x20           {arg_use}use $crate::generated::dispatch::{{Eval, Values}};\n\
-            \x20           if {condition} {{\n\
-            \x20               return Ok(lhs);\n\
-            \x20           }}\n\
-            \x20           rhs.eval(self, cx)\n\
-            \x20       }}",
+            "{indent}    fn {m}(\n\
+             {indent}        &mut self,\n\
+             {indent}        lhs: <Self as $crate::generated::dispatch::Semantics>::Out,\n\
+             {indent}        {arg_ty}rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,\n\
+             {indent}        cx: &mut ::nh_runtime::Ctx,\n\
+             {indent}    ) -> ::nh_runtime::Result<\n\
+             {indent}        <Self as $crate::generated::dispatch::Semantics>::Out,\n\
+             {indent}    > {{\n\
+             {indent}        {arg_use}use $crate::generated::dispatch::{{Eval, Values}};\n\
+             {indent}        if {condition} {{\n\
+             {indent}            return Ok(lhs);\n\
+             {indent}        }}\n\
+             {indent}        rhs.eval(self, cx)\n\
+             {indent}    }}",
             // `Values` is in scope from the `use` above, so method syntax works.
             condition = short_circuit_when(&e.role),
         );
     }
 
-    let _ = writeln!(out, "    }};\n}}\n");
+    let _ = writeln!(out, "{indent}}}");
 }
 
 /// Prefix readings of literals that are also infix operators.

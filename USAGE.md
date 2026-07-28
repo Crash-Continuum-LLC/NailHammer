@@ -511,55 +511,36 @@ Every method defaults to an `unsupported` error, so declining an operator costs
 nothing. `%` stays unimplemented until you want it, and reports itself honestly
 if a program uses it.
 
-### Short-circuiting is one line
+### Short-circuiting is written for you
 
-`&&` and `||` are lazy in their right operand, and they are the only operator
-roles you **must** write — every other role defaults to an `unsupported` error,
-which is right for them: if your language has no `%`, nothing ever calls `rem`.
-`&&` is different. It is *in your grammar*, so your language has it, and a
-default would let you forget to say what it means and find out from a user.
+`&&` and `||` are lazy in their right operand, and you do not implement them.
 
-If you leave them out, rustc says so:
-
-```
-error[E0046]: not all trait items implemented, missing: `or_else`, `and_then`
-```
-
-For an interpreter the fix is one line, pasted into your `Operators` impl:
+Give `Values` a `truthy` — that is the only part specific to your language —
+and `nh_handlers!(Interp)` writes the rest:
 
 ```rust
-impl generated::dispatch::Operators for Interp {
-    crate::nh_value_operators!();
-    fn add(&mut self, l: Value, r: Value) -> Result<Value> { /* ... */ }
+impl generated::dispatch::Values for Interp {
+    fn truthy(&self, v: &Value) -> bool {
+        match v {
+            Value::Bool(b) => *b,
+            Value::Num(n) => *n != 0.0,
+        }
+    }
 }
 ```
 
-They are built on the `truthy` you gave to `Values`:
+That is all. `a && b` now evaluates `b` only when `a` is truthy, `a || b` only
+when it is falsy, and `a ?? b` only when `a` is null (add `is_null` if your
+language has one — it defaults to "never").
 
-```rust
-fn and_then(&mut self, lhs: Out, rhs: Rc<Expr>, cx: &mut Ctx) -> Result<Out> {
-    if !self.truthy(&lhs) { return Ok(lhs); }
-    rhs.eval(self, cx)       // only now is the right operand evaluated
-}
-```
+There is nothing to remember because there is nothing to write. `if truthy(lhs)
+{ rhs } else { lhs }` is not a decision anybody makes; it is what `&&` *means*
+once you have said what truth is.
 
-A lazy operand is an `Rc<Expr>` — located, but not evaluated. It owns the
-expression rather than borrowing your interpreter, so running it inside a method
-that already holds `&mut self` is not a borrow conflict.
+If your language wants different behaviour, that choice lives in the grammar's
+operator table, not in your Rust. A BASIC-style `AND` that is bitwise and strict
+binds `bit_and` instead and gets no laziness at all.
 
-Skip the macro and write your own if your language wants different behaviour. A
-BASIC-style `AND` that is bitwise and strict binds `bit_and` instead and gets no
-laziness at all — that choice lives in the grammar's table, not in your Rust.
-
-> **Why a macro and not a trait default?** The bodies need `Values::truthy`, and
-> a Rust default cannot require a bound its trait does not have. Making `Values`
-> a supertrait would force it on **every** host — including a bytecode emitter,
-> whose `Out` stands for something the target machine computes later and has
-> nothing to inspect.
->
-> Given no *correct* default is possible, the choice was between a wrong one and
-> none. A wrong one is silent, so: none. See
-> [Two shapes](#two-shapes-interpreter-and-compiler).
 
 ### Assignment
 
@@ -641,9 +622,13 @@ pub fn run(host: &mut Interp, _cond: (), body: &Rc<Stmt>, cx: &mut Ctx) -> Resul
 Note the inversion: a compiler calls `.eval()` **once**, to emit a body that will
 run many times. An interpreter calls it once per execution.
 
-**What differs.** A compiler does not implement [`Values`] — there is nothing to
-inspect at build time — and writes its own `and_then`/`or_else`, which emit the
-test rather than performing it:
+**What differs.** A compiler does not implement `Values` — there is nothing to
+inspect at build time — so it opts out and writes its own `ShortCircuit`, which
+emits the test rather than performing it:
+
+```rust
+nh_handlers!(Compiler, without short_circuit);
+```
 
 ```
 a && b     →     <a> · Dup · JumpIfFalse end · Pop · <b> · end:

@@ -25,6 +25,39 @@ descending length (§5.2).
 
 ---
 
+## 0. The standing principle
+
+**Do not bill the tool writer for a decision that always goes the same way.**
+
+Everything in this document is downstream of one bet: writing a language should
+cost you the parts that are *yours* and nothing else. So when a choice always
+skews one way, the generator makes it. What the user writes should be the part
+only they could have written.
+
+Three tests, applied to every generated API:
+
+1. **Is it a decision, or a consequence?** `if truthy(lhs) { rhs } else { lhs }`
+   is not a decision — it is what `&&` *means* for a host with values. The
+   decision is `truthy`. Ask for the decision; write the consequence. (§6.9)
+2. **If they get it wrong, when do they find out?** Compile time, or it does not
+   ship. A default that is silently wrong is worse than no default, and a
+   default that is always right is better than either. (§6.9, §5.5)
+3. **Does the exception have to pay?** If one host in ten needs something else,
+   nine should not carry the ceremony. Make the common case free and let the
+   exception say one thing.
+
+This is why handler parameters are bindings rather than a `Pair` to walk, why
+`nh_handlers!` writes the dispatch, why the operator roles are defaulted, why
+`Place` payloads arrive pre-evaluated, and why `nh init` vendors the runtime.
+Each was once a thing a user would have had to write the same way every time.
+
+Where it has been violated, the tell has been the same: a paragraph of
+documentation explaining what to type. If the docs have to teach a ritual, the
+generator should have performed it. (§6.9 is a worked example of catching this
+one commit too late.)
+
+---
+
 ## 1. Decisions locked
 
 | Question | Decision |
@@ -1627,41 +1660,54 @@ with values can answer. A compiler simply does not implement it.
 
 That forces one consequence: a Rust default body cannot require a bound its
 trait does not have, so the short-circuit bodies cannot stay trait defaults.
-They moved to `nh_value_operators!()`, pasted into an `Operators` impl.
 
-### The first attempt made the failure silent
+### Two wrong answers before the right one
 
-The lazy roles were then defaulted to `unsupported`, like every other role. That
-was wrong, and the ergonomics are what showed it. Measured on the real tree:
-deleting `nh_value_operators!()` from `examples/calc-interp` **compiled without
-a murmur** and failed eight tests at runtime. Forgetting `impl Values` was a
-compile error; forgetting the one line that uses it was not. A toolkit whose
-entire pitch is "grammar change → compile error, not silent misbehaviour" had
-grown a way to silently lose `&&`.
+**First attempt: a macro to paste.** The bodies moved to
+`nh_value_operators!()`, which an interpreter wrote inside its `Operators` impl,
+and the lazy roles defaulted to `unsupported` like every other role.
 
-The asymmetry came from treating a lazy role like `rem`. They are not alike:
+Measured on the real tree: deleting that line from `examples/calc-interp`
+**compiled without a murmur** and failed eight tests at runtime. Forgetting
+`impl Values` was a compile error; forgetting the one line that used it was not.
 
-|  | `rem` (`%`) | `and_then` (`&&`) |
+**Second attempt: make it required.** The lazy roles lost their defaults, so
+rustc said `missing: or_else, and_then`. Correct, and still wrong — it billed
+every interpreter author for a decision nobody makes. `if truthy(lhs) { rhs }
+else { lhs }` is not a choice; it is what `&&` *means* for a host with values.
+The only host-specific part is `truthy`, which was already written.
+
+The tell was in the documentation. USAGE had grown a paragraph explaining which
+line to paste where. **If the docs have to teach a ritual, the generator should
+have performed it** (§0).
+
+### The answer: `nh_handlers!` writes it
+
+The lazy roles moved to their own trait, `ShortCircuit`, for one reason — a
+separate trait means a separate `impl` block, and `nh_handlers!` can write that
+without touching the `Operators` impl the user hand-writes.
+
+```rust
+nh_handlers!(Interp);                          // Handlers + ShortCircuit, from your `truthy`
+nh_handlers!(Compiler, without short_circuit); // I emit code; I'll write my own
+```
+
+Every property holds at once:
+
+| | interpreter | compiler |
 |---|---|---|
-| not in the grammar | never called | — |
-| in the grammar | a host may still never use it | the language **has** it |
-| a default that errors | correct — unused roles cost nothing | a host that forgot compiles clean |
+| short-circuit code written | **none** | its own `impl ShortCircuit` |
+| forgets `impl Values` | compile error | n/a — never needed |
+| forgets the impl after opting out | n/a | compile error |
+| pays for the other shape | no | no |
 
-So a lazy role now has **no default at all**. There cannot be a correct one, and
-given the choice between a wrong default and none, a wrong default is the one
-that fails silently:
+`ShortCircuit`'s methods are still *declared* rather than defaulted, because
+there is no correct default. But nobody meets that declaration except a host
+that said `without short_circuit` — for whom "write it yourself" is the whole
+intent. The common case now costs zero lines, down from two.
 
-```
-error[E0046]: not all trait items implemented, missing: `or_else`, `and_then`
-```
-
-An interpreter answers with `nh_value_operators!();`. A compiler answers with
-its own bodies, emitting `Dup · JumpIfFalse · Pop · <rhs>` — which is what
-`examples/bytecode` does, and what proved `operators::core` has lazy roles after
-this document claimed otherwise.
-
-The cost is one line in an interpreter, announced by rustc. What it buys is that
-the second shape does not have to lie about the first.
+The comma in `(Interp, without short_circuit)` is not styling: Rust's macro
+follow-set forbids a bare word after a `ty` fragment.
 
 ### What stayed different, and should
 

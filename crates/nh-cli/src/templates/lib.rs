@@ -79,7 +79,6 @@ impl generated::dispatch::Operators for Interp {
     // in a macro rather than in trait defaults because they need `Values`, and
     // a bytecode emitter has no values to inspect — it compiles these to jumps
     // instead and writes its own.
-    crate::nh_value_operators!();
 
     fn add(&mut self, lhs: Value, rhs: Value) -> nh_runtime::Result<Value> {
         let (a, b) = self.nums(&lhs, &rhs, "+")?;

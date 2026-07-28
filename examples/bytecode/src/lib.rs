@@ -157,50 +157,6 @@ impl generated::dispatch::Operators for Interp {
     fn div(&mut self, _: (), _: ()) -> nh_runtime::Result<()> { self.emit(Op::Div); Ok(()) }
     fn neg(&mut self, _: ()) -> nh_runtime::Result<()> { self.emit(Op::Neg); Ok(()) }
 
-    // `&&` and `||` are lazy in their right operand, so unlike every method
-    // above, `rhs` arrives **unemitted** and this decides where it goes.
-    //
-    // These are *required* — the generated trait gives them no default, because
-    // `&&` is in the grammar and a host that quietly did the wrong thing with
-    // it would compile clean and misbehave at runtime. An interpreter satisfies
-    // them with `nh_value_operators!();`. A compiler cannot: there is no value
-    // to test at build time, so it emits the test instead.
-    //
-    //     a && b   ->   <a> · Dup · JumpIfFalse end · Pop · <b> · end:
-    //
-    // `Dup` is there because if `a` is falsy it *is* the result, so the test
-    // must not consume it.
-    fn and_then(
-        &mut self,
-        _lhs: (),
-        rhs: std::rc::Rc<generated::ast::Expr>,
-        cx: &mut nh_runtime::Ctx,
-    ) -> nh_runtime::Result<()> {
-        use generated::dispatch::Eval;
-        self.emit_dup();
-        let skip = self.emit_jump_if_false();
-        self.emit_pop();
-        rhs.eval(self, cx)?;
-        self.patch_to_here(skip);
-        Ok(())
-    }
-
-    /// `a || b` — the mirror image: keep `a` when it is *truthy*.
-    fn or_else(
-        &mut self,
-        _lhs: (),
-        rhs: std::rc::Rc<generated::ast::Expr>,
-        cx: &mut nh_runtime::Ctx,
-    ) -> nh_runtime::Result<()> {
-        use generated::dispatch::Eval;
-        self.emit_dup();
-        let skip = self.emit_jump_if_true();
-        self.emit_pop();
-        rhs.eval(self, cx)?;
-        self.patch_to_here(skip);
-        Ok(())
-    }
-
     fn assign(
         &mut self,
         place: generated::place::Place<'_, ()>,
@@ -220,4 +176,49 @@ impl generated::dispatch::Operators for Interp {
     }
 }
 
-crate::nh_handlers!(Interp);
+/// `&&` and `||`, compiled.
+///
+/// This is the one impl an interpreter never writes: `nh_handlers!` would have
+/// written it from `Values::truthy`, but there is no value to test at build
+/// time. So this host says `without short_circuit` below and emits the test:
+///
+/// ```text
+/// a && b   ->   <a> · Dup · JumpIfFalse end · Pop · <b> · end:
+/// ```
+///
+/// `Dup` is there because if `a` is falsy it *is* the result, so the test must
+/// not consume it.
+impl generated::dispatch::ShortCircuit for Interp {
+    fn and_then(
+        &mut self,
+        _lhs: (),
+        rhs: std::rc::Rc<generated::ast::Expr>,
+        cx: &mut nh_runtime::Ctx,
+    ) -> nh_runtime::Result<()> {
+        use generated::dispatch::Eval;
+        self.emit_dup();
+        let skip = self.emit_jump_if_false();
+        self.emit_pop();
+        rhs.eval(self, cx)?;
+        self.patch_to_here(skip);
+        Ok(())
+    }
+
+    /// The mirror image: keep `a` when it is *truthy*.
+    fn or_else(
+        &mut self,
+        _lhs: (),
+        rhs: std::rc::Rc<generated::ast::Expr>,
+        cx: &mut nh_runtime::Ctx,
+    ) -> nh_runtime::Result<()> {
+        use generated::dispatch::Eval;
+        self.emit_dup();
+        let skip = self.emit_jump_if_true();
+        self.emit_pop();
+        rhs.eval(self, cx)?;
+        self.patch_to_here(skip);
+        Ok(())
+    }
+}
+
+crate::nh_handlers!(Interp, without short_circuit);
