@@ -634,3 +634,66 @@ fn a_changed_parameter_count_is_left_to_the_compiler() {
     let stale = "pub fn run<H: Handlers>(host: &mut H, name: &str, cx: &mut Ctx) -> Result<H::Out> {}";
     assert_eq!(nh_codegen::drift::check(named, stale), None);
 }
+
+// ---------------------------------------------------------------------------
+// Two shapes: interpreter and compiler
+// ---------------------------------------------------------------------------
+
+/// `truthy` is a question only a host with *values* can answer. A bytecode
+/// emitter's `Out` stands for something the target machine computes later, so
+/// there is nothing to inspect — and requiring it of every host forced a
+/// compiler to write a `truthy` it could never answer and must never be asked.
+#[test]
+fn semantics_does_not_demand_what_a_compiler_cannot_answer() {
+    let g = gen(DOCS);
+    let dispatch = file(&g, "generated/dispatch.rs");
+
+    // `Semantics` is the minimum every host can meet.
+    let semantics = &dispatch[dispatch.find("pub trait Semantics").unwrap()..];
+    let semantics = &semantics[..semantics.find("\n}").unwrap()];
+    assert!(semantics.contains("type Out"), "{semantics}");
+    assert!(
+        !semantics.contains("fn truthy"),
+        "a compiler cannot answer this:\n{semantics}"
+    );
+
+    assert!(dispatch.contains("pub trait Values: Semantics"), "{dispatch}");
+    assert!(dispatch.contains("fn truthy(&self, value: &Self::Out) -> bool;"), "{dispatch}");
+}
+
+/// The short-circuit bodies move to an opt-in macro, because a trait default
+/// cannot require a bound the trait does not have.
+#[test]
+fn short_circuiting_is_opt_in_rather_than_defaulted() {
+    let g = gen(DOCS);
+    let dispatch = file(&g, "generated/dispatch.rs");
+
+    assert!(dispatch.contains("macro_rules! nh_value_operators"), "{dispatch}");
+    assert!(
+        dispatch.contains("if self.truthy(&lhs)") && dispatch.contains("if !self.truthy(&lhs)"),
+        "`||` stops on a truthy left and `&&` on a falsy one; getting that \
+         backwards is silent:\n{dispatch}"
+    );
+
+    // The trait default must not reach for truthiness.
+    let trait_body = &dispatch[dispatch.find("pub trait Operators").unwrap()
+        ..dispatch.find("macro_rules! nh_value_operators").unwrap()];
+    assert!(
+        !trait_body.contains("self.truthy"),
+        "a default cannot call `Values`; not every host has it:\n{trait_body}"
+    );
+    assert!(trait_body.contains("Error::unsupported"), "{trait_body}");
+}
+
+/// A grammar with no lazy operators needs no macro at all.
+#[test]
+fn a_table_without_lazy_operators_emits_no_macro() {
+    let g = gen(BASIC);
+    let dispatch = file(&g, "generated/dispatch.rs");
+    // The name appears in `Values`'s own doc comment, so this checks for the
+    // macro itself rather than any mention of it.
+    assert!(
+        !dispatch.contains("macro_rules! nh_value_operators"),
+        "nothing short-circuits here:\n{dispatch}"
+    );
+}

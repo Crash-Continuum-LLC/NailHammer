@@ -45,6 +45,9 @@ pub struct Interp {
 
 impl generated::dispatch::Semantics for Interp {
     type Out = Value;
+}
+
+impl generated::dispatch::Values for Interp {
 
     fn truthy(&self, value: &Value) -> bool {
         match value {
@@ -68,6 +71,12 @@ impl Interp {
 // Only the roles this language has. `assign`, `rem`, and the rest keep their
 // defaulted errors, and nothing had to be written to decline them.
 impl generated::dispatch::Operators for Interp {
+    // The standard short-circuit bodies for `&&`, `||` and friends. They live
+    // in a macro rather than in trait defaults because they need `Values`, and
+    // a bytecode emitter has no values to inspect — it compiles these to jumps
+    // instead and writes its own.
+    crate::nh_value_operators!();
+
     fn add(&mut self, lhs: Value, rhs: Value) -> nh_runtime::Result<Value> {
         let (a, b) = self.nums(&lhs, &rhs, "+")?;
         Ok(Value::Num(a + b))
@@ -98,7 +107,7 @@ impl generated::dispatch::Operators for Interp {
         }
     }
     fn not(&mut self, operand: Value) -> nh_runtime::Result<Value> {
-        let t = <Self as generated::dispatch::Semantics>::truthy(self, &operand);
+        let t = <Self as generated::dispatch::Values>::truthy(self, &operand);
         Ok(Value::Bool(!t))
     }
 

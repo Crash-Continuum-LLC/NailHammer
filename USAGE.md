@@ -10,11 +10,12 @@ to write and why. For the reasoning behind the design, see
 2. [Your first grammar](#your-first-grammar)
 3. [Grammar reference](#grammar-reference)
 4. [Operators](#operators)
-5. [Writing handlers](#writing-handlers)
-6. [Control flow](#control-flow)
-7. [Errors and recovery](#errors-and-recovery)
-8. [Checking your grammar](#checking-your-grammar)
-9. [Reading the generated `.pest`](#reading-the-generated-pest)
+5. [Two shapes: interpreter and compiler](#two-shapes-interpreter-and-compiler)
+6. [Writing handlers](#writing-handlers)
+7. [Control flow](#control-flow)
+8. [Errors and recovery](#errors-and-recovery)
+9. [Checking your grammar](#checking-your-grammar)
+10. [Reading the generated `.pest`](#reading-the-generated-pest)
 
 ---
 
@@ -509,10 +510,19 @@ Every method defaults to an `unsupported` error, so declining an operator costs
 nothing. `%` stays unimplemented until you want it, and reports itself honestly
 if a program uses it.
 
-### Short-circuiting is free
+### Short-circuiting is one line
 
-`&&` and `||` are lazy in their right operand. The generated defaults are already
-correct, built on the `truthy` you gave to `Semantics`:
+`&&` and `||` are lazy in their right operand. Paste the standard bodies into
+your `Operators` impl:
+
+```rust
+impl generated::dispatch::Operators for Interp {
+    crate::nh_value_operators!();
+    fn add(&mut self, l: Value, r: Value) -> Result<Value> { /* ... */ }
+}
+```
+
+They are built on the `truthy` you gave to `Values`:
 
 ```rust
 fn and_then(&mut self, lhs: Out, rhs: Rc<Expr>, cx: &mut Ctx) -> Result<Out> {
@@ -525,9 +535,15 @@ A lazy operand is an `Rc<Expr>` — located, but not evaluated. It owns the
 expression rather than borrowing your interpreter, so running it inside a method
 that already holds `&mut self` is not a borrow conflict.
 
-Override these only if your language wants different behaviour. A BASIC-style
-`AND` that is bitwise and strict binds `bit_and` instead and gets no laziness at
-all. That choice lives in the grammar's table, not in your Rust.
+Skip the macro and write your own if your language wants different behaviour. A
+BASIC-style `AND` that is bitwise and strict binds `bit_and` instead and gets no
+laziness at all — that choice lives in the grammar's table, not in your Rust.
+
+> **Why a macro and not a trait default?** The bodies need `Values::truthy`, and
+> a Rust default cannot require a bound its trait does not have. Making `Values`
+> a supertrait would force it on **every** host — including a bytecode emitter,
+> whose `Out` stands for something the target machine computes later and has
+> nothing to inspect. See [Two shapes](#two-shapes-interpreter-and-compiler).
 
 ### Assignment
 
@@ -565,6 +581,58 @@ An assignment target is never evaluated *as a value* either. Assignment is lazy
 in its left operand, so `fresh = 3` creates `fresh` instead of failing to read it.
 
 ---
+
+## Two shapes: interpreter and compiler
+
+The same grammar and the same handler signatures build either. The structural
+difference is one line:
+
+```rust
+type Out = Value;   // interpreter: what a node evaluated to
+type Out = ();      // compiler: nothing is returned; results live on the stack
+```
+
+**Eager parameters give a compiler stack order for free.** They are evaluated
+left to right *before* the handler runs, and for a compiler "evaluated" means
+"emitted" — so operand code lands before the operator's instruction:
+
+```
+2 + 3 * 4     ->    Push 2 · Push 3 · Push 4 · Mul · Add
+```
+
+Precedence ends up in the instruction *order*, and `add` is one line:
+`self.emit(Op::Add)`.
+
+**`lazy` reads differently in each, and works identically.**
+
+| | interpreter | compiler |
+|---|---|---|
+| eager binding | already evaluated | already **emitted** |
+| `lazy` binding | run it **when** I say | emit it **where** I say |
+
+Without `lazy` a body would already be emitted before the handler could put a
+jump in front of it:
+
+```rust
+pub fn run(host: &mut Interp, _cond: (), body: &Rc<Stmt>, cx: &mut Ctx) -> Result<()> {
+    let jump = host.emit_jump_if_false();   // cond's code is already emitted
+    body.eval(host, cx)?;                   // emits the body here
+    host.patch_to_here(jump);               // now its length is known
+    Ok(())
+}
+```
+
+Note the inversion: a compiler calls `.eval()` **once**, to emit a body that will
+run many times. An interpreter calls it once per execution.
+
+**What differs.** A compiler does not implement [`Values`] — there is nothing to
+inspect at build time — and writes its own `and_then`/`or_else` that emit jumps.
+Non-local control flow differs too: an interpreter unwinds with
+`Error::Signal`, while a compiler emits a jump and records its index for
+patching, which is host state rather than a signal.
+
+A third shape falls out of the same model: `type Out = Type` with handlers that
+check rather than compute is a typechecker.
 
 ## Writing handlers
 

@@ -17,7 +17,7 @@ use nh_operators::OperatorTable;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-use crate::operators::{emit_discriminants, emit_driver, emit_trait, emitted};
+use crate::operators::{emit_discriminants, emit_driver, emit_trait, emit_value_operators, emitted};
 use crate::params::{params, Param};
 use crate::{ident, type_name, Options, HEADER};
 
@@ -78,6 +78,7 @@ pub fn generate(lowered: &Lowered, table: &OperatorTable, opts: &Options) -> Str
             })
             .unwrap_or_else(|| "atom".to_string());
         emit_driver(&mut out, &ops, &atom);
+        emit_value_operators(&mut out, &ops);
     }
     emit_macro(&mut out, lowered, opts);
 
@@ -95,11 +96,24 @@ fn emit_semantics(out: &mut String) {
          // ---------------------------------------------------------------------------\n\n\
          pub trait Semantics {{\n\
         \x20   /// What evaluating a node produces.\n\
-        \x20   type Out;\n\n\
-        \x20   /// Truthiness, used by the short-circuit operator defaults.\n\
+        \x20   type Out;\n\
+         }}\n\n\
+         /// A host whose `Out` is a **value it can ask questions about**.\n\
+         ///\n\
+         /// An interpreter implements this: `Out` is a value, and truthiness is\n\
+         /// a question it can answer. A compiler does not: its `Out` is a\n\
+         /// placeholder for something the *target machine* will compute later,\n\
+         /// so there is nothing to inspect at build time.\n\
+         ///\n\
+         /// It is separate from [`Semantics`] for exactly that reason. Requiring\n\
+         /// it of every host would force a bytecode emitter to write a `truthy`\n\
+         /// it can never answer and must never be asked.\n\
+         pub trait Values: Semantics {{\n\
+        \x20   /// Used by the short-circuit operator bodies in\n\
+        \x20   /// `nh_value_operators!`.\n\
         \x20   fn truthy(&self, value: &Self::Out) -> bool;\n\n\
-        \x20   /// Nullness, used by the `??` default. Languages without a null\n\
-        \x20   /// need not override it.\n\
+        \x20   /// Used by the `??` body. Languages without a null need not\n\
+        \x20   /// override it.\n\
         \x20   fn is_null(&self, value: &Self::Out) -> bool {{\n\
         \x20       let _ = value;\n\
         \x20       false\n\
