@@ -17,6 +17,10 @@ fn nh() -> Command {
 
 /// Scaffolds into a fresh temp directory and returns its path.
 fn scaffold(name: &str) -> PathBuf {
+    scaffold_with(name, &[])
+}
+
+fn scaffold_with(name: &str, extra: &[&str]) -> PathBuf {
     let dir = std::env::temp_dir()
         .join("nh-init-tests")
         .join(format!("{name}-{}", std::process::id()));
@@ -25,6 +29,7 @@ fn scaffold(name: &str) -> PathBuf {
 
     let out = nh()
         .args(["init", dir.to_str().unwrap(), "--name", name])
+        .args(extra)
         .output()
         .expect("running nh init");
 
@@ -493,5 +498,58 @@ fn help_lists_every_flag_and_claims_nothing_untrue() {
     assert!(
         !help.contains("Not yet implemented"),
         "every milestone is complete; the help should not say otherwise:\n{help}"
+    );
+}
+
+/// `--async` sets a project up for async work in handlers, and a project
+/// without it must not pay for tokio at all.
+#[test]
+fn async_scaffolds_differ_only_where_they_should() {
+    let plain = scaffold("plainproj");
+    for f in ["Cargo.toml", "src/main.rs", "src/lib.rs"] {
+        assert!(
+            !read(&plain, f).contains("tokio"),
+            "a plain scaffold must not mention tokio in {f}"
+        );
+    }
+
+    let dir = scaffold_with("asyncproj", &["--async"]);
+
+    // `rt-multi-thread` is not optional: `block_in_place` panics on the
+    // current-thread runtime, so the feature and the flavor must agree.
+    let toml = read(&dir, "Cargo.toml");
+    assert!(toml.contains("tokio"), "{toml}");
+    assert!(toml.contains("rt-multi-thread"), "{toml}");
+
+    let main = read(&dir, "src/main.rs");
+    assert!(main.contains(r#"#[tokio::main(flavor = "multi_thread")]"#), "{main}");
+    assert!(main.contains("async fn main"), "{main}");
+
+    // The helper exists, and uses `block_in_place` rather than the spelling
+    // that panics inside a runtime.
+    let lib = read(&dir, "src/lib.rs");
+    assert!(lib.contains("pub fn block_on"), "{lib}");
+    assert!(
+        lib.contains("block_in_place"),
+        "`Handle::block_on` alone panics inside a runtime:\n{lib}"
+    );
+}
+
+/// ...and the async scaffold has to actually build and run.
+#[test]
+#[ignore = "compiles a scaffolded project"]
+fn an_async_scaffold_builds_and_runs() {
+    let dir = scaffold_with("asyncbuild", &["--async"]);
+    let out = Command::new(env!("CARGO"))
+        .current_dir(&dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .args(["run", "--quiet"])
+        .output()
+        .expect("running cargo");
+
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).lines().collect::<Vec<_>>(),
+        vec!["28", "22", "5", "14"],
     );
 }
