@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: cargo test + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+      # Standing constraint: generated code is read by the user's linter, and a
+      # warning they cannot act on is a defect. `-D warnings` holds that line.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # `nh init` scaffolds a project that must compile and run. These are
+      # `#[ignore]`d locally because they invoke cargo recursively and are slow.
+      - name: Scaffold end-to-end
+        run: cargo test -p nh-cli -- --ignored
+
+  grammars:
+    name: every shipped grammar checks clean
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the CLI
+        run: cargo build -p nh-cli
+
+      # A grammar that stops checking clean is a regression in the analyser,
+      # the lowerer, or the grammar. Any of the three is worth failing for.
+      - name: Check
+        run: |
+          set -euo pipefail
+          for f in example.nh examples/*.nh examples/*/*.nh; do
+            # common_lex.nh is a fragment with no `grammar` declaration, so it
+            # is only meaningful when imported.
+            [ "$(basename "$f")" = common_lex.nh ] && continue
+            echo "--- $f"
+            ./target/debug/nh check "$f" --quiet --deny-warnings
+          done
+
+      # The checked-in generated code must match what the current generator
+      # produces, or the worked examples silently drift from the toolkit.
+      - name: Generated output is current
+        run: |
+          set -euo pipefail
+          for e in config calc-interp basic-interp; do
+            g=$(ls examples/$e/*.nh)
+            ./target/debug/nh build "$g" \
+              -o "examples/$e/src/$(basename "$g" .nh).pest" --rust "examples/$e/src"
+          done
+          ./target/debug/nh build examples/selfhost/nh.nh -o examples/selfhost/nh.pest
+          if ! git diff --quiet; then
+            echo "::error::generated output is stale — re-run nh build and commit"
+            git diff --stat
+            exit 1
+          fi
+
+  extension:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - run: npm ci
+
+      # Tokenises real `.nh` with the same engine VS Code uses, checks the
+      # completion logic, verifies every grammar scope has a colour, then
+      # type-checks against the real VS Code and Node APIs.
+      - run: npm test
+
+      - name: Package
+        run: npx --yes @vscode/vsce@latest package --no-dependencies --allow-missing-repository
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nailhammer-vsix
+          path: editors/vscode/*.vsix
