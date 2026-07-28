@@ -22,6 +22,7 @@ pub mod dispatch;
 pub mod operators;
 pub mod params;
 pub mod place;
+mod run;
 pub mod stubs;
 pub mod views;
 
@@ -54,8 +55,13 @@ pub struct Generated {
 }
 
 /// Options that cannot be inferred from the grammar.
+#[derive(Clone)]
 pub struct Options {
     /// Rust path to the pest parser type produced by `#[derive(Parser)]`.
+    ///
+    /// Overridden from the grammar's own name by [`generate`] — `grammar Calc;`
+    /// gives `crate::CalcParser` — so a caller only sets this for a project
+    /// that names its parser something else.
     pub parser_type: String,
     /// Module path the generated code lives under.
     pub module_path: String,
@@ -81,7 +87,18 @@ pub const HEADER: &str = "\
 ";
 
 pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Options) -> Generated {
-    let _ = ast;
+    // `grammar Calc;` means `#[derive(Parser)] pub struct CalcParser`, which is
+    // what the scaffold writes and what every example uses. Deriving it here
+    // rather than making both callers pass it is the same rule as everything
+    // else (DESIGN §0): a value that can be worked out is not a question.
+    let mut derived = opts.clone();
+    if opts.parser_type == Options::default().parser_type {
+        if let Some(name) = &ast.grammar_name {
+            derived.parser_type = format!("crate::{}Parser", name.value);
+        }
+    }
+    let opts = &derived;
+
     let mut files = Vec::new();
 
     files.push(GeneratedFile {
@@ -105,6 +122,11 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
         policy: Policy::Generated,
     });
     files.push(GeneratedFile {
+        path: "generated/run.rs".into(),
+        contents: run::generate(lowered, opts),
+        policy: Policy::Generated,
+    });
+    files.push(GeneratedFile {
         path: "generated/place.rs".into(),
         contents: place::generate(lowered, opts),
         policy: Policy::Generated,
@@ -114,10 +136,11 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
         contents: format!(
             "{HEADER}\n\
              pub mod ast;\npub mod diagnostics;\npub mod dispatch;\n\
-             pub mod place;\npub mod views;\n\n\
+             pub mod place;\npub mod run;\npub mod views;\n\n\
              pub use diagnostics::{{render_parse_error, syntax_errors}};\n\
              pub use dispatch::{{Eval, Handlers}};\n\
-             pub use place::Place;\n"
+             pub use place::Place;\n\
+             pub use run::eval_source;\n"
         ),
         policy: Policy::Generated,
     });

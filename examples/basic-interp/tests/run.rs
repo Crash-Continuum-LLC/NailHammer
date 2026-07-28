@@ -4,26 +4,28 @@
 //! that a `FOR` body is not evaluated until the loop forces it, and is forced
 //! exactly as many times as the loop says.
 
-use basic_interp::{generated, BasicParser, Interp, Rule, Value};
-use nh_runtime::{Ctx, SourceMap, Span};
-use pest::Parser;
+use basic_interp::{generated, Interp, Value};
+use nh_runtime::{Ctx, SourceMap};
 
 fn run(source: &str) -> Result<Interp, String> {
     let mut sources = SourceMap::new();
     let file = sources.add("t.bas", source);
-    let text = sources.text(file).to_string();
-
-    let mut pairs = BasicParser::parse(Rule::program, &text).map_err(|e| e.to_string())?;
-    let program = pairs.next().expect("one program pair");
-
     let mut cx = Ctx::new(sources);
-    cx.enter(Span::new(file, 0, 0));
     let mut interp = Interp::default();
 
-    let tree = generated::ast::build_program(program, file).map_err(|e| cx.render(&e))?;
-    generated::dispatch::eval_program(&mut interp, &tree, &mut cx)
-        .map(|_| interp)
-        .map_err(|e| cx.render(&e))
+    match generated::eval_source(&mut interp, &mut cx, file) {
+        Ok(_) => Ok(interp),
+        Err(errors) => Err(render(&errors, &cx)),
+    }
+}
+
+/// Every diagnostic, the way the binary would print them.
+fn render(errors: &[nh_runtime::Diagnostic], cx: &Ctx) -> String {
+    errors
+        .iter()
+        .map(|d| d.render(cx.sources()))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn out(source: &str) -> Vec<String> {

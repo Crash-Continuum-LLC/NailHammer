@@ -12,19 +12,17 @@ use pest::Parser;
 fn run(source: &str) -> Result<Interp, String> {
     let mut sources = SourceMap::new();
     let file = sources.add("t.calc", source);
-    let text = sources.text(file).to_string();
-
-    let mut pairs = CalcParser::parse(Rule::program, &text).map_err(|e| e.to_string())?;
-    let program = pairs.next().expect("one program pair");
-
     let mut cx = Ctx::new(sources);
-    cx.enter(Span::new(file, 0, 0));
     let mut interp = Interp::default();
 
-    let tree = generated::ast::build_program(program, file).map_err(|e| cx.render(&e))?;
-    generated::dispatch::eval_program(&mut interp, &tree, &mut cx)
-        .map(|_| interp)
-        .map_err(|e| cx.render(&e))
+    match generated::eval_source(&mut interp, &mut cx, file) {
+        Ok(_) => Ok(interp),
+        Err(errors) => Err(errors
+            .iter()
+            .map(|d| d.render(cx.sources()))
+            .collect::<Vec<_>>()
+            .join("\n")),
+    }
 }
 
 /// Evaluates a single expression.

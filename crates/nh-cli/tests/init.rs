@@ -330,6 +330,92 @@ fn scaffolded_project_builds_and_runs() {
     );
 }
 
+/// `--compiler` scaffolds the other shape, and it produces the **same answers**.
+///
+/// That is the whole claim: one grammar, one set of handler signatures, and the
+/// only difference is `type Out = ()` plus bodies that emit instead of compute.
+/// If these two ever disagree, something has become interpreter-shaped that
+/// should not be.
+#[test]
+#[ignore = "compiles a whole cargo project"]
+fn the_compiler_scaffold_gives_the_same_answers_as_the_interpreter() {
+    let dir = scaffold_with("e2ec", &["--compiler"]);
+    let out = Command::new(env!("CARGO"))
+        .current_dir(&dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .args(["run", "--quiet"])
+        .output()
+        .expect("running cargo in the scaffolded compiler");
+
+    assert!(
+        out.status.success(),
+        "scaffolded compiler failed to build:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(
+        lines,
+        vec!["28", "22", "5", "14"],
+        "the compiled program must compute what the interpreted one did:\n{stdout}"
+    );
+
+    // And it really did compile rather than interpret.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--- bytecode ---") && stderr.contains("Mul"),
+        "no instruction stream in sight:\n{stderr}"
+    );
+}
+
+/// A compiler scaffold implements no `Values`, and says so where it must.
+#[test]
+fn the_compiler_scaffold_asks_no_questions_about_values() {
+    let dir = scaffold_with("shape", &["--compiler"]);
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
+
+    assert!(lib.contains("type Out = ();"), "{lib}");
+    assert!(
+        !lib.contains("impl generated::dispatch::Values"),
+        "a compiler has no values to inspect:\n{lib}"
+    );
+    assert!(
+        lib.contains("nh_handlers!(Interp, without short_circuit)"),
+        "it must opt out, having no `truthy` for the generated impl:\n{lib}"
+    );
+    assert!(
+        lib.contains("impl generated::dispatch::ShortCircuit for Interp"),
+        "and then supply its own:\n{lib}"
+    );
+}
+
+/// Both shapes share `main.rs` bar one arm — including the whole error path,
+/// which is the boilerplate the scaffold exists to provide.
+#[test]
+fn both_shapes_get_the_same_error_handling() {
+    for extra in [&[][..], &["--compiler"][..]] {
+        let dir = scaffold_with(if extra.is_empty() { "mi" } else { "mc" }, extra);
+        let main = std::fs::read_to_string(dir.join("src/main.rs")).unwrap();
+
+        assert!(
+            main.contains("generated::eval_source(&mut interp, &mut cx, file)"),
+            "{extra:?} must use the generated driver:\n{main}"
+        );
+        assert!(
+            main.contains("d.render(cx.sources())"),
+            "{extra:?} must scaffold the formatting loop:\n{main}"
+        );
+        // Parsing, syntax-error collection and tree building are the driver's.
+        for gone in ["::parse(Rule::", "syntax_errors", "build_program", "cx.enter"] {
+            assert!(
+                !main.contains(gone),
+                "{extra:?} still hand-writes `{gone}`:\n{main}"
+            );
+        }
+    }
+}
+
 /// DESIGN.md §5.4: adding an alternative to the grammar breaks the build until
 /// a handler exists.
 ///

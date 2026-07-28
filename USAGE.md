@@ -10,12 +10,13 @@ to write and why. For the reasoning behind the design, see
 2. [Your first grammar](#your-first-grammar)
 3. [Grammar reference](#grammar-reference)
 4. [Operators](#operators)
-5. [Two shapes: interpreter and compiler](#two-shapes-interpreter-and-compiler)
-6. [Writing handlers](#writing-handlers)
-7. [Control flow](#control-flow)
-8. [Errors and recovery](#errors-and-recovery)
-9. [Checking your grammar](#checking-your-grammar)
-10. [Reading the generated `.pest`](#reading-the-generated-pest)
+5. [Running a program](#running-a-program)
+6. [Two shapes: interpreter and compiler](#two-shapes-interpreter-and-compiler)
+7. [Writing handlers](#writing-handlers)
+8. [Control flow](#control-flow)
+9. [Errors and recovery](#errors-and-recovery)
+10. [Checking your grammar](#checking-your-grammar)
+11. [Reading the generated `.pest`](#reading-the-generated-pest)
 
 ---
 
@@ -166,7 +167,7 @@ $ nh check mylang.nh --json
 | `examples/config/` | A complete interpreter. Nine handlers, two or three lines each |
 | `examples/calc-interp/` | Operators end to end, proved by tests |
 | `examples/basic-interp/` | Mini BASIC: loops, subroutines, functions, `GOTO` |
-| `examples/bytecode/` | The same idea compiled instead of interpreted — `type Out = ()` |
+| `examples/bytecode/` | The same idea compiled instead of interpreted — `type Out = ()`. `nh init --compiler` scaffolds one |
 | `examples/selfhost/` | `.nh` describing `.nh` |
 
 ---
@@ -576,6 +577,45 @@ and it is a property of the type rather than a rule you have to remember.
 
 An assignment target is never evaluated *as a value* either. Assignment is lazy
 in its left operand, so `fresh = 3` creates `fresh` instead of failing to read it.
+
+---
+
+## Running a program
+
+You do not write a parse loop.
+
+```rust
+let mut sources = SourceMap::new();
+let file = sources.load(&path)?;              // yours
+let mut cx = Ctx::new(sources);
+let mut interp = Interp::default();
+
+match generated::eval_source(&mut interp, &mut cx, file) {
+    Ok(value) => { /* .. */ }
+    Err(errors) => for d in &errors {          // yours
+        eprint!("{}", d.render(cx.sources()));
+    },
+}
+```
+
+`eval_source` parses, renders a parse error into a sentence, collects the syntax
+errors that recovery got past, builds the owned tree, and evaluates it — in the
+one order that is correct.
+
+**Where the source comes from is yours**, because a file, a socket, and a string
+literal in a test are all legitimate. **Where errors go is yours**, because that
+is a property of your program: a binary prints them, a test asserts on them, an
+editor turns them into squiggles. `eval_source` returns them so all three can
+use the same list.
+
+Everything between those two is the same in every project, so it is not yours to
+write. `nh init` scaffolds both ends for you.
+
+> **`Ok` means the program was clean.** A parse that *recovered* still gives
+> you `Err`, holding the syntax errors, even though everything evaluable was
+> evaluated — a reported typo is not a successful run. Anything your handlers
+> collected is still there on your host, so a partial run can still show its
+> output. The scaffold prints it either way.
 
 ---
 

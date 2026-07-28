@@ -1709,6 +1709,68 @@ intent. The common case now costs zero lines, down from two.
 The comma in `(Interp, without short_circuit)` is not styling: Rust's macro
 follow-set forbids a bare word after a `ty` fragment.
 
+### §0 applied: the run loop
+
+Codifying the principle immediately turned up a bigger violation than the one
+that prompted it. Every project hand-wrote the same seven steps — parse, render
+a parse error, collect recovered syntax errors, seed a `Ctx`, build the tree,
+evaluate, decide an outcome. None is a decision. All were easy to get wrong.
+
+They *were* wrong. Six of the eight parse sites in this repository's own
+examples and tests built a tree and never checked for recovered syntax errors,
+so a program with a reported typo ran anyway:
+
+```
+examples/config/src/main.rs
+examples/basic-interp/tests/run.rs
+examples/bytecode/tests/compile.rs        <- written the same week
+examples/calc-interp/tests/ast.rs
+examples/config/tests/interpret.rs
+examples/basic-interp/tests/ast.rs
+```
+
+`config/src/main.rs` also printed raw pest errors, having quietly missed
+`render_parse_error`. Nobody had made a bad decision; the sequence was simply
+long enough that a copy drifted.
+
+**Generated: `generated/run.rs`.**
+
+```rust
+pub fn eval_source<H: Handlers>(host: &mut H, cx: &mut Ctx, file: FileId)
+    -> Result<H::Out, Vec<Diagnostic>>
+```
+
+**Not generated, deliberately.** Loading the source, because a file, a socket
+and a string literal in a test are all legitimate. Formatting a diagnostic,
+because where errors go is a property of the program, not of the grammar — a
+binary prints, a test asserts, an editor draws squiggles. Returning the list
+lets all three share one path. Both ends are scaffolded by `nh init`, for either
+shape, so nobody writes them from nothing.
+
+Two things fell out of building it:
+
+* **Duplicate diagnostics.** Evaluating an error node reports the same syntax
+  error `syntax_errors` already collected. Every reached recovery point printed
+  twice until the driver deduplicated. `syntax_errors` is the copy kept, being
+  complete — it sees error nodes in code that never ran.
+* **`Error::diagnostic()`.** `Ctx::render` built a `Diagnostic` and immediately
+  threw away the structure. Splitting it out is what lets a terminal failure
+  join the same list as the syntax errors.
+
+`parser_type` also stopped being a caller's job. `grammar Calc;` implies
+`CalcParser`, so `generate` derives it rather than asking — the same rule, one
+level down.
+
+### `nh init --compiler`
+
+The scaffold shipped one shape, which made "one grammar, two shapes" something
+you had to take on trust. `--compiler` writes the same grammar with
+`type Out = ()`, handlers that emit, and its own `ShortCircuit`.
+
+An `#[ignore]`d e2e test builds both and asserts they print **the same four
+numbers**. If they ever diverge, something has become interpreter-shaped that
+should not be.
+
 ### What stayed different, and should
 
 Not everything that differs is a defect. Non-local control flow legitimately
