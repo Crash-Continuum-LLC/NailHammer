@@ -17,7 +17,11 @@ use std::path::{Path, PathBuf};
 /// importantly — exercised by the test suite that scaffolds a project and then
 /// parses its own sample program.
 const GRAMMAR: &str = include_str!("templates/grammar.nh");
-const CARGO_TOML: &str = include_str!("templates/Cargo.toml");
+// `.tpl`, not `Cargo.toml`. Cargo scans for manifests wherever this crate is
+// checked out and tries to parse anything with that name — including a template
+// full of `{{placeholder}}` — so an unsuffixed one prints a parse error on every
+// build of every project that depends on us. Same reason as `build.rs.tpl`.
+const CARGO_TOML: &str = include_str!("templates/Cargo.toml.tpl");
 const LIB_RS: &str = include_str!("templates/lib.rs");
 const MAIN_RS: &str = include_str!("templates/main.rs");
 const README: &str = include_str!("templates/README.md");
