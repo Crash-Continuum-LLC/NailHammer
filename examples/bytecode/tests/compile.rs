@@ -172,3 +172,62 @@ fn the_sample_compiles_and_runs() {
     let src = include_str!("../sample.bc");
     assert_eq!(output(src), ["28", "22", "5", "14", "111"]);
 }
+
+// ---------------------------------------------------------------------------
+// Short-circuiting compiles to a jump
+// ---------------------------------------------------------------------------
+
+/// `&&` and `||` are the roles a compiler *must* write itself — the generated
+/// trait gives them no default, because a wrong one would be silent. For a
+/// compiler there is no value to test at build time, so it emits the test.
+#[test]
+fn and_emits_a_test_rather_than_performing_one() {
+    assert_eq!(
+        compile("1 && 2;"),
+        vec![
+            Op::Push(1.0),
+            Op::Dup,             // the falsy left operand *is* the result
+            Op::JumpIfFalse(5),  // so the test must not consume it
+            Op::Pop,
+            Op::Push(2.0),
+            Op::Pop,
+        ]
+    );
+}
+
+#[test]
+fn or_is_the_mirror_image() {
+    assert_eq!(
+        compile("0 || 2;"),
+        vec![
+            Op::Push(0.0),
+            Op::Dup,
+            Op::JumpIfTrue(5),
+            Op::Pop,
+            Op::Push(2.0),
+            Op::Pop,
+        ]
+    );
+}
+
+/// The point of short-circuiting, checked by running rather than by reading:
+/// the right operand's code is reached only when the left does not decide.
+#[test]
+fn the_right_operand_is_skipped_at_runtime() {
+    assert_eq!(output("print 0 && 7;"), ["0"]);
+    assert_eq!(output("print 1 && 7;"), ["7"]);
+    assert_eq!(output("print 5 || 7;"), ["5"]);
+    assert_eq!(output("print 0 || 7;"), ["7"]);
+}
+
+/// Nesting is where a hand-written jump patcher usually breaks: each `&&` must
+/// patch its own jump, not the innermost one.
+#[test]
+fn nested_short_circuits_patch_their_own_jumps() {
+    assert_eq!(output("print 1 && 1 && 9;"), ["9"]);
+    assert_eq!(output("print 1 && 0 && 9;"), ["0"]);
+    assert_eq!(output("print 0 && 1 && 9;"), ["0"]);
+    assert_eq!(output("print 0 || 0 || 9;"), ["9"]);
+    assert_eq!(output("if 1 && 1 then print 4;"), ["4"]);
+    assert_eq!(output("if 1 && 0 then print 4; print 5;"), ["5"]);
+}

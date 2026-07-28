@@ -1627,11 +1627,41 @@ with values can answer. A compiler simply does not implement it.
 
 That forces one consequence: a Rust default body cannot require a bound its
 trait does not have, so the short-circuit bodies cannot stay trait defaults.
-They moved to `nh_value_operators!()`, pasted into an `Operators` impl. The
-lazy roles now default to `unsupported` like every other role.
+They moved to `nh_value_operators!()`, pasted into an `Operators` impl.
 
-The cost is one line in an interpreter. What it buys is that the second shape
-does not have to lie about the first.
+### The first attempt made the failure silent
+
+The lazy roles were then defaulted to `unsupported`, like every other role. That
+was wrong, and the ergonomics are what showed it. Measured on the real tree:
+deleting `nh_value_operators!()` from `examples/calc-interp` **compiled without
+a murmur** and failed eight tests at runtime. Forgetting `impl Values` was a
+compile error; forgetting the one line that uses it was not. A toolkit whose
+entire pitch is "grammar change → compile error, not silent misbehaviour" had
+grown a way to silently lose `&&`.
+
+The asymmetry came from treating a lazy role like `rem`. They are not alike:
+
+|  | `rem` (`%`) | `and_then` (`&&`) |
+|---|---|---|
+| not in the grammar | never called | — |
+| in the grammar | a host may still never use it | the language **has** it |
+| a default that errors | correct — unused roles cost nothing | a host that forgot compiles clean |
+
+So a lazy role now has **no default at all**. There cannot be a correct one, and
+given the choice between a wrong default and none, a wrong default is the one
+that fails silently:
+
+```
+error[E0046]: not all trait items implemented, missing: `or_else`, `and_then`
+```
+
+An interpreter answers with `nh_value_operators!();`. A compiler answers with
+its own bodies, emitting `Dup · JumpIfFalse · Pop · <rhs>` — which is what
+`examples/bytecode` does, and what proved `operators::core` has lazy roles after
+this document claimed otherwise.
+
+The cost is one line in an interpreter, announced by rustc. What it buys is that
+the second shape does not have to lie about the first.
 
 ### What stayed different, and should
 

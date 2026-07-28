@@ -513,8 +513,19 @@ if a program uses it.
 
 ### Short-circuiting is one line
 
-`&&` and `||` are lazy in their right operand. Paste the standard bodies into
-your `Operators` impl:
+`&&` and `||` are lazy in their right operand, and they are the only operator
+roles you **must** write — every other role defaults to an `unsupported` error,
+which is right for them: if your language has no `%`, nothing ever calls `rem`.
+`&&` is different. It is *in your grammar*, so your language has it, and a
+default would let you forget to say what it means and find out from a user.
+
+If you leave them out, rustc says so:
+
+```
+error[E0046]: not all trait items implemented, missing: `or_else`, `and_then`
+```
+
+For an interpreter the fix is one line, pasted into your `Operators` impl:
 
 ```rust
 impl generated::dispatch::Operators for Interp {
@@ -544,7 +555,11 @@ laziness at all — that choice lives in the grammar's table, not in your Rust.
 > a Rust default cannot require a bound its trait does not have. Making `Values`
 > a supertrait would force it on **every** host — including a bytecode emitter,
 > whose `Out` stands for something the target machine computes later and has
-> nothing to inspect. See [Two shapes](#two-shapes-interpreter-and-compiler).
+> nothing to inspect.
+>
+> Given no *correct* default is possible, the choice was between a wrong one and
+> none. A wrong one is silent, so: none. See
+> [Two shapes](#two-shapes-interpreter-and-compiler).
 
 ### Assignment
 
@@ -627,7 +642,12 @@ Note the inversion: a compiler calls `.eval()` **once**, to emit a body that wil
 run many times. An interpreter calls it once per execution.
 
 **What differs.** A compiler does not implement [`Values`] — there is nothing to
-inspect at build time — and writes its own `and_then`/`or_else` that emit jumps.
+inspect at build time — and writes its own `and_then`/`or_else`, which emit the
+test rather than performing it:
+
+```
+a && b     →     <a> · Dup · JumpIfFalse end · Pop · <b> · end:
+```
 Non-local control flow differs too: an interpreter unwinds with
 `Error::Signal`, while a compiler emits a jump and records its index for
 patching, which is host state rather than a signal.

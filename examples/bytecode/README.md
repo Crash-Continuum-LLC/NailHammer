@@ -89,11 +89,34 @@ fn truthy(&self, _: &()) -> bool {
 A method it could never answer and must never be asked. Building this example
 is what found that, and `tests/compile.rs` is what keeps it found.
 
-The knock-on: short-circuit `&&`/`||` bodies need `truthy`, and a Rust default
-cannot require a bound its trait lacks — so they live in `nh_value_operators!()`
-for an interpreter to paste in, and a compiler writes its own emitting a jump.
-This grammar uses `operators::core`, which has no lazy roles, so neither
-appears here.
+## What it writes instead: `&&` and `||`
+
+`operators::core` gives this language `&&` and `||`, and they are the two roles
+a host **must** write itself — the generated trait gives them no default,
+because a wrong one would be silent.
+
+An interpreter satisfies them with one line, `nh_value_operators!();`, whose
+bodies ask `Values::truthy`. A compiler has no value to ask about at build
+time, so it emits the question:
+
+```
+a && b     →     <a> · Dup · JumpIfFalse end · Pop · <b> · end:
+```
+
+`Dup` is there because if `a` is falsy it *is* the result, so the test must not
+consume it. `||` is the mirror image with `JumpIfTrue`.
+
+This is the same trade as `if`, one level down: short-circuiting is a *decision*
+to an interpreter and *control flow* to a compiler, and `lazy` is what lets one
+signature mean both.
+
+## Why `&&` is required rather than defaulted
+
+A default would be silent. Measured: with one, deleting `nh_value_operators!()`
+from `examples/calc-interp` compiled without a murmur and failed eight tests at
+runtime — the exact failure mode this toolkit exists to eliminate. Now rustc
+says `missing: or_else, and_then` and points at a doc comment telling you which
+of the two lines to write.
 
 ## What legitimately differs
 
