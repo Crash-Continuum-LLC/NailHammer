@@ -7,9 +7,10 @@
 //! than a body that pretends.
 
 use nh_runtime::{Ctx, Result};
+{{name_import}}
 
 use crate::Interp;
 
-pub fn run(_host: &mut Interp, _first: &str, _rest: Vec<()>, _cx: &mut Ctx) -> Result<()> {
+pub fn run(_host: &mut Interp, _first: {{name_ty}}, _rest: Vec<()>, _cx: &mut Ctx) -> Result<()> {
     unreachable!("a parameter list is read for its names, never evaluated")
 }

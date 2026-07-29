@@ -474,8 +474,14 @@ fn run_scaffold(dir: &Path) -> Vec<String> {
 ///
 /// `WHILE cond .. WEND` and `while cond { }` bind the same names to the same
 /// shapes, so `stmt_while.rs` does not know which syntax reached it. That is
-/// not a happy accident — it is what binding by name instead of position buys,
-/// and it is why the picker needs one handler per feature rather than two.
+/// what binding by name instead of position buys, and it is why the picker
+/// needs one handler per feature rather than two.
+///
+/// **One thing does differ, and it is a language difference rather than a
+/// syntax one.** The line-oriented style folds identifier case, as BASIC always
+/// has, so a name arrives as `&Name` — carrying both the folded key and the
+/// spelling as written — where the C style gets a plain `&str`. Everything else
+/// about the signature, and the whole body, is the same file.
 #[test]
 fn both_styles_share_their_handlers() {
     let c = scaffold_with("shc", &["--style", "c", "--with", "all"]);
@@ -498,20 +504,123 @@ fn both_styles_share_their_handlers() {
     cn.sort();
     assert_eq!(cn, bn, "the two styles must need the same handlers");
 
-    // And identically-named handlers must have identical signatures, or
-    // "shared" is only true of the file names.
     // `mod.rs` is the generated module list, not a handler.
-    for name in bn.iter().filter(|n| *n != "line.rs" && *n != "mod.rs") {
-        let sig = |dir: &Path| {
-            std::fs::read_to_string(dir.join("src/handlers").join(name))
-                .expect("a handler")
-                .lines()
-                .find(|l| l.starts_with("pub fn run"))
-                .map(str::to_string)
-                .unwrap_or_else(|| panic!("{name} has no `run`"))
+    let shared: Vec<&String> = bn.iter().filter(|n| *n != "line.rs" && *n != "mod.rs").collect();
+    assert!(shared.len() > 10, "expected a real handler set, got {shared:?}");
+
+    let mut folded = 0;
+    for name in shared {
+        let read = |dir: &Path| {
+            std::fs::read_to_string(dir.join("src/handlers").join(name)).expect("a handler")
         };
-        assert_eq!(sig(&c), sig(&b), "{name} differs between styles");
+        let (cs, bs) = (read(&c), read(&b));
+
+        // Normalising the identifier type is the *only* licence taken here. If
+        // anything else drifts apart, this fails.
+        let normalise = |s: &str| {
+            s.replace("&Name", "&str")
+                .replace("use nh_runtime::Name;\n", "")
+                .replace(".key()", "")
+        };
+        assert_eq!(
+            normalise(&cs),
+            normalise(&bs),
+            "{name} differs between styles by more than how a name is spelled"
+        );
+
+        if bs.contains("&Name") {
+            folded += 1;
+            assert!(
+                cs.contains("&str"),
+                "{name}: the C style does not fold, so it should take `&str`"
+            );
+        }
     }
+
+    assert_eq!(
+        folded, 7,
+        "seven handlers touch a name; if this moves, the folding decision \
+         reached somewhere new and is worth a second look"
+    );
+}
+
+
+/// The line-oriented style folds identifier case, as BASIC always has.
+///
+/// This costs the scaffold something real — a folding token binds as `&Name`
+/// rather than `&str`, so the two styles no longer produce byte-identical
+/// handlers — and it is worth it. A BASIC where `Total` and `total` are
+/// different variables is not a BASIC.
+#[test]
+#[ignore = "compiles two cargo projects"]
+fn the_line_oriented_style_folds_identifier_case() {
+    const PROGRAM: &str = "\
+LET Total = 5
+PRINT total
+LET counter = 2
+PRINT COUNTER * Total
+
+FUNCTION Double(N)
+  RETURN n * 2
+END FUNCTION
+PRINT double(21)
+
+FOR Idx = 1 TO 3
+  PRINT idx
+NEXT
+";
+
+    for (label, extra) in [
+        ("interpreter", &["--style", "basic", "--with", "all"][..]),
+        (
+            "compiler",
+            &["--style", "basic", "--with", "all", "--compiler"][..],
+        ),
+    ] {
+        let dir = scaffold_with(&format!("fold{}", &label[..4]), extra);
+        std::fs::write(dir.join("prog.txt"), PROGRAM).unwrap();
+
+        let out = Command::new(env!("CARGO"))
+            .current_dir(&dir)
+            .env("NH", env!("CARGO_BIN_EXE_nh"))
+            .args(["run", "--quiet", "--", "prog.txt"])
+            .output()
+            .expect("running cargo");
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<&str> = stdout.lines().collect();
+        assert_eq!(
+            lines,
+            // variables, then a call whose *name* and *parameter* both fold,
+            // then a loop variable.
+            vec!["5", "10", "42", "1", "2", "3"],
+            "{label}: case should not matter here:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+/// Folding must not reach the *diagnostics*. `Name` keeps both spellings for
+/// exactly this: reporting `missing` when the programmer typed `Missing` reads
+/// as a bug in their language rather than in their program.
+#[test]
+#[ignore = "compiles a cargo project"]
+fn an_error_reports_the_spelling_that_was_typed() {
+    let dir = scaffold_with("foldmsg", &["--style", "basic"]);
+    std::fs::write(dir.join("prog.txt"), "PRINT Missing\n").unwrap();
+
+    let out = Command::new(env!("CARGO"))
+        .current_dir(&dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .args(["run", "--quiet", "--", "prog.txt"])
+        .output()
+        .expect("running cargo");
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("`Missing`"),
+        "the diagnostic should echo what was written:\n{stderr}"
+    );
 }
 
 /// DESIGN.md §5.4: adding an alternative to the grammar breaks the build until

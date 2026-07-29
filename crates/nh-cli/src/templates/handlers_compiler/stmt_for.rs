@@ -21,6 +21,7 @@
 use std::rc::Rc;
 
 use nh_runtime::{Ctx, Result};
+{{name_import}}
 
 use crate::generated::ast::Block;
 use crate::generated::dispatch::Eval;
@@ -28,7 +29,7 @@ use crate::Interp;
 
 pub fn run(
     host: &mut Interp,
-    var: &str,
+    var: {{name_ty}},
     _from: (),
     _to: (),
     body: &Rc<Block>,
@@ -36,14 +37,14 @@ pub fn run(
 ) -> Result<()> {
     // The bounds are on the stack, `to` on top. A hidden variable holds the
     // limit so the body cannot reach it.
-    let limit = format!(" limit {var}");
+    let limit = format!(" limit {}", var{{key}});
     host.emit_store(&limit);
     host.emit_pop();
-    host.emit_store(var);
+    host.emit_store(var{{key}});
     host.emit_pop();
 
     let top = host.here();
-    host.emit_load(var);
+    host.emit_load(var{{key}});
     host.emit_load(&limit);
     host.emit_le();
     let to_end = host.emit_jump_if_false();
@@ -53,10 +54,10 @@ pub fn run(
 
     // Where `continue` goes: the increment, then back to the test.
     let next = host.here();
-    host.emit_load(var);
+    host.emit_load(var{{key}});
     host.emit_push(1.0);
     host.emit_add();
-    host.emit_store(var);
+    host.emit_store(var{{key}});
     host.emit_pop();
     host.emit_jump_to(top);
 

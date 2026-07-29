@@ -6,12 +6,13 @@
 //! list without a trailing-comma hole.
 
 use nh_runtime::{Ctx, Result};
+{{name_import}}
 
 use crate::{Interp, Value};
 
 pub fn run(
     host: &mut Interp,
-    name: &str,
+    name: {{name_ty}},
     first: Option<Value>,
     rest: Vec<Value>,
     cx: &mut Ctx,
@@ -19,5 +20,5 @@ pub fn run(
     let mut args = Vec::with_capacity(rest.len() + 1);
     args.extend(first);
     args.extend(rest);
-    host.call(name, args, cx)
+    host.call(name{{key}}, args, cx)
 }

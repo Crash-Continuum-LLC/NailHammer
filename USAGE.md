@@ -659,6 +659,40 @@ Change your mind about syntax later and you rewrite the grammar, not the
 handlers. The only file the line-oriented style adds is `line.rs`, because a
 newline needs a rule to hang on where a `;` does not.
 
+### One thing that does differ, and why
+
+`--style basic` folds identifier case, as BASIC always has: `Total` and `total`
+are one variable. `--style c` does not.
+
+That is a difference in the *language*, not the syntax, and it shows up in the
+seven handlers that touch a name. A folding token binds as `&Name` instead of
+`&str`:
+
+```rust
+// --style c
+pub fn run(host: &mut Interp, name: &str,  value: Value, cx: &mut Ctx)
+// --style basic
+pub fn run(host: &mut Interp, name: &Name, value: Value, cx: &mut Ctx)
+```
+
+`Name` keeps **both** spellings, because folding creates two different questions
+and neither answer is safe as a default:
+
+```rust
+name.key()    // "total"  — the folded form, to look it up
+name.text()   // "Total"  — as written, to report it back
+```
+
+Return only the folded form and your error says ``undefined variable `total` ``
+when they typed `Total`, which reads as a bug in your language. Return only the
+raw text and `Total` and `total` become different symbol-table keys, so folding
+silently does nothing. The type makes you choose, once, per use.
+
+The scaffolded handlers already choose correctly — `.key()` to look up, and
+plain `{name}` in diagnostics, which formats as the text. Turning folding on or
+off in your grammar later is one word, and every handler that has to change
+stops compiling until it does.
+
 ---
 
 ## Two shapes: interpreter and compiler

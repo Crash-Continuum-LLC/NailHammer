@@ -355,6 +355,30 @@ fn render(template: &str, opts: &Options) -> String {
                 (true, Style::Basic) => SAMPLE_FNS_BASIC,
             },
         )
+        // How an identifier arrives, and how to turn one into a lookup. A
+        // folding token binds as `&Name`, which keeps both spellings — see the
+        // comment above `token IDENT` in the line-oriented grammar.
+        .replace(
+            "{{name_ty}}",
+            match opts.style {
+                Style::C => "&str",
+                Style::Basic => "&Name",
+            },
+        )
+        .replace(
+            "{{name_import}}",
+            match opts.style {
+                Style::C => "",
+                Style::Basic => "use nh_runtime::Name;\n",
+            },
+        )
+        .replace(
+            "{{key}}",
+            match opts.style {
+                Style::C => "",
+                Style::Basic => ".key()",
+            },
+        )
         .replace("{{host_types}}", &chunks.types)
         .replace("{{host_state}}", &chunks.state)
         .replace("{{host_impl}}", &chunks.methods)

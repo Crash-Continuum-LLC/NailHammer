@@ -8,17 +8,18 @@
 //! a function can be called before it is defined, and can call itself.
 
 use nh_runtime::{Ctx, Result};
+{{name_import}}
 
 use crate::Interp;
 
 pub fn run(
     host: &mut Interp,
-    name: &str,
+    name: {{name_ty}},
     first: Option<()>,
     rest: Vec<()>,
     _cx: &mut Ctx,
 ) -> Result<()> {
     let argc = usize::from(first.is_some()) + rest.len();
-    host.emit_call(name, argc);
+    host.emit_call(name{{key}}, argc);
     Ok(())
 }

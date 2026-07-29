@@ -7,14 +7,14 @@
 use std::rc::Rc;
 
 use nh_runtime::{Ctx, Error, Result};
-
+{{name_import}}
 use crate::generated::ast::Block;
 use crate::generated::dispatch::Eval;
 use crate::{Interp, Value};
 
 pub fn run(
     host: &mut Interp,
-    var: &str,
+    var: {{name_ty}},
     from: Value,
     to: Value,
     body: &Rc<Block>,
@@ -27,7 +27,7 @@ pub fn run(
 
     let mut i = start;
     while i <= end {
-        host.set(var, Value::Num(i));
+        host.set(var{{key}}, Value::Num(i));
         match body.eval(host, cx) {
             Ok(_) => {}
             Err(Error::Signal { label: "break", .. }) => break,

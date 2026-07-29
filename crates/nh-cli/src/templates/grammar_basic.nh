@@ -43,17 +43,22 @@ token EOL    = @ "\r"? "\n";
 token DIGIT  = @ "0".."9";
 token ALPHA  = @ "a".."z" | "A".."Z";
 token NUMBER = @ DIGIT+ ("." DIGIT+)?;
-// Note what is *not* here: `case-insensitive` on the token itself. Keywords
-// fold (above), so `PRINT` and `print` are one word — but variable names do
-// not, so `Total` and `total` are two.
+// `case-insensitive` on the token means `Total` and `total` are one variable,
+// which is what BASIC has always done. It is not the same knob as
+// `keywords case-insensitive` above: that one folds the *keywords*.
 //
-// Add `case-insensitive` here and `total` will find `Total`. It will also stop
-// your handlers compiling: a folding token binds as `&Name` (with `.text()`
-// and `.key()`) rather than `&str`, so every handler that reads a name has to
-// say which one it means. That is the drift check doing its job, not an
-// obstacle — but it is why the scaffold leaves it off, so both syntax styles
-// can share one set of handler files.
-token IDENT  = @ ALPHA (ALPHA | DIGIT)*;
+// This changes what your handlers receive. A folding token binds as `&Name`
+// rather than `&str`, because once two spellings are one variable there are two
+// different questions to ask about a name and no safe default:
+//
+//     name.key()   the folded form, to look it up
+//     name.text()  the spelling as written, to report it back
+//
+// Answer the first with the second and an error says `total` when the
+// programmer typed `Total`, which reads as a bug in your language. Answer the
+// second with the first and folding silently does not work at all. So the type
+// makes you choose, once, at each place that touches a name.
+token IDENT  = @ case-insensitive ALPHA (ALPHA | DIGIT)*;
 
 reserved from IDENT { "LET" "PRINT" "IF" "THEN" "ELSE" "END" "REM"{{reserved}} }
 

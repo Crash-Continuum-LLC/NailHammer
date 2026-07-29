@@ -6,10 +6,11 @@
 //! `Operators::assign` — that split is what `place` in the grammar buys you.
 
 use nh_runtime::{Ctx, Result};
+{{name_import}}
 
 use crate::Interp;
 
-pub fn run(host: &mut Interp, name: &str, _cx: &mut Ctx) -> Result<()> {
-    host.emit_load(name);
+pub fn run(host: &mut Interp, name: {{name_ty}}, _cx: &mut Ctx) -> Result<()> {
+    host.emit_load(name{{key}});
     Ok(())
 }

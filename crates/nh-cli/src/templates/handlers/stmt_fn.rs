@@ -11,20 +11,21 @@
 use std::rc::Rc;
 
 use nh_runtime::{Ctx, Result};
+{{name_import}}
 
 use crate::generated::ast::{Block, ParamList};
 use crate::{Function, Interp, Value};
 
 pub fn run(
     host: &mut Interp,
-    name: &str,
+    name: {{name_ty}},
     params: Option<&Rc<ParamList>>,
     body: &Rc<Block>,
     cx: &mut Ctx,
 ) -> Result<Value> {
     let _ = cx;
     host.fns.insert(
-        name.to_string(),
+        name{{key}}.to_string(),
         Function {
             params: param_names(params),
             body: Rc::clone(body),
@@ -43,8 +44,8 @@ pub fn run(
 fn param_names(params: Option<&Rc<ParamList>>) -> Vec<String> {
     match params {
         None => Vec::new(),
-        Some(list) => std::iter::once(list.first.clone())
-            .chain(list.rest.iter().map(|p| p.name.clone()))
+        Some(list) => std::iter::once(list.first{{key}}.to_string())
+            .chain(list.rest.iter().map(|p| p.name{{key}}.to_string()))
             .collect(),
     }
 }
