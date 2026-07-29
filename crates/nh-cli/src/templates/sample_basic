@@ -1,0 +1,18 @@
+REM A sample {{Name}} program.
+
+LET width  = 4
+LET height = 7
+
+PRINT width * height
+PRINT (width + height) * 2
+
+REM Precedence comes from the table in the grammar - this is 14, not 20.
+PRINT 2 + 3 * 4
+
+REM THEN and ELSE are lazy, so only the chosen branch runs.
+IF width > 3 THEN
+  PRINT 1
+ELSE
+  PRINT 0
+END IF
+{{sample_loops}}{{sample_functions}}

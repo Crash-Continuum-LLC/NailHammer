@@ -1,0 +1,22 @@
+
+REM cond and body are both lazy: a loop re-tests and re-runs.
+LET n = 3
+WHILE n > 0
+  PRINT n
+  LET n = n - 1
+WEND
+
+REM The bounds are eager - fixed when the loop starts.
+FOR i = 1 TO 5
+  IF i = 3 THEN
+    CONTINUE
+  END IF
+  IF i = 5 THEN
+    EXIT
+  END IF
+  PRINT i * 10
+NEXT
+
+DO
+  PRINT 99
+LOOP WHILE 0

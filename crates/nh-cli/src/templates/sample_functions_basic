@@ -1,0 +1,15 @@
+
+REM Defining does not run the body; body is lazy for exactly that reason.
+FUNCTION double(n)
+  RETURN n * 2
+END FUNCTION
+
+FUNCTION fact(n)
+  IF n < 2 THEN
+    RETURN 1
+  END IF
+  RETURN n * fact(n - 1)
+END FUNCTION
+
+PRINT double(21)
+PRINT fact(5)

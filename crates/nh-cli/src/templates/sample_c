@@ -12,3 +12,11 @@ print width;
 
 // Precedence comes from `use operators::core` — this is 14, not 20.
 print 2 + 3 * 4;
+
+// `then` and `else` are `lazy`, so only the chosen branch runs.
+if width > 4 {
+  print 1;
+} else {
+  print 0;
+}
+{{sample_loops}}{{sample_functions}}

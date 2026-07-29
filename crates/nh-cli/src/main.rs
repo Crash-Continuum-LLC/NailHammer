@@ -9,6 +9,7 @@ use std::process::ExitCode;
 
 use nh_syntax::{render, resolve, Ast, Errors, SourceMap};
 
+mod features;
 mod init;
 mod json;
 mod vendor;
@@ -142,12 +143,24 @@ fn report(errors: &Errors, sm: &SourceMap) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn init_cmd(args: &[String]) -> ExitCode {
-    let parsed = match parse_args(args, &["--force", "--async", "--compiler"], &["--name", "--ext"]) {
+    let parsed = match parse_args(args, &["--force", "--async", "--compiler"], &["--name", "--ext", "--style", "--with"]) {
         Ok(p) => p,
         Err(e) => return usage_error(e),
     };
 
     let dir = parsed.path.clone().unwrap_or_else(|| PathBuf::from("."));
+
+    // A person at a prompt gets asked; a script gets the defaults.
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let (style, features) = match features::choose(
+        parsed.value("--style"),
+        parsed.value("--with"),
+        interactive,
+    ) {
+        Ok(pair) => pair,
+        Err(e) => return usage_error(e),
+    };
+
     let opts = match init::Options::new(
         dir,
         parsed.value("--name").map(str::to_string),
@@ -155,6 +168,8 @@ fn init_cmd(args: &[String]) -> ExitCode {
         parsed.has("--force"),
         parsed.has("--async"),
         parsed.has("--compiler"),
+        style,
+        features,
     ) {
         Ok(o) => o,
         Err(e) => return usage_error(e),

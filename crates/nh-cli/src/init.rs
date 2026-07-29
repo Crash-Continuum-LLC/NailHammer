@@ -13,23 +13,51 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::features::{Feature, Features, Style, ARG_RULE};
+
 /// Files are stored as real templates so they can be read, linted, and — most
 /// importantly — exercised by the test suite that scaffolds a project and then
 /// parses its own sample program.
-const GRAMMAR: &str = include_str!("templates/grammar.nh");
+const GRAMMAR_C: &str = include_str!("templates/grammar_c.nh");
+const GRAMMAR_BASIC: &str = include_str!("templates/grammar_basic.nh");
 // `.tpl`, not `Cargo.toml`. Cargo scans for manifests wherever this crate is
 // checked out and tries to parse anything with that name — including a template
 // full of `{{placeholder}}` — so an unsuffixed one prints a parse error on every
 // build of every project that depends on us. Same reason as `build.rs.tpl`.
 const CARGO_TOML: &str = include_str!("templates/Cargo.toml.tpl");
+/// One host per (shape, style). They duplicate a good deal of each other on
+/// purpose: a template is read and edited by whoever scaffolded it, so being
+/// self-contained matters more than being factored.
 const LIB_RS: &str = include_str!("templates/lib.rs");
-/// The same project, `type Out = ()`. See `--compiler`.
+const LIB_RS_BASIC: &str = include_str!("templates/lib_basic.rs");
 const LIB_RS_COMPILER: &str = include_str!("templates/lib_compiler.rs");
+const LIB_RS_COMPILER_BASIC: &str = include_str!("templates/lib_compiler_basic.rs");
+
+fn sample_template(style: Style) -> &'static str {
+    match style {
+        Style::C => SAMPLE_C,
+        Style::Basic => SAMPLE_BASIC,
+    }
+}
+
+fn lib_template(opts: &Options) -> &'static str {
+    match (opts.is_compiler, opts.style) {
+        (false, Style::C) => LIB_RS,
+        (false, Style::Basic) => LIB_RS_BASIC,
+        (true, Style::C) => LIB_RS_COMPILER,
+        (true, Style::Basic) => LIB_RS_COMPILER_BASIC,
+    }
+}
 const MAIN_RS: &str = include_str!("templates/main.rs");
 const README: &str = include_str!("templates/README.md");
 const GITIGNORE: &str = include_str!("templates/gitignore");
 const BUILD_RS: &str = include_str!("templates/build.rs.tpl");
-const SAMPLE: &str = include_str!("templates/sample");
+const SAMPLE_C: &str = include_str!("templates/sample_c");
+const SAMPLE_BASIC: &str = include_str!("templates/sample_basic");
+const SAMPLE_LOOPS_C: &str = include_str!("templates/sample_loops_c");
+const SAMPLE_LOOPS_BASIC: &str = include_str!("templates/sample_loops_basic");
+const SAMPLE_FNS_C: &str = include_str!("templates/sample_functions_c");
+const SAMPLE_FNS_BASIC: &str = include_str!("templates/sample_functions_basic");
 
 /// Hand-written handlers, one per grammar alternative.
 ///
@@ -39,25 +67,55 @@ const SAMPLE: &str = include_str!("templates/sample");
 /// survive regeneration.
 const HANDLERS: &[(&str, &str)] = &[
     ("program", include_str!("templates/handlers/program.rs")),
+    ("block", include_str!("templates/handlers/block.rs")),
+    ("line", include_str!("templates/handlers/line.rs")),
     ("stmt_bind", include_str!("templates/handlers/stmt_bind.rs")),
     ("stmt_print", include_str!("templates/handlers/stmt_print.rs")),
+    ("stmt_iff", include_str!("templates/handlers/stmt_iff.rs")),
+    ("else_tail", include_str!("templates/handlers/else_tail.rs")),
     ("stmt_eval", include_str!("templates/handlers/stmt_eval.rs")),
+    ("stmt_while", include_str!("templates/handlers/stmt_while.rs")),
+    ("stmt_for", include_str!("templates/handlers/stmt_for.rs")),
+    ("stmt_do", include_str!("templates/handlers/stmt_do.rs")),
+    ("stmt_break", include_str!("templates/handlers/stmt_break.rs")),
+    ("stmt_continue", include_str!("templates/handlers/stmt_continue.rs")),
+    ("stmt_fn", include_str!("templates/handlers/stmt_fn.rs")),
+    ("stmt_return", include_str!("templates/handlers/stmt_return.rs")),
     ("primary_num", include_str!("templates/handlers/primary_num.rs")),
     ("primary_var", include_str!("templates/handlers/primary_var.rs")),
+    ("primary_call", include_str!("templates/handlers/primary_call.rs")),
+    ("param_list", include_str!("templates/handlers/param_list.rs")),
+    ("more_param", include_str!("templates/handlers/more_param.rs")),
+    ("more_arg", include_str!("templates/handlers/more_arg.rs")),
 ];
 
-/// The same handlers for a host that emits rather than computes.
+/// The same alternatives for a host that emits rather than computes.
 ///
 /// Compare them side by side: the signatures are identical bar the return type,
 /// and every body does the emitting equivalent of what the interpreter's does.
 /// That similarity is the claim `--compiler` exists to make checkable.
 const HANDLERS_COMPILER: &[(&str, &str)] = &[
     ("program", include_str!("templates/handlers_compiler/program.rs")),
+    ("block", include_str!("templates/handlers_compiler/block.rs")),
+    ("line", include_str!("templates/handlers_compiler/line.rs")),
     ("stmt_bind", include_str!("templates/handlers_compiler/stmt_bind.rs")),
     ("stmt_print", include_str!("templates/handlers_compiler/stmt_print.rs")),
+    ("stmt_iff", include_str!("templates/handlers_compiler/stmt_iff.rs")),
+    ("else_tail", include_str!("templates/handlers_compiler/else_tail.rs")),
     ("stmt_eval", include_str!("templates/handlers_compiler/stmt_eval.rs")),
+    ("stmt_while", include_str!("templates/handlers_compiler/stmt_while.rs")),
+    ("stmt_for", include_str!("templates/handlers_compiler/stmt_for.rs")),
+    ("stmt_do", include_str!("templates/handlers_compiler/stmt_do.rs")),
+    ("stmt_break", include_str!("templates/handlers_compiler/stmt_break.rs")),
+    ("stmt_continue", include_str!("templates/handlers_compiler/stmt_continue.rs")),
+    ("stmt_fn", include_str!("templates/handlers_compiler/stmt_fn.rs")),
+    ("stmt_return", include_str!("templates/handlers_compiler/stmt_return.rs")),
     ("primary_num", include_str!("templates/handlers_compiler/primary_num.rs")),
     ("primary_var", include_str!("templates/handlers_compiler/primary_var.rs")),
+    ("primary_call", include_str!("templates/handlers_compiler/primary_call.rs")),
+    ("param_list", include_str!("templates/handlers_compiler/param_list.rs")),
+    ("more_param", include_str!("templates/handlers_compiler/more_param.rs")),
+    ("more_arg", include_str!("templates/handlers_compiler/more_arg.rs")),
 ];
 
 /// What `main.rs` does with what the run produced. The only part of the binary
@@ -134,6 +192,10 @@ pub struct Options {
     /// Source file extension for the target language.
     pub ext: String,
     pub force: bool,
+    /// Syntactic flavour of the scaffolded language.
+    pub style: Style,
+    /// Optional capabilities: loops, functions.
+    pub features: Features,
     /// Scaffold a bytecode compiler rather than an interpreter.
     ///
     /// The grammar, the generated code, and `eval_source` are the same either
@@ -155,6 +217,8 @@ impl Options {
         force: bool,
         is_async: bool,
         is_compiler: bool,
+        style: Style,
+        features: Features,
     ) -> Result<Self, String> {
         let derived = match &name {
             Some(n) => n.clone(),
@@ -190,6 +254,8 @@ impl Options {
             force,
             is_async,
             is_compiler,
+            style,
+            features,
         })
     }
 }
@@ -239,8 +305,29 @@ fn pascal_case(s: &str) -> String {
         .collect()
 }
 
+/// The grammar template for this style.
+fn grammar_template(style: Style) -> &'static str {
+    match style {
+        Style::C => GRAMMAR_C,
+        Style::Basic => GRAMMAR_BASIC,
+    }
+}
+
 fn render(template: &str, opts: &Options) -> String {
+    let parts = opts.features.grammar_parts(opts.style);
+    let arg_rule = if opts.features.has(Feature::Functions) {
+        ARG_RULE
+    } else {
+        ""
+    };
+    let chunks = opts.features.host_chunks(opts.is_compiler);
+
     template
+        .replace("{{reserved}}", &parts.reserved)
+        .replace("{{stmt_loops}}", &parts.stmt_loops)
+        .replace("{{stmt_functions}}", &parts.stmt_functions)
+        .replace("{{rules_extra}}", &format!("{}{arg_rule}", parts.rules))
+        .replace("{{primary_call}}", &parts.primary)
         .replace("{{name}}", &opts.name)
         .replace("{{Name}}", &opts.grammar)
         .replace("{{ext}}", &opts.ext)
@@ -248,6 +335,27 @@ fn render(template: &str, opts: &Options) -> String {
         .replace("{{tokiomain}}", if opts.is_async { "#[tokio::main(flavor = \"multi_thread\")]\n" } else { "" })
         .replace("{{mainasync}}", if opts.is_async { "async " } else { "" })
         .replace("{{asyncsupport}}", if opts.is_async { ASYNC_SUPPORT } else { "" })
+        .replace(
+            "{{sample_loops}}",
+            match (opts.features.has(Feature::Loops), opts.style) {
+                (false, _) => "",
+                (true, Style::C) => SAMPLE_LOOPS_C,
+                (true, Style::Basic) => SAMPLE_LOOPS_BASIC,
+            },
+        )
+        .replace(
+            "{{sample_functions}}",
+            match (opts.features.has(Feature::Functions), opts.style) {
+                (false, _) => "",
+                (true, Style::C) => SAMPLE_FNS_C,
+                (true, Style::Basic) => SAMPLE_FNS_BASIC,
+            },
+        )
+        .replace("{{host_types}}", &chunks.types)
+        .replace("{{host_state}}", &chunks.state)
+        .replace("{{host_impl}}", &chunks.methods)
+        .replace("{{vm_ops}}", &chunks.vm_ops)
+        .replace("{{vm_exec}}", &chunks.vm_exec)
         .replace(
             "{{produced}}",
             if opts.is_compiler {
@@ -294,18 +402,21 @@ pub fn scaffold(opts: &Options) -> Result<Created, String> {
         .map_err(|e| format!("cannot create `{}`: {e}", handlers.display()))?;
 
     let mut files = vec![
-        (grammar_path.clone(), render(GRAMMAR, opts)),
+        (
+            grammar_path.clone(),
+            render(grammar_template(opts.style), opts),
+        ),
         (opts.dir.join("Cargo.toml"), render(CARGO_TOML, opts)),
         (opts.dir.join("README.md"), render(README, opts)),
         (opts.dir.join(".gitignore"), render(GITIGNORE, opts)),
         (
             opts.dir.join(format!("sample.{}", opts.ext)),
-            render(SAMPLE, opts),
+            render(sample_template(opts.style), opts),
         ),
         (opts.dir.join("build.rs"), render(BUILD_RS, opts)),
         (
             src.join("lib.rs"),
-            render(if opts.is_compiler { LIB_RS_COMPILER } else { LIB_RS }, opts),
+            render(lib_template(opts), opts),
         ),
         (src.join("main.rs"), render(MAIN_RS, opts)),
     ];
@@ -314,7 +425,12 @@ pub fn scaffold(opts: &Options) -> Result<Created, String> {
     } else {
         HANDLERS
     };
-    for (name, body) in handler_set {
+    for name in crate::features::handler_names(opts.style, &opts.features) {
+        let body = handler_set
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, b)| *b)
+            .unwrap_or_else(|| panic!("no template for handler `{name}`"));
         files.push((handlers.join(format!("{name}.rs")), render(body, opts)));
     }
 
@@ -358,7 +474,7 @@ mod tests {
     #[test]
     fn a_scaffold_depends_only_on_pest_and_the_vendored_runtime() {
         let toml = render(CARGO_TOML, &Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false,
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false, Style::C, Features::none(),
         ).unwrap());
 
         assert!(
@@ -378,7 +494,7 @@ mod tests {
     #[test]
     fn the_build_script_shells_out_rather_than_depending_on_the_generator() {
         let build = render(BUILD_RS, &Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false,
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false, Style::C, Features::none(),
         ).unwrap());
 
         assert!(build.contains("Command::new"), "{build}");
@@ -390,7 +506,10 @@ mod tests {
     #[test]
     fn a_keyword_name_is_refused() {
         // `nh init pub` would generate `use pub::...`, which does not compile.
-        let err = Options::new(PathBuf::from("/tmp/pub"), Some("pub".into()), None, false, false, false)
+        let err = Options::new(
+            PathBuf::from("/tmp/pub"), Some("pub".into()), None, false, false, false,
+            Style::C, Features::none(),
+        )
             .expect_err("a Rust keyword cannot name a crate");
         assert!(err.contains("Rust keyword"), "{err}");
         assert!(err.contains("--name"), "{err}");
@@ -404,8 +523,11 @@ mod tests {
 
     #[test]
     fn templates_have_no_unreplaced_placeholders() {
-        let opts = Options::new(PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false).unwrap();
-        for t in [GRAMMAR, CARGO_TOML, MAIN_RS, README, GITIGNORE, SAMPLE] {
+        let opts = Options::new(
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false,
+            Style::C, Features::all(),
+        ).unwrap();
+        for t in [GRAMMAR_C, GRAMMAR_BASIC, CARGO_TOML, MAIN_RS, README, GITIGNORE, SAMPLE_C, SAMPLE_BASIC] {
             let out = render(t, &opts);
             assert!(
                 !out.contains("{{"),

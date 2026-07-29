@@ -1,0 +1,113 @@
+// {{Name}} — a starter grammar, BASIC-flavoured.
+//
+// Line-oriented: a newline ends a statement, and a block is closed by a
+// keyword rather than a brace. `nh init` without `--style basic` writes the
+// same language with braces and semicolons instead.
+//
+// The handlers are the same files either way. Both styles bind the same names
+// to the same shapes, so `handlers/stmt_while.rs` does not know or care which
+// syntax reached it.
+//
+// Every comment below marks something easy to get wrong and hard to discover.
+// Delete them once you have read them.
+
+grammar {{Name}};
+
+// BASIC uses `=` for equality and words for the logical operators, so the
+// C-style presets do not fit. `none` plus a table written from scratch is a
+// first-class way to use this toolkit, not a fallback — run
+// `nh explain {{name}}.nh` to see exactly what this produces.
+use operators::none;
+
+// `PRINT` and `print` are the same word.
+keywords case-insensitive;
+
+precedence {                    // loosest first
+    left    word "OR"  -> or_else;
+    left    word "AND" -> and_then;
+    prefix  word "NOT" -> not;
+    left    "=" | "<>" | "<=" | ">=" | "<" | ">" -> compare;
+    left    "+" | "-";
+    left    word "MOD" -> rem;
+    left    "*" | "/";
+    prefix  "-";
+    atom    atom;
+}
+
+// **Newlines are not whitespace here.** That is the whole of what makes this
+// style line-oriented, and it is one line.
+skip WHITESPACE = " " | "\t";
+skip COMMENT    = ^"REM" (!"\n" ANY)*;
+
+token EOL    = @ "\r"? "\n";
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+// Note what is *not* here: `case-insensitive` on the token itself. Keywords
+// fold (above), so `PRINT` and `print` are one word — but variable names do
+// not, so `Total` and `total` are two.
+//
+// Add `case-insensitive` here and `total` will find `Total`. It will also stop
+// your handlers compiling: a folding token binds as `&Name` (with `.text()`
+// and `.key()`) rather than `&str`, so every handler that reads a name has to
+// say which one it means. That is the drift check doing its job, not an
+// obstacle — but it is why the scaffold leaves it off, so both syntax styles
+// can share one set of handler files.
+token IDENT  = @ ALPHA (ALPHA | DIGIT)*;
+
+reserved from IDENT { "LET" "PRINT" "IF" "THEN" "ELSE" "END" "REM"{{reserved}} }
+
+// ---------------------------------------------------------------------------
+// Rules
+// ---------------------------------------------------------------------------
+
+// ANCHOR YOUR ENTRY RULE. `EOL*` after `SOI` is what lets a program start with
+// a blank line — implicit skipping happens *between* elements, never before the
+// first one, and here newlines are not skipped at all.
+rule program = SOI EOL* stmts:line* EOI -> doc;
+
+// One statement, plus the newline that ends it. Blank lines between statements
+// are the trailing `EOL*`.
+rule line = body:stmt EOL* -> one;
+
+// A group of lines, closed by a keyword rather than a brace.
+//
+// It is nullable — an empty body is legal — and it stops at the first line that
+// is not a statement, which is how `WEND` and `END IF` terminate it without
+// being listed here.
+rule block = stmts:line* -> body;
+
+// `lazy` hands the handler the *unevaluated* node. Everything else arrives
+// already evaluated, which is what you want almost everywhere — but a branch
+// must not run before it is chosen, and a loop body must run more than once.
+rule stmt
+  = "IF" cond:expr "THEN" EOL*
+      lazy then:block
+      lazy otherwise:else_tail?
+    "END" "IF"                                               -> iff
+{{stmt_loops}}{{stmt_functions}}  | "PRINT" value:expr                                       -> print
+  | "LET" name:IDENT "=" value:expr                          -> bind
+  | value:expr                                               -> eval
+  ;
+
+rule else_tail = "ELSE" EOL* lazy body:block -> tail;
+{{rules_extra}}
+// The rule the operator driver folds over.
+rule atom = primary;
+
+// No `place` here. In this style assignment is a *statement* (`LET x = 1`),
+// because `=` already means equality in an expression — which is exactly why
+// BASIC has the `LET` keyword at all.
+rule primary
+  = digits:NUMBER      -> num
+{{primary_call}}  | name:IDENT         -> var
+  | "(" inner:expr ")" -> pass
+  ;
+
+// A statement that does not parse is skipped to the end of the line and the
+// parse carries on, so one typo does not hide every later error.
+recover stmt sync EOL;
+
+// Without this, a missing `)` reports pest's internal rule names. With it, it
+// reports something a user of *your* language can act on.
+expect ")" in primary as "closing parenthesis";
