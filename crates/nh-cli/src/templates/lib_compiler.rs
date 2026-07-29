@@ -64,7 +64,22 @@ pub enum Op {
     JumpIfTrue(usize),
     /// Jump unconditionally. A loop's back-edge and every `break`.
     Jump(usize),
+    /// The whole comparison tier. The discriminant rides along, so one opcode
+    /// covers `<`, `<=`, `>`, `>=`, `==` and `!=`.
+    Compare(generated::dispatch::CompareOp),
 {{vm_ops}}}
+
+/// One call in progress, at run time.
+///
+/// Present even when the scaffold has no functions, so `Load` and `Store` are
+/// written once — adding functions later then changes nothing here. Which is
+/// also why `ret` is allowed to be unused: nothing calls anything yet.
+#[derive(Debug, Default)]
+#[allow(dead_code)]
+struct Frame {
+    ret: usize,
+    locals: std::collections::HashMap<String, f64>,
+}
 
 {{host_types}}/// The compiler.
 #[derive(Debug, Default)]
@@ -153,6 +168,7 @@ impl Interp {
     pub fn run(&self) -> Vec<String> {
         let mut stack: Vec<f64> = Vec::new();
         let mut vars: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let mut frames: Vec<Frame> = Vec::new();
         let mut out = Vec::new();
 
         let mut pc = 0;
@@ -161,10 +177,23 @@ impl Interp {
             pc += 1;
             match op {
                 Op::Push(n) => stack.push(*n),
-                Op::Load(n) => stack.push(*vars.get(n).unwrap_or(&0.0)),
+                // Innermost frame first, then the globals — the same rule the
+                // interpreter's `get`/`set` follow.
+                Op::Load(n) => {
+                    let v = frames
+                        .last()
+                        .and_then(|f| f.locals.get(n))
+                        .or_else(|| vars.get(n))
+                        .copied()
+                        .unwrap_or(0.0);
+                    stack.push(v)
+                }
                 Op::Store(n) => {
                     let v = *stack.last().expect("store needs a value");
-                    vars.insert(n.clone(), v);
+                    match frames.last_mut() {
+                        Some(f) => f.locals.insert(n.clone(), v),
+                        None => vars.insert(n.clone(), v),
+                    };
                 }
                 Op::Add => bin(&mut stack, |a, b| a + b),
                 Op::Sub => bin(&mut stack, |a, b| a - b),
@@ -193,6 +222,20 @@ impl Interp {
                     }
                 }
                 Op::Jump(t) => pc = *t,
+                Op::Compare(op) => {
+                    use generated::dispatch::CompareOp as C;
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    let yes = match op {
+                        C::Lt => a < b,
+                        C::LtEq => a <= b,
+                        C::Gt => a > b,
+                        C::GtEq => a >= b,
+                        C::EqEq => a == b,
+                        C::BangEq => a != b,
+                    };
+                    stack.push(if yes { 1.0 } else { 0.0 })
+                }
 {{vm_exec}}
             }
         }
@@ -241,6 +284,19 @@ impl generated::dispatch::Operators for Interp {
     }
     fn neg(&mut self, _: ()) -> nh_runtime::Result<()> {
         self.emit(Op::Neg);
+        Ok(())
+    }
+
+    /// One instruction for the whole comparison tier: the discriminant that
+    /// picked the spelling is carried into the opcode, exactly as the
+    /// interpreter carries it into a match.
+    fn compare(
+        &mut self,
+        _lhs: (),
+        op: generated::dispatch::CompareOp,
+        _rhs: (),
+    ) -> nh_runtime::Result<()> {
+        self.emit(Op::Compare(op));
         Ok(())
     }
 

@@ -71,6 +71,18 @@ pub enum Op {
     Compare(generated::dispatch::CompareOp),
 {{vm_ops}}}
 
+/// One call in progress, at run time.
+///
+/// Present even when the scaffold has no functions, so `Load` and `Store` are
+/// written once — adding functions later then changes nothing here. Which is
+/// also why `ret` is allowed to be unused: nothing calls anything yet.
+#[derive(Debug, Default)]
+#[allow(dead_code)]
+struct Frame {
+    ret: usize,
+    locals: std::collections::HashMap<String, f64>,
+}
+
 {{host_types}}/// The compiler.
 #[derive(Debug, Default)]
 pub struct Interp {
@@ -158,6 +170,7 @@ impl Interp {
     pub fn run(&self) -> Vec<String> {
         let mut stack: Vec<f64> = Vec::new();
         let mut vars: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let mut frames: Vec<Frame> = Vec::new();
         let mut out = Vec::new();
 
         let mut pc = 0;
@@ -166,10 +179,23 @@ impl Interp {
             pc += 1;
             match op {
                 Op::Push(n) => stack.push(*n),
-                Op::Load(n) => stack.push(*vars.get(n).unwrap_or(&0.0)),
+                // Innermost frame first, then the globals — the same rule the
+                // interpreter's `get`/`set` follow.
+                Op::Load(n) => {
+                    let v = frames
+                        .last()
+                        .and_then(|f| f.locals.get(n))
+                        .or_else(|| vars.get(n))
+                        .copied()
+                        .unwrap_or(0.0);
+                    stack.push(v)
+                }
                 Op::Store(n) => {
                     let v = *stack.last().expect("store needs a value");
-                    vars.insert(n.clone(), v);
+                    match frames.last_mut() {
+                        Some(f) => f.locals.insert(n.clone(), v),
+                        None => vars.insert(n.clone(), v),
+                    };
                 }
                 Op::Add => bin(&mut stack, |a, b| a + b),
                 Op::Sub => bin(&mut stack, |a, b| a - b),
