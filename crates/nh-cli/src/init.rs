@@ -210,6 +210,10 @@ pub struct Options {
 }
 
 impl Options {
+    // Eight arguments, all of them independent answers `nh init` was given.
+    // A builder or an options struct would only move the same eight somewhere
+    // else, and this has exactly one caller.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dir: PathBuf,
         name: Option<String>,

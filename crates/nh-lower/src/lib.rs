@@ -15,6 +15,7 @@
 //!     reachable and `a+++b` munches maximally. Only synthesised alternations
 //!     are sorted; the user's own ordered choices are emitted as written.
 
+pub mod follow;
 pub mod names;
 pub mod pest_syntax;
 pub mod resolve;
@@ -760,12 +761,38 @@ impl<'a> Ctx<'a> {
             let err = self.alloc.alloc(&names::error(&outer));
             let sync = self.expr(&rec.sync, false);
 
+            // Recovery must also stop at anything that could close a construct
+            // this rule is inside, or the error node eats the closer and the
+            // enclosing repetition never terminates. See `follow.rs` — this was
+            // a real bug, and it broke every grammar with a block.
+            let stops: Vec<String> = crate::follow::stops_for(self.ast, &rule.name.value)
+                .into_iter()
+                .map(|stop| {
+                    let e = Expr {
+                        kind: match stop {
+                            crate::follow::Stop::Literal(value) => ExprKind::Literal {
+                                value,
+                                case_insensitive: false,
+                            },
+                            crate::follow::Stop::Ref(name) => ExprKind::Ref(name),
+                        },
+                        span: rec.sync.span,
+                    };
+                    // Lowered the same way the rest of the grammar lowers a
+                    // terminal, so a reserved word keeps its boundary guard.
+                    self.expr(&e, false)
+                })
+                .filter(|lowered| *lowered != sync)
+                .collect();
+
+            let guards: String = stops.iter().map(|s| format!("!({s}) ~ ")).collect();
+
             // `+` guarantees at least one character is consumed, so the error
             // node can never match empty — which would make `stmt*` spin
             // forever. The trailing sync is optional so trailing garbage with
             // no terminator still recovers instead of failing the parse.
             self.generated.push(format!(
-                "{err} = {{ (!({sync}) ~ ANY)+ ~ ({sync})? }}"
+                "{err} = {{ (!({sync}) ~ {guards}ANY)+ ~ ({sync})? }}"
             ));
             let _ = writeln!(out, "{outer} = {{ {ok} | {err} }}");
 

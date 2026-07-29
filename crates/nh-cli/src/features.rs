@@ -165,10 +165,6 @@ impl Features {
         self.0.contains(&f)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = Feature> + '_ {
         self.0.iter().copied()
     }
@@ -548,7 +544,7 @@ fn host_chunk(f: Feature, is_compiler: bool) -> HostChunks {
 
         (Feature::Functions, true) => HostChunks {
             types: COMPILER_FNINFO.into(),
-            state: "    /// Where each function starts, and how many arguments it takes.\n    pub fns: HashMap<String, FnInfo>,\n".into(),
+            state: "    /// Where each function starts, and how many arguments it takes.\n    pub fns: std::collections::HashMap<String, FnInfo>,\n".into(),
             methods: COMPILER_FN_METHODS.into(),
             vm_ops: COMPILER_FN_OPS.into(),
             vm_exec: COMPILER_FN_EXEC.into(),
@@ -711,13 +707,6 @@ pub struct FnInfo {
     pub arity: usize,
 }
 
-/// One call in progress, at run time.
-#[derive(Debug)]
-struct Frame {
-    ret: usize,
-    locals: std::collections::HashMap<String, f64>,
-}
-
 "##;
 
 const COMPILER_FN_METHODS: &str = r##"
@@ -751,7 +740,7 @@ const COMPILER_FN_EXEC: &str = r##"                Op::Call(name, argc) => {
                     }
                     frames.push(Frame {
                         ret: pc,
-                        locals: std::collections::HashMap::new(),
+                        ..Frame::default()
                     });
                     pc = f.addr;
                 }

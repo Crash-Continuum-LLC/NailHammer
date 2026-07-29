@@ -1792,6 +1792,54 @@ assumes an interpreter fails in CI rather than in somebody's project.
 
 ---
 
+### Recovery ate its own terminator
+
+`recover stmt sync ";"` lowered to
+
+```text
+nh_error_stmt = { (!(";") ~ ANY)+ ~ (";")? }
+```
+
+— consume anything that is not the sync token. Including the `}` that closes
+the block the statement is inside. At the closing brace `stmt`'s real body
+fails, the error node matches, and it eats the brace; `stmt*` never terminates
+and the block never closes.
+
+**It broke every grammar with a block**, which is most of them. The three
+examples here escaped because they recover only at the top level, where the
+closer is `EOI` and `ANY` stops there anyway. Nothing caught it until `nh init`
+grew an `if` with a braced body.
+
+Two things made it nastier than the one-line cause suggests:
+
+* **The symptom named the wrong thing.** The user saw *"could not parse this
+  `stmt`"* pointing at their `if`. Nothing anywhere said "recovery".
+* **A test that only checked "did it parse" passed against it.** `program` still
+  matched — recovery swallowed the whole file into one error node and the
+  top-level `stmt*` was content. The regression tests in
+  `crates/nh-lower/tests/recovery.rs` assert on *rule names in the tree*, and
+  four of the seven fail if the fix is removed. Written the obvious way, one
+  did.
+
+**The fix** derives what recovery must stop at, rather than asking:
+
+```text
+nh_error_stmt = { (!(";") ~ !(nh_kw_else) ~ !(nh_kw_while) ~ !("}") ~ ANY)+ ~ (";")? }
+```
+
+`follow.rs` collects every terminal that can follow the recovered rule *or any
+rule that transitively contains it*. Transitivity is the part that is easy to
+get half-right: in the line-oriented style the chain is `stmt` → `line` →
+`block` → `WEND`, and stopping at any depth leaves a loop eating its own
+terminator. A rule reference expands to what that rule can *start* with, so the
+guard is `!(nh_kw_else)` rather than a lookahead that re-parses a whole block —
+and a reserved word keeps its boundary guard, so `wendy` is still a variable.
+
+Asking the author to list the closers would have been the boilerplate §0 exists
+to remove: the grammar already says where its blocks end.
+
+The fix is inert where it was not needed — no shipped `.pest` changed.
+
 ## 11. Resolved questions and residual risks
 
 **All open design questions are closed.** Resolved across v0–v0.4: handler return
