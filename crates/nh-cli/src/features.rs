@@ -656,18 +656,22 @@ const INTERP_CALL: &str = r##"
     /// Recursion works because each call pushes its own frame, and `get`/`set`
     /// look at the innermost one. Nothing here is reentrant by accident — the
     /// frame is popped on every path out, including the error path.
+    /// Note which half of the name each line uses. `{{key}}` finds the
+    /// function; the message says `{{text}}`, so a caller who wrote `Double`
+    /// is told about `Double` and not about `double`.
     pub fn call(
         &mut self,
-        name: &str,
+        name: {{name_ty}},
         args: Vec<Value>,
         cx: &mut nh_runtime::Ctx,
     ) -> nh_runtime::Result<Value> {
-        let Some(f) = self.fns.get(name).cloned() else {
-            return cx.err(format!("undefined function `{name}`"));
+        let Some(f) = self.fns.get(name{{key}}).cloned() else {
+            return cx.err(format!("undefined function `{}`", name{{text}}));
         };
         if args.len() != f.params.len() {
             return cx.err(format!(
-                "`{name}` takes {} argument(s), got {}",
+                "`{}` takes {} argument(s), got {}",
+                name{{text}},
                 f.params.len(),
                 args.len()
             ));
@@ -710,8 +714,16 @@ pub struct FnInfo {
 "##;
 
 const COMPILER_FN_METHODS: &str = r##"
-    pub fn emit_call(&mut self, name: &str, argc: usize) {
-        self.emit(Op::Call(name.to_string(), argc));
+    /// A call carries both spellings: one to find the function when the
+    /// program runs, one to name it if that fails. Baking only the folded form
+    /// into the instruction would mean a caller who wrote `Double` was told
+    /// about `double`.
+    pub fn emit_call(&mut self, name: {{name_ty}}, argc: usize) {
+        self.emit(Op::Call {
+            key: name{{key}}.to_string(),
+            shown: name{{text}}.to_string(),
+            argc,
+        });
     }
 
     pub fn emit_return(&mut self) {
@@ -722,18 +734,28 @@ const COMPILER_FN_METHODS: &str = r##"
 const COMPILER_FN_OPS: &str = r##"    /// Call by name, with a known argument count. Resolved when the program
     /// runs rather than patched here, so a function can be called before it is
     /// defined — and can call itself.
-    Call(String, usize),
+    Call {
+        /// Folded, to find the function.
+        key: String,
+        /// As written, for the diagnostic if it is not there.
+        shown: String,
+        argc: usize,
+    },
     Return,
 "##;
 
-const COMPILER_FN_EXEC: &str = r##"                Op::Call(name, argc) => {
-                    let Some(f) = self.fns.get(name).copied() else {
-                        out.push(format!("error: undefined function `{name}`"));
+const COMPILER_FN_EXEC: &str = r##"                Op::Call { key, shown, argc } => {
+                    // A real failure, reported through `run.error` so it
+                    // reaches stderr and the exit code. Pushing it into
+                    // `output` would put a diagnostic on stdout and still
+                    // exit 0.
+                    let Some(f) = self.fns.get(key).copied() else {
+                        run.error = Some(format!("undefined function `{shown}`"));
                         break;
                     };
                     if f.arity != *argc {
-                        out.push(format!(
-                            "error: `{name}` takes {} argument(s), got {argc}",
+                        run.error = Some(format!(
+                            "`{shown}` takes {} argument(s), got {argc}",
                             f.arity
                         ));
                         break;

@@ -34,15 +34,24 @@ use {{name}}::{generated, Interp};
 
     let outcome = generated::eval_source(&mut interp, &mut cx, file);
 
-    // Yours: what to do with what was produced.
+    // Yours: what to do with what was produced, and whether it went wrong
+    // *after* it compiled.
     //
     // This happens either way, on purpose. A run that recovered from a syntax
     // error still evaluated everything it could, and that output is worth
     // seeing — reporting the error is not a reason to hide it.
+    let runtime_error: Option<String> = {
 {{produced}}
+    };
 
     match outcome {
-        Ok(_) => std::process::ExitCode::SUCCESS,
+        Ok(_) => match runtime_error {
+            None => std::process::ExitCode::SUCCESS,
+            Some(e) => {
+                eprintln!("error: {e}");
+                std::process::ExitCode::FAILURE
+            }
+        },
 
         // Yours: where errors go. `eval_source` returns them rather than
         // printing them, so a test, an LSP, and this binary can each do

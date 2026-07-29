@@ -8,8 +8,9 @@ use nh_runtime::{Ctx, Result};
 use crate::{Interp, Value};
 
 pub fn run(host: &mut Interp, name: {{name_ty}}, cx: &mut Ctx) -> Result<Value> {
-    match host.get(name{{key}}) {
-        Some(v) => Ok(v.clone()),
-        None => cx.err(format!("undefined variable `{name}`")),
-    }
+    // What an undeclared name means is a property of the *language*, not of
+    // this handler, so it lives on the host next to the symbol table. The
+    // braced style calls it an error; the line-oriented style reads it as zero,
+    // which is what BASIC has always done.
+    host.read(name{{key}}, cx)
 }

@@ -13,6 +13,9 @@
 
 use std::collections::HashMap;
 
+use nh_runtime::Ctx;
+{{name_import}}
+
 pub mod generated;
 pub mod handlers;
 
@@ -75,6 +78,16 @@ impl Interp {
             .last()
             .and_then(|frame| frame.get(name))
             .or_else(|| self.vars.get(name))
+    }
+
+    /// Reads a name. An undeclared one is zero.
+    ///
+    /// **This is a language decision, and it is yours.** BASIC has always
+    /// started every variable at zero, so `PRINT total` before any `LET total`
+    /// prints `0` rather than failing. Return an error here instead and
+    /// declaring becomes deliberate — which is what the braced scaffold does.
+    pub fn read(&self, name: &str, _cx: &mut Ctx) -> nh_runtime::Result<Value> {
+        Ok(self.get(name).cloned().unwrap_or(Value::Num(0.0)))
     }
 
     /// Writes a name, into the innermost frame if there is one.

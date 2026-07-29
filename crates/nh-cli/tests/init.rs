@@ -601,26 +601,148 @@ NEXT
 }
 
 /// Folding must not reach the *diagnostics*. `Name` keeps both spellings for
-/// exactly this: reporting `missing` when the programmer typed `Missing` reads
-/// as a bug in their language rather than in their program.
+/// exactly this: reporting `nope` when the programmer typed `Nope` reads as a
+/// bug in their language rather than in their program.
+///
+/// This caught a real one. `primary_call` handed `.key()` to the host, which
+/// used the same string to look the function up *and* to name it in the error —
+/// so a caller who wrote `Double` was told about `double`. The whole name is
+/// passed now, and the host picks a half per use.
 #[test]
-#[ignore = "compiles a cargo project"]
-fn an_error_reports_the_spelling_that_was_typed() {
-    let dir = scaffold_with("foldmsg", &["--style", "basic"]);
-    std::fs::write(dir.join("prog.txt"), "PRINT Missing\n").unwrap();
+#[ignore = "compiles two cargo projects"]
+fn a_diagnostic_reports_the_spelling_that_was_typed() {
+    for (shape, extra) in [
+        ("interp", vec!["--style", "basic", "--with", "functions"]),
+        (
+            "compiler",
+            vec!["--style", "basic", "--with", "functions", "--compiler"],
+        ),
+    ] {
+        let dir = scaffold_with(&format!("spell{shape}"), &extra);
+        std::fs::write(dir.join("prog.txt"), "PRINT Nope(1)\n").unwrap();
 
-    let out = Command::new(env!("CARGO"))
-        .current_dir(&dir)
-        .env("NH", env!("CARGO_BIN_EXE_nh"))
-        .args(["run", "--quiet", "--", "prog.txt"])
-        .output()
-        .expect("running cargo");
+        let out = Command::new(env!("CARGO"))
+            .current_dir(&dir)
+            .env("NH", env!("CARGO_BIN_EXE_nh"))
+            .args(["run", "--quiet", "--", "prog.txt"])
+            .output()
+            .expect("running cargo");
 
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("`Missing`"),
-        "the diagnostic should echo what was written:\n{stderr}"
-    );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("undefined function `Nope`"),
+            "{shape}: should echo what was written:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("`nope`"),
+            "{shape}: the folded key is for lookup, not for reading:\n{stderr}"
+        );
+    }
+}
+
+/// What an undeclared name means is a **language** decision, so the two shapes
+/// must agree on it — and the two *styles* are allowed to differ.
+///
+/// They did not. The compiled shape read any unknown name as `0` while the
+/// interpreted one reported it, in both styles. That is the one kind of
+/// divergence this whole design exists to prevent: the same program computing
+/// different answers depending on which host ran it.
+///
+/// Braced: declaring is deliberate, so reading an undeclared name is an error.
+/// Line-oriented: every variable starts at zero, as BASIC has always done.
+#[test]
+#[ignore = "compiles four cargo projects"]
+fn the_two_shapes_agree_about_an_undeclared_name() {
+    for (style, program, want) in [
+        ("c", "print x;\nx = 5;\nprint x;\n", None),
+        ("basic", "PRINT x\nLET x = 5\nPRINT x\n", Some(vec!["0", "5"])),
+    ] {
+        let mut seen = Vec::new();
+        for (shape, extra) in [
+            ("interp", vec!["--style", style]),
+            ("compiler", vec!["--style", style, "--compiler"]),
+        ] {
+            let dir = scaffold_with(&format!("und{style}{shape}"), &extra);
+            std::fs::write(dir.join("prog.txt"), program).unwrap();
+
+            let out = Command::new(env!("CARGO"))
+                .current_dir(&dir)
+                .env("NH", env!("CARGO_BIN_EXE_nh"))
+                .args(["run", "--quiet", "--", "prog.txt"])
+                .output()
+                .expect("running cargo");
+
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            match &want {
+                // Zero is a value, not a failure.
+                Some(lines) => {
+                    assert!(out.status.success(), "{style}/{shape} failed:\n{stderr}");
+                    assert_eq!(stdout.lines().collect::<Vec<_>>(), *lines, "{style}/{shape}");
+                }
+                None => {
+                    assert!(
+                        !out.status.success(),
+                        "{style}/{shape}: an undeclared read must fail here"
+                    );
+                    assert!(
+                        stderr.contains("undefined variable `x`"),
+                        "{style}/{shape}: and say so on stderr:\n{stderr}"
+                    );
+                }
+            }
+            seen.push(stdout.into_owned());
+        }
+        assert_eq!(seen[0], seen[1], "{style}: the two shapes disagreed");
+    }
+}
+
+/// A failure *while running* the compiled program must reach stderr and the
+/// exit code, in every style.
+///
+/// The VM used to push its errors into the program's output and return
+/// normally, so a broken program printed a diagnostic to **stdout** and exited
+/// 0 — something a pipeline would treat as data. The interpreter had always
+/// reported properly.
+#[test]
+#[ignore = "compiles two cargo projects"]
+fn a_runtime_failure_in_compiled_code_reaches_stderr_and_the_exit_code() {
+    for (style, program) in [
+        ("c", "print 1;\nprint nope(2);\n"),
+        ("basic", "PRINT 1\nPRINT nope(2)\n"),
+    ] {
+        let dir = scaffold_with(
+            &format!("rt{style}"),
+            &["--style", style, "--with", "functions", "--compiler"],
+        );
+        std::fs::write(dir.join("prog.txt"), program).unwrap();
+
+        let out = Command::new(env!("CARGO"))
+            .current_dir(&dir)
+            .env("NH", env!("CARGO_BIN_EXE_nh"))
+            .args(["run", "--quiet", "--", "prog.txt"])
+            .output()
+            .expect("running cargo");
+
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+
+        assert!(!out.status.success(), "{style}: must not exit 0:\n{stdout}");
+        assert!(
+            stderr.contains("undefined function `nope`"),
+            "{style}: the diagnostic belongs on stderr:\n{stderr}"
+        );
+        assert!(
+            !stdout.contains("undefined function"),
+            "{style}: and not in the program's output:\n{stdout}"
+        );
+        // What it managed before failing is still worth seeing.
+        assert_eq!(
+            stdout.lines().collect::<Vec<_>>(),
+            vec!["1"],
+            "{style}: partial output should survive"
+        );
+    }
 }
 
 /// DESIGN.md §5.4: adding an alternative to the grammar breaks the build until

@@ -121,19 +121,28 @@ const HANDLERS_COMPILER: &[(&str, &str)] = &[
 /// What `main.rs` does with what the run produced. The only part of the binary
 /// that knows which shape this project is — everything else, including the
 /// whole error path, is identical.
-const PRODUCED_INTERP: &str = r#"    for line in &interp.output {
-        println!("{line}");
-    }"#;
+const PRODUCED_INTERP: &str = r#"        for line in &interp.output {
+            println!("{line}");
+        }
+        // Nothing runs after evaluation here — the handlers *were* the run, so
+        // anything that went wrong is already in `outcome`.
+        None"#;
 
-const PRODUCED_COMPILER: &str = r#"    // Compiling produced instructions; running them produces output.
-    eprintln!("--- bytecode ---");
-    for (i, op) in interp.code.iter().enumerate() {
-        eprintln!("{i:3}  {op:?}");
-    }
-    eprintln!("--- output ---");
-    for line in interp.run() {
-        println!("{line}");
-    }"#;
+const PRODUCED_COMPILER: &str = r#"        // Compiling produced instructions; running them produces output.
+        eprintln!("--- bytecode ---");
+        for (i, op) in interp.code.iter().enumerate() {
+            eprintln!("{i:3}  {op:?}");
+        }
+        eprintln!("--- output ---");
+
+        // Unlike an interpreter, this host has a second thing that can fail:
+        // the program it built. `outcome` covers compiling, `run.error` covers
+        // running, and both have to reach the exit code.
+        let run = interp.run();
+        for line in &run.output {
+            println!("{line}");
+        }
+        run.error"#;
 
 /// Added to `Cargo.toml` by `--async`.
 const TOKIO_DEP: &str = r#"
@@ -355,6 +364,11 @@ fn render(template: &str, opts: &Options) -> String {
                 (true, Style::Basic) => SAMPLE_FNS_BASIC,
             },
         )
+        .replace("{{host_types}}", &chunks.types)
+        .replace("{{host_state}}", &chunks.state)
+        .replace("{{host_impl}}", &chunks.methods)
+        .replace("{{vm_ops}}", &chunks.vm_ops)
+        .replace("{{vm_exec}}", &chunks.vm_exec)
         // How an identifier arrives, and how to turn one into a lookup. A
         // folding token binds as `&Name`, which keeps both spellings — see the
         // comment above `token IDENT` in the line-oriented grammar.
@@ -372,6 +386,8 @@ fn render(template: &str, opts: &Options) -> String {
                 Style::Basic => "use nh_runtime::Name;\n",
             },
         )
+        // The two questions a folded name can answer. `{{key}}` looks one up;
+        // `{{text}}` reports it back the way it was written.
         .replace(
             "{{key}}",
             match opts.style {
@@ -379,11 +395,13 @@ fn render(template: &str, opts: &Options) -> String {
                 Style::Basic => ".key()",
             },
         )
-        .replace("{{host_types}}", &chunks.types)
-        .replace("{{host_state}}", &chunks.state)
-        .replace("{{host_impl}}", &chunks.methods)
-        .replace("{{vm_ops}}", &chunks.vm_ops)
-        .replace("{{vm_exec}}", &chunks.vm_exec)
+        .replace(
+            "{{text}}",
+            match opts.style {
+                Style::C => "",
+                Style::Basic => ".text()",
+            },
+        )
         .replace(
             "{{produced}}",
             if opts.is_compiler {

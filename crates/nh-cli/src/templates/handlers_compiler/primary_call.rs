@@ -20,6 +20,6 @@ pub fn run(
     _cx: &mut Ctx,
 ) -> Result<()> {
     let argc = usize::from(first.is_some()) + rest.len();
-    host.emit_call(name{{key}}, argc);
+    host.emit_call(name, argc);
     Ok(())
 }

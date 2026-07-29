@@ -13,6 +13,9 @@
 
 use std::collections::HashMap;
 
+use nh_runtime::Ctx;
+{{name_import}}
+
 pub mod generated;
 pub mod handlers;
 
@@ -75,6 +78,19 @@ impl Interp {
             .last()
             .and_then(|frame| frame.get(name))
             .or_else(|| self.vars.get(name))
+    }
+
+    /// Reads a name, or says why it cannot.
+    ///
+    /// **This is a language decision, and it is yours.** Erroring is right for
+    /// a language where declaring is deliberate. A language where every name
+    /// starts at zero would return `Value::Num(0.0)` here instead — see the
+    /// line-oriented scaffold, which does exactly that.
+    pub fn read(&self, name: &str, cx: &mut Ctx) -> nh_runtime::Result<Value> {
+        match self.get(name) {
+            Some(v) => Ok(v.clone()),
+            None => cx.err(format!("undefined variable `{name}`")),
+        }
     }
 
     /// Writes a name, into the innermost frame if there is one.

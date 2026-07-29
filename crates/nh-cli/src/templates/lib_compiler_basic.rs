@@ -31,6 +31,7 @@
 //!
 //! What is yours: this file, `src/main.rs`, and `src/handlers/*.rs`.
 
+{{name_import}}
 pub mod generated;
 pub mod handlers;
 
@@ -70,6 +71,23 @@ pub enum Op {
     /// covers `=`, `<>`, `<=`, `>=`, `<` and `>`.
     Compare(generated::dispatch::CompareOp),
 {{vm_ops}}}
+
+/// What running the compiled program produced.
+///
+/// Both halves matter. A run that failed still printed whatever it managed
+/// before it stopped, and that output is worth seeing — the same reason
+/// `main.rs` prints before it checks the outcome.
+#[derive(Debug, Default)]
+pub struct Run {
+    pub output: Vec<String>,
+    /// How it stopped, if it stopped badly.
+    ///
+    /// This used to be pushed into `output` as a line of text, which meant a
+    /// failing program printed its error to **stdout** and exited 0 — a
+    /// diagnostic that a pipeline would treat as data. The interpreter had
+    /// always reported properly; this is the compiler catching up.
+    pub error: Option<String>,
+}
 
 /// One call in progress, at run time.
 ///
@@ -167,11 +185,11 @@ impl Interp {
     /// A real project would put this in its own crate, or emit for a machine
     /// somebody else wrote. It is here so `cargo run` shows the bytecode doing
     /// what it claims.
-    pub fn run(&self) -> Vec<String> {
+    pub fn run(&self) -> Run {
         let mut stack: Vec<f64> = Vec::new();
         let mut vars: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
         let mut frames: Vec<Frame> = Vec::new();
-        let mut out = Vec::new();
+        let mut run = Run::default();
 
         let mut pc = 0;
         while pc < self.code.len() {
@@ -181,6 +199,9 @@ impl Interp {
                 Op::Push(n) => stack.push(*n),
                 // Innermost frame first, then the globals — the same rule the
                 // interpreter's `get`/`set` follow.
+                // An undeclared name is zero, which is what BASIC has always
+                // done — and what this scaffold's interpreter does too. The
+                // two shapes must agree on a language question like this.
                 Op::Load(n) => {
                     let v = frames
                         .last()
@@ -205,7 +226,7 @@ impl Interp {
                     let a = stack.pop().unwrap();
                     stack.push(-a)
                 }
-                Op::Print => out.push(format!("{}", stack.pop().unwrap())),
+                Op::Print => run.output.push(format!("{}", stack.pop().unwrap())),
                 Op::Pop => {
                     stack.pop();
                 }
@@ -247,7 +268,7 @@ impl Interp {
 {{vm_exec}}
             }
         }
-        out
+        run
     }
 }
 

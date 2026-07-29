@@ -659,6 +659,32 @@ Change your mind about syntax later and you rewrite the grammar, not the
 handlers. The only file the line-oriented style adds is `line.rs`, because a
 newline needs a rule to hang on where a `;` does not.
 
+### Language decisions live on the host, not in a handler
+
+The scaffold makes one such decision for you, and shows you where to change it.
+Reading a name that was never declared is an **error** in the braced style and
+**zero** in the line-oriented one, because that is what BASIC has always done.
+
+The handler does not decide:
+
+```rust
+// handlers/primary_var.rs — the same file in both styles
+pub fn run(host: &mut Interp, name: &Name, cx: &mut Ctx) -> Result<Value> {
+    host.read(name.key(), cx)
+}
+```
+
+`read` is on your host in `src/lib.rs`, next to the symbol table, and it is
+four lines. That placement is the point: a question about what your *language*
+means should have one answer in one place, not one per handler that happens to
+look a name up.
+
+It also has to be the same answer in both **shapes**. A compiled program and an
+interpreted one disagreeing about whether `x` is an error is the one failure
+this design exists to prevent, so the scaffold's bytecode VM makes the matching
+choice — and `the_two_shapes_agree_about_an_undeclared_name` fails if that ever
+drifts.
+
 ### One thing that does differ, and why
 
 `--style basic` folds identifier case, as BASIC always has: `Total` and `total`

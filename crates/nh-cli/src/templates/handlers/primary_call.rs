@@ -20,5 +20,5 @@ pub fn run(
     let mut args = Vec::with_capacity(rest.len() + 1);
     args.extend(first);
     args.extend(rest);
-    host.call(name{{key}}, args, cx)
+    host.call(name, args, cx)
 }

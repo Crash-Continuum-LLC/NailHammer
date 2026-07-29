@@ -1771,6 +1771,53 @@ An `#[ignore]`d e2e test builds both and asserts they print **the same four
 numbers**. If they ever diverge, something has become interpreter-shaped that
 should not be.
 
+### The two shapes disagreed about a language question
+
+Found by poking at the scaffold rather than by a test. Reading a never-declared
+name:
+
+```
+             interpreter                   compiler
+--style c    error: undefined variable `x`  0
+--style basic error: undefined variable `x` 0
+```
+
+The compiled program computed a different answer from the interpreted one, for
+the same source. That is precisely the divergence §4.1's whole claim rests on
+not happening.
+
+Two mistakes, stacked:
+
+1. **It was treated as a host detail** rather than a language decision. The
+   interpreter's `primary_var` handler chose to error; the VM's `Load` chose to
+   default. Nobody decided; two files drifted.
+2. **The style axis was ignored.** Zero is *correct* for BASIC, which has always
+   started every variable at zero. Erroring is correct for a language where
+   declaring is deliberate. So there is no single right answer — only a right
+   answer per style, which then must hold across both shapes.
+
+The fix moves the decision onto the host, next to the symbol table, and out of
+the handler:
+
+```rust
+// handlers/primary_var.rs — shared by both styles
+host.read(name.key(), cx)
+```
+
+`--style c` errors in both shapes; `--style basic` reads zero in both.
+
+### Runtime errors in compiled code went to stdout
+
+Next to it, and less defensible. The scaffold VM reported an undefined function
+by pushing `"error: undefined function ..."` into the program's **output** and
+returning normally — a diagnostic on stdout, exit code 0, indistinguishable from
+data to anything downstream. The interpreter had always reported properly.
+
+`run()` now returns output *and* an optional error, so a failure reaches stderr
+and the exit code while whatever the program managed to print still appears.
+Both halves matter: a partial run is worth seeing, for the same reason `main.rs`
+prints before it checks the outcome.
+
 ### What stayed different, and should
 
 Not everything that differs is a defect. Non-local control flow legitimately
