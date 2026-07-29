@@ -1194,6 +1194,19 @@ expensive than carrying it from the start.
    diagnostics, context-aware completion, go-to-definition, hover, outline,
    scaffolding, and tasks. See §10.
 
+9. **M9 — the second host shape. ✅ Done.** `Values` split out of `Semantics`,
+   so a host whose `Out` is not a value need not answer questions about one;
+   short-circuiting written by `nh_handlers!` from the one thing that *is*
+   language-specific. `nh init --compiler` scaffolds a register machine with
+   slot-allocated locals, and an end-to-end test asserts both shapes print the
+   same thing across every style and feature combination. See §10.
+10. **M10 — `nh trace`. ✅ Done.** What a program routes to, and with what,
+    without generating or compiling anything: `pest_vm` interprets the lowered
+    grammar and the node tags are read back out. Arguments own their subtrees,
+    `lazy` is marked, and operators are folded by the table's precedence — which
+    the parse tree cannot show, being deliberately flat (§5.2). Surfaced as a
+    live pane in the extension.
+
 **Every milestone, including the stretch goal, is complete.** What remains is
 the residual risks in §11.
 
@@ -1764,12 +1777,16 @@ level down.
 ### `nh init --compiler`
 
 The scaffold shipped one shape, which made "one grammar, two shapes" something
-you had to take on trust. `--compiler` writes the same grammar with
-`type Out = ()`, handlers that emit, and its own `ShortCircuit`.
+you had to take on trust. `--compiler` writes the same grammar with handlers that
+emit and its own `ShortCircuit`.
 
-An `#[ignore]`d e2e test builds both and asserts they print **the same four
-numbers**. If they ever diverge, something has become interpreter-shaped that
-should not be.
+It began as a stack machine — `type Out = ()` — which is where the section below
+picks up; it is a register machine now. `examples/bytecode` keeps the stack
+version, because a stack machine shows the point in fewer moving parts.
+
+An `#[ignore]`d e2e test builds every style × feature × shape combination and
+asserts the two shapes print the same thing. If they ever diverge, something has
+become interpreter-shaped that should not be.
 
 ### The two shapes disagreed about a language question
 

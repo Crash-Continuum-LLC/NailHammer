@@ -72,3 +72,19 @@ from a registry.
 A private registry (Cloudsmith, Artifactory) is the middle path if versioned
 dependencies are wanted without going public. Users would need registry
 credentials, which is the burden vendoring exists to remove.
+
+## The extension has outrun the last release
+
+`v0.1.0` carries a `.vsix` built at that tag. The extension has moved several
+versions since — completion, an evaluation playground, and the `nh trace` pane it
+depends on — so that asset installs something noticeably older than the source.
+
+Two ways out, and the second is the real one:
+
+* Build it locally: `cd editors/vscode && npx @vscode/vsce package`.
+* **Cut a tag.** `git tag v0.2.0 && git push origin v0.2.0` rebuilds `nh` for
+  four platforms and repackages the extension, both attached to the release. The
+  workflow is already in place; nothing needs writing.
+
+Worth doing before pointing anyone else at the repository: the install
+instructions in README.md are only as current as the newest tag.

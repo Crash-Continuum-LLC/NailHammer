@@ -10,14 +10,16 @@ to write and why. For the reasoning behind the design, see
 2. [Your first grammar](#your-first-grammar)
 3. [Grammar reference](#grammar-reference)
 4. [Operators](#operators)
-5. [Starting a project](#starting-a-project)
-6. [Running a program](#running-a-program)
+5. [Running a program](#running-a-program)
+6. [Starting a project](#starting-a-project)
 7. [Two shapes: interpreter and compiler](#two-shapes-interpreter-and-compiler)
 8. [Writing handlers](#writing-handlers)
 9. [Control flow](#control-flow)
 10. [Errors and recovery](#errors-and-recovery)
-11. [Checking your grammar](#checking-your-grammar)
-12. [Reading the generated `.pest`](#reading-the-generated-pest)
+11. [Seeing where a program goes](#seeing-where-a-program-goes)
+12. [Checking your grammar](#checking-your-grammar)
+13. [Reading the generated `.pest`](#reading-the-generated-pest)
+14. [Known gaps](#known-gaps)
 
 ---
 
@@ -143,11 +145,18 @@ Exit status is `0` on success, `1` for a grammar error, `2` for a usage mistake.
 
 ```console
 $ cd editors/vscode && npm run package
-$ code --install-extension nailhammer-0.1.0.vsix
+$ code --install-extension nailhammer-*.vsix
 ```
 
-The VS Code extension highlights `.nh`, puts `nh check`'s diagnostics in the
-Problems panel as you type, and scaffolds a project from the command palette.
+The VS Code extension highlights `.nh`, completes declarations and roles, puts
+`nh check`'s diagnostics in the Problems panel as you type, and scaffolds a
+project from the command palette.
+
+It also carries an **evaluation playground**: a pane beside your grammar where
+you type a program and watch which handler each part of it reaches, updated as
+you type. That is `nh trace` — see
+[Seeing where a program goes](#seeing-where-a-program-goes) — so what the editor
+shows is what the CLI computes.
 Point `nailhammer.executable` at your `nh` binary if it is not on `PATH`.
 
 Diagnostics come from `nh check --json`, which is also worth knowing about on
@@ -168,7 +177,7 @@ $ nh check mylang.nh --json
 | `examples/config/` | A complete interpreter. Nine handlers, two or three lines each |
 | `examples/calc-interp/` | Operators end to end, proved by tests |
 | `examples/basic-interp/` | Mini BASIC: loops, subroutines, functions, `GOTO` |
-| `examples/bytecode/` | The same idea compiled instead of interpreted — `type Out = ()`. `nh init --compiler` scaffolds one |
+| `examples/bytecode/` | The same idea compiled instead of interpreted — `type Out = ()`, a stack machine |
 | `examples/selfhost/` | `.nh` describing `.nh` |
 
 ---
@@ -728,8 +737,14 @@ difference is one line:
 
 ```rust
 type Out = Value;   // interpreter: what a node evaluated to
-type Out = ();      // compiler: nothing is returned; results live on the stack
+type Out = ();      // stack compiler: nothing is returned; results live on the stack
+type Out = Reg;     // register compiler: which register holds the result
 ```
+
+`nh init --compiler` scaffolds the third, because it is the one worth building
+on — see [Registers, and why slots matter](#registers-and-why-slots-matter)
+below. `examples/bytecode` is the second, kept because a stack machine is the
+shortest way to see the idea.
 
 **Eager parameters give a compiler stack order for free.** They are evaluated
 left to right *before* the handler runs, and for a compiler "evaluated" means
@@ -781,6 +796,49 @@ patching, which is host state rather than a signal.
 
 A third shape falls out of the same model: `type Out = Type` with handlers that
 check rather than compute is a typechecker.
+
+### Registers, and why slots matter
+
+`type Out = Reg` makes the operator trait read as three-address code, with no
+change to the toolkit:
+
+```rust
+fn add(&mut self, a: Reg, b: Reg) -> Result<Reg> {
+    let dst = self.reuse(&[a, b]);      // frees the operands, takes a destination
+    self.emit(Op::Add { dst, a, b });
+    Ok(dst)
+}
+```
+
+Registers are allocated in **stack discipline** — `free` only releases the top
+one — which is what keeps an expression's temporaries contiguous. That is not
+tidiness: a call needs its arguments in consecutive registers, and eager
+parameters evaluated left to right into such an allocator put them there with
+nobody arranging it.
+
+**Registers alone buy nothing.** Measured on the scaffold: with variables in a
+name-keyed map and registers used only for temporaries, the same program came to
+100 instructions either way. The textbook "four dispatches versus one" assumes
+the operands are already in registers; when every variable access is a hash
+lookup, both shapes pay it.
+
+What pays is a **compile-time symbol table**. Parameters take slots `0..n`,
+locals the next free slots, and globals stay named:
+
+| | instructions | name lookups |
+|---|---|---|
+| stack | 33 | 11 |
+| register + slots | 18 | **0** |
+
+Reading a local then emits *no instruction at all* — `primary_var` hands back the
+slot. Two things follow, and both are in the scaffold:
+
+* **`free` must skip locals.** A slot belongs to its variable for the whole
+  function. Releasing one reuses a live variable, which produces wrong answers
+  rather than a compile error.
+* **Policy belongs on the host, not in a handler.** `stmt_for` never asks whether
+  its counter is a slot or a global; `read_var` and `emit_increment` answer that,
+  and they live in your `lib.rs`.
 
 ## Writing handlers
 
@@ -1359,6 +1417,59 @@ repetition will swallow the token that ends the block. If `rule block = "{"
 body:stmt* "}"` and `stmt` recovers, the error node eats the closing brace and
 `stmt*` never terminates. Attach recovery to a rule used in flat lists — see
 `examples/basic-interp/basic.nh` for a grammar that deliberately does without it.
+
+---
+
+## Seeing where a program goes
+
+```console
+$ nh trace mylang.nh --source 'let a = 1 + 2 * 3;'
+$ nh trace mylang.nh --input program.mylang
+$ nh trace mylang.nh --source '...' --json
+```
+
+Answers "which handler gets this, and what does it receive?" **without
+generating or compiling anything.** `pest_vm` interprets your lowered grammar, so
+it costs a parse. Without it, the question is a generate-compile-add-print-
+statements round trip to learn something the grammar already decided.
+
+```
+stmt_bind  → handlers/stmt_bind.rs
+  · "let" name:IDENT "=" value:expr ";" -> bind
+  name: &str = "a"
+  value: Self::Out   ⟵ evaluated first, by:
+    Operators::add
+      · `+` — left-associative, precedence 4
+      lhs: Self::Out   ⟵ evaluated first, by:
+        primary_num  → handlers/primary_num.rs
+          · digits:NUMBER -> num
+          digits: &str = "1"
+      rhs: Self::Out   ⟵ evaluated first, by:
+        Operators::mul
+          · `*` — left-associative, precedence 5
+```
+
+Four things it makes explicit:
+
+* **Which handler**, and the file to open.
+* **What it receives** — names, types, and a token's actual text.
+* **Which arguments have not been evaluated yet.** A `lazy` one arrives as the
+  node; everything else arrives as a value. That is the distinction people get
+  wrong.
+* **How operators fold.** They route to `Operators::<role>` and to no handler at
+  all, nested the way the driver nests them. Nothing else can show you this —
+  precedence lives in the operator table, so the parse tree is flat and has no
+  order in it.
+
+Two more things it tells you honestly:
+
+* A rule with no `-> label` generates no handler, and says so rather than naming
+  a file that does not exist.
+* A statement `recover` got past routes **nowhere**, and is shown as such — it
+  would otherwise be simply absent, which reads as "handled".
+
+`--rule` starts somewhere other than the first rule declared. The VS Code
+extension puts this in a live pane beside your grammar.
 
 ---
 

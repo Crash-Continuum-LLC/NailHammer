@@ -1,7 +1,13 @@
 # bytecode — the same grammar, compiled instead of interpreted
 
-The other examples interpret. This one emits instructions for a stack machine,
-from a grammar that does not know the difference.
+The other examples interpret. This one emits instructions for a **stack
+machine**, from a grammar that does not know the difference.
+
+> `nh init --compiler` scaffolds a **register** machine instead — three-address
+> code with locals in slots, which is what you would build on. This example
+> stays a stack machine on purpose: it is the shortest way to see that the shape
+> of a host is one line, without a register allocator in the way. USAGE.md
+> compares them.
 
 ```console
 $ cargo run -p bc-compiler -- examples/bytecode/sample.bc
@@ -143,7 +149,7 @@ shared mechanism would serve both — patching is not unwinding.
 
 | Path | |
 |---|---|
-| `bc.nh` | The grammar — the scaffold's, unchanged |
+| `bc.nh` | The grammar — the scaffold's as of when this was written |
 | `src/lib.rs` | The `Op` enum, the emitters, the trait impls, and a small VM |
 | `src/handlers/*.rs` | One file per alternative; each emits |
 | `src/generated/**` | Generated. Never edited |

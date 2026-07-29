@@ -161,7 +161,7 @@ Development Host with this extension loaded.
 
 ```console
 $ npm run package   # builds a .vsix
-$ code --install-extension nailhammer-0.1.0.vsix --force
+$ code --install-extension nailhammer-*.vsix --force
 ```
 
 ## If nothing is coloured

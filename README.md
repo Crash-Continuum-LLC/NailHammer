@@ -6,15 +6,30 @@ rule — with operator precedence, error recovery, and determinism checks you di
 not have to write.
 
 ```console
-$ nh init mylang && cd mylang && cargo run   # asks for a syntax and a feature set
+$ nh init mylang --with all
+$ cd mylang && cargo run
 28
 22
 5
 14
+1
+3
+2
+1
+10
+20
+40
+99
+42
+120
 ```
 
 That is a working interpreter: variables, arithmetic with real precedence,
-assignment, and error recovery. Six handler files of a few lines each.
+branches, three kinds of loop with `break`/`continue`, functions with recursion,
+and error recovery. Twenty handler files of a few lines each.
+
+Run `nh init` on its own and it asks two questions instead — which syntax, and
+what to include.
 
 ## The problem
 
@@ -60,7 +75,7 @@ recover stmt sync ";";
 ```rust
 // handlers/stmt_bind.rs — one file per alternative
 pub fn run(host: &mut Interp, name: &str, value: Value, cx: &mut Ctx) -> Result<Value> {
-    host.vars.insert(name.to_string(), value.clone());
+    host.set(name, value.clone());
     Ok(value)
 }
 ```
@@ -80,6 +95,31 @@ parse tree in a handler.
 | **Errors locate themselves** | `cx.err("...")` already knows which node it is inside |
 | **Recovery reports everything** | One bad statement does not hide the rest |
 | **Determinism is checked** | Left recursion, nullable repetitions, and shadowed alternatives are reported with fixes |
+
+## Seeing where a program goes
+
+`nh trace` answers "which handler gets this, and what does it receive?" without
+generating or compiling anything — `pest_vm` interprets your grammar, so it is as
+fast as parsing:
+
+```console
+$ nh trace mylang.nh --source 'if x > 1 { print 2 + 3 * 4; }'
+stmt_iff  → handlers/stmt_iff.rs
+  · "if" cond:expr lazy then:block lazy otherwise:else_tail? -> iff
+  cond: Self::Out   ⟵ evaluated first, by:
+    Operators::compare
+      · `>` — left-associative, precedence 3
+  then: &Rc<Block>   ⟵ lazy: the node, unevaluated
+  otherwise: Option<&Rc<ElseTail>>   ⟵ absent here
+```
+
+Children hang off the **argument** they produce, `lazy` parameters are marked as
+the one case where what is below has not run yet, and operators are folded the
+way the driver folds them — which nothing else can show you, because precedence
+lives in the operator table rather than in the grammar.
+
+`--json` gives the same tree as data. The VS Code extension puts it in a live
+pane.
 
 ## Determinism analysis
 
@@ -132,13 +172,9 @@ $ sudo mv nh-macos-arm64/nh /usr/local/bin/
 Then:
 
 ```console
-$ nh init mylang
+$ nh init mylang        # asks which syntax, and what to include
 $ cd mylang
 $ cargo run
-28
-22
-5
-14
 ```
 
 Then edit `mylang.nh`. The scaffolded project has a `build.rs`, so `cargo build`
@@ -161,16 +197,20 @@ record of what went wrong and what that taught.
 ## Editor support
 
 ```console
-$ gh release download v0.1.0 --repo Crash-Continuum-LLC/NailHammer --pattern '*.vsix'
-$ code --install-extension nailhammer-0.1.0.vsix
+$ cd editors/vscode && npm test && npx @vscode/vsce package --no-dependencies
+$ code --install-extension nailhammer-*.vsix
 ```
 
-Highlighting, live diagnostics in the Problems panel, `nh init` from the command
-palette, and tasks for check/build/explain. It shells out to `nh check --json`,
-so the lint you see in the editor is the lint CI runs.
+Highlighting, completion, live diagnostics in the Problems panel, `nh init` from
+the command palette, tasks for check/build/explain, and an **evaluation
+playground**: a pane beside your grammar where you type a program and watch
+where it routes, updated as you type. It shells out to `nh check --json` and
+`nh trace --json`, so what the editor shows is what the CLI and CI compute.
 
-Or build it from source with `cd editors/vscode && npm run package`. See
-[editors/vscode](editors/vscode).
+> The `.vsix` attached to the `v0.1.0` release predates all of that. Build from
+> source until the next tag.
+
+See [editors/vscode](editors/vscode).
 
 ## Examples
 
@@ -180,15 +220,36 @@ Or build it from source with `cd editors/vscode && npm run package`. See
 | [`examples/calc-interp`](examples/calc-interp) | Operators end to end: precedence, short-circuiting, assignment, recovery, `lazy` |
 | [`examples/selfhost`](examples/selfhost) | `.nh` describing `.nh`, parsing every grammar in this repo |
 | [`examples/basic-interp`](examples/basic-interp) | Mini BASIC: `PRINT`, `FOR`, `WHILE`, `SUB`, `FUNCTION`, `GOTO`, `EXIT`/`CONTINUE`. Recursion with local frames, stored bodies, jumps, signals, a from-scratch operator table |
-| [`examples/bytecode`](examples/bytecode) | A **bytecode compiler**, not an interpreter (`nh init --compiler` scaffolds one). Same handler shapes, `type Out = ()`, handlers emit instead of compute. Precedence becomes instruction order; `lazy` becomes jump patching |
+| [`examples/bytecode`](examples/bytecode) | A **bytecode compiler**, not an interpreter. `type Out = ()`, a stack machine, handlers emit instead of compute. Precedence becomes instruction order; `lazy` becomes jump patching |
 | [`examples/basic.nh`](examples/basic.nh) | The BASIC grammar on its own, with `GOTO` and line numbers |
+
+## Two shapes from one grammar
+
+An interpreter and a compiler are two impls over the same `.nh`, and the
+difference is one line:
+
+```rust
+type Out = Value;   // an interpreter: what a node evaluated to
+type Out = Reg;     // a compiler: which register holds the result
+```
+
+`nh init --compiler` scaffolds the second — a **register machine** emitting
+three-address code, with locals allocated to slots at compile time. The operator
+trait reads as three-address code without any change to the toolkit:
+
+```rust
+fn add(&mut self, a: Reg, b: Reg) -> Result<Reg>
+```
+
+An `#[ignore]`d end-to-end test builds all sixteen style × feature × shape
+combinations and asserts the two shapes print the same thing.
 
 ## Status
 
 Every planned milestone is complete: parsing, lowering, code generation, the
-operator driver, determinism analysis, error recovery, self-hosting, and an
-owned AST that makes subroutines, stored code, and non-local jumps
-expressible. 317 tests.
+operator driver, determinism analysis, error recovery, self-hosting, an owned AST
+that makes subroutines, stored code and non-local jumps expressible, both host
+shapes, and `nh trace`. 365 tests.
 
 **Not published, and it does not need to be.** `nh init` vendors the runtime
 into the project it creates, so a generated project depends on pest and nothing
