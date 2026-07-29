@@ -18,7 +18,8 @@ const USAGE: &str = "\
 nh — NailHammer grammar toolkit
 
 USAGE:
-    nh init    [dir] [--name <name>] [--ext <ext>] [--compiler] [--async] [--force]
+    nh init    [dir] [--name <name>] [--ext <ext>] [--style c|basic]
+               [--with loops,functions] [--compiler] [--async] [--force]
     nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
     nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
     nh explain <file.nh> [--source]
@@ -33,6 +34,10 @@ COMMANDS:
 OPTIONS:
     --name     init: project name (default: the directory name)
     --ext      init: source file extension for your language (default: the name)
+    --style    init: syntax flavour — `c` (braces, default) or `basic`
+               (line-oriented). Both drive the same handlers
+    --with     init: what to include — `loops`, `functions`, `all`, `none`.
+               Run `nh init` in a terminal to be asked instead
     --compiler init: scaffold a bytecode compiler instead of an interpreter
     --async    init: add tokio and a `block_on` helper for async work in handlers
     --force    init: write into a non-empty directory

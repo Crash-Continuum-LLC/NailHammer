@@ -676,7 +676,18 @@ fn help_lists_every_flag_and_claims_nothing_untrue() {
         .expect("running nh --help");
     let help = String::from_utf8_lossy(&out.stdout);
 
-    for flag in ["--json", "--deny-warnings", "--prune", "--lints", "--source", "--ext"] {
+    for flag in [
+        "--json",
+        "--deny-warnings",
+        "--prune",
+        "--lints",
+        "--source",
+        "--ext",
+        "--style",
+        "--with",
+        "--compiler",
+        "--async",
+    ] {
         assert!(help.contains(flag), "`{flag}` is undocumented:\n{help}");
     }
     assert!(

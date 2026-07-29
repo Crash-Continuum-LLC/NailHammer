@@ -10,13 +10,14 @@ to write and why. For the reasoning behind the design, see
 2. [Your first grammar](#your-first-grammar)
 3. [Grammar reference](#grammar-reference)
 4. [Operators](#operators)
-5. [Running a program](#running-a-program)
-6. [Two shapes: interpreter and compiler](#two-shapes-interpreter-and-compiler)
-7. [Writing handlers](#writing-handlers)
-8. [Control flow](#control-flow)
-9. [Errors and recovery](#errors-and-recovery)
-10. [Checking your grammar](#checking-your-grammar)
-11. [Reading the generated `.pest`](#reading-the-generated-pest)
+5. [Starting a project](#starting-a-project)
+6. [Running a program](#running-a-program)
+7. [Two shapes: interpreter and compiler](#two-shapes-interpreter-and-compiler)
+8. [Writing handlers](#writing-handlers)
+9. [Control flow](#control-flow)
+10. [Errors and recovery](#errors-and-recovery)
+11. [Checking your grammar](#checking-your-grammar)
+12. [Reading the generated `.pest`](#reading-the-generated-pest)
 
 ---
 
@@ -616,6 +617,47 @@ write. `nh init` scaffolds both ends for you.
 > evaluated — a reported typo is not a successful run. Anything your handlers
 > collected is still there on your host, so a partial run can still show its
 > output. The scaffold prints it either way.
+
+---
+
+## Starting a project
+
+```console
+$ nh init mylang
+```
+
+Run in a terminal it asks two questions; run in a script it takes the defaults.
+Either way the same flags work:
+
+```console
+$ nh init mylang --style basic --with loops,functions --compiler
+```
+
+**`--style`** is syntax. `c` gives braces and semicolons, `basic` gives a
+line-oriented language where a newline ends a statement and `WEND` closes a
+loop. It is a genuinely different grammar — newlines are not whitespace, and
+assignment is a statement rather than an operator, because `=` already means
+equality.
+
+**`--with`** is capability: `loops` (`while`, `for`, `do`, with `break` and
+`continue`), `functions` (definitions, calls, parameters, `return`, recursion),
+or `all` / `none`.
+
+**`--compiler`** picks the other shape — see below.
+
+### The styles share their handlers
+
+This is worth knowing before you pick, because it means the choice is cheaper
+than it looks. `WHILE cond ... WEND` and `while cond { }` bind the same names to
+the same shapes, so both scaffold the *same* `handlers/stmt_while.rs`:
+
+```rust
+pub fn run(host: &mut Interp, cond: &Rc<Expr>, body: &Rc<Block>, cx: &mut Ctx)
+```
+
+Change your mind about syntax later and you rewrite the grammar, not the
+handlers. The only file the line-oriented style adds is `line.rs`, because a
+newline needs a rule to hang on where a `;` does not.
 
 ---
 

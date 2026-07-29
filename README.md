@@ -6,7 +6,7 @@ rule — with operator precedence, error recovery, and determinism checks you di
 not have to write.
 
 ```console
-$ nh init mylang && cd mylang && cargo run
+$ nh init mylang && cd mylang && cargo run   # asks for a syntax and a feature set
 28
 22
 5
