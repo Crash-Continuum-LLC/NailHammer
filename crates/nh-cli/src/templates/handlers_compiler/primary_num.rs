@@ -1,20 +1,10 @@
-//! Handler for `primary_num`.
-//!
-//! From `= digits:NUMBER -> num`
-//!
-//! A token binding arrives as text. Parsing it is a build-time job even for a
-//! compiler — the literal is known now, so bake it in.
-
+//! A literal: take a register and put the constant in it.
 use nh_runtime::{Ctx, Result};
+use crate::{Interp, Reg};
 
-use crate::Interp;
-
-pub fn run(host: &mut Interp, digits: &str, cx: &mut Ctx) -> Result<()> {
+pub fn run(host: &mut Interp, digits: &str, cx: &mut Ctx) -> Result<Reg> {
     match digits.parse::<f64>() {
-        Ok(n) => {
-            host.emit_push(n);
-            Ok(())
-        }
+        Ok(n) => Ok(host.emit_const(n)),
         Err(_) => cx.err("not a valid number"),
     }
 }

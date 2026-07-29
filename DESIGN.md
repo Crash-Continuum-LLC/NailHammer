@@ -1818,6 +1818,56 @@ and the exit code while whatever the program managed to print still appears.
 Both halves matter: a partial run is worth seeing, for the same reason `main.rs`
 prints before it checks the outcome.
 
+### The compiler scaffold is a register machine
+
+`type Out` earns its keep here. An interpreter's is a value; a stack compiler's
+is `()`, because nothing is returned. A register compiler's is **which register
+holds the result** — and the operator trait then reads as three-address code
+with no change to the toolkit:
+
+```rust
+fn add(&mut self, a: Reg, b: Reg) -> Result<Reg>
+```
+
+Two findings, in order, because the first was nearly a wrong conclusion.
+
+**Registers alone bought nothing.** The first prototype kept variables in a
+name-keyed map and used registers only for expression temporaries. Same program,
+**100 instructions either way**. The textbook "four dispatches versus one"
+assumes the operands are already in registers; when every variable access is a
+hash lookup, both shapes pay it.
+
+**Slots are what pay.** Giving each function a compile-time symbol table —
+parameters at slots `0..n`, locals at the next free slots, globals still by name
+— changes the picture completely. The same function:
+
+| | instructions | name lookups |
+|---|---|---|
+| stack | 33 | 11 |
+| register + slots | 18 | **0** |
+
+Per loop iteration it is 8 against 17. Reading a local now emits **no
+instruction at all**: `primary_var` hands back the slot.
+
+Three things fell out that are worth knowing:
+
+* **Calling conventions are free.** Arguments must be in consecutive registers;
+  they already are, because eager parameters evaluate left to right into an
+  allocator that hands out the top of the file. A `debug_assert` guards it and
+  has never fired.
+* **`free` must skip locals.** A local's slot belongs to it for the whole
+  function. Getting this wrong corrupts a live variable and produces wrong
+  answers rather than a compile error — the counting loop's limit register
+  caught it during the prototype.
+* **The handlers got *smaller*** — 255 lines against 262 — because the allocator
+  lives on the host. `stmt_for` never asks whether its counter is a slot or a
+  global; `read_var` and `emit_increment` answer that.
+
+What is deliberately not done: locals are function-scoped rather than
+block-scoped, and there is no peephole pass, so `x = x + 1` still emits an `Add`
+into a temporary followed by a `Move` to the slot. Folding that pair is about a
+quarter of the loop body and is the obvious next optimisation.
+
 ### What stayed different, and should
 
 Not everything that differs is a defect. Non-local control flow legitimately

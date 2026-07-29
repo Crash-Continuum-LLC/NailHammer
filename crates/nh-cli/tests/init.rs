@@ -386,12 +386,20 @@ fn the_compiler_scaffold_gives_the_same_answers_as_the_interpreter() {
 }
 
 /// A compiler scaffold implements no `Values`, and says so where it must.
+///
+/// `Out` is a **register** — which register holds this node's result. An
+/// interpreter's is a value; a stack machine's would be `()`, since nothing is
+/// returned. Three-address code falls straight out of the operator trait:
+/// `fn add(&mut self, a: Reg, b: Reg) -> Result<Reg>`.
 #[test]
 fn the_compiler_scaffold_asks_no_questions_about_values() {
     let dir = scaffold_with("shape", &["--compiler"]);
     let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
 
-    assert!(lib.contains("type Out = ();"), "{lib}");
+    assert!(
+        lib.contains("type Out = Reg;"),
+        "a register machine's `Out` is the register holding the result:\n{lib}"
+    );
     assert!(
         !lib.contains("impl generated::dispatch::Values"),
         "a compiler has no values to inspect:\n{lib}"

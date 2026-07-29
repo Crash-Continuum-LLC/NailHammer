@@ -1,15 +1,7 @@
-//! Handler for `program`.
-//!
-//! From `rule program = SOI stmts:stmt* EOI -> doc;`
-//!
-//! Each statement emitted its own code before this ran, so there is nothing
-//! left to do. An interpreter would have a `Vec<Value>` here; this has a
-//! `Vec<()>`, because the results are in `host.code`.
-
+//! Every statement emitted its own code and freed its own temporaries.
 use nh_runtime::{Ctx, Result};
+use crate::{Interp, Reg};
 
-use crate::Interp;
-
-pub fn run(_host: &mut Interp, _stmts: Vec<()>, _cx: &mut Ctx) -> Result<()> {
-    Ok(())
+pub fn run(host: &mut Interp, _stmts: Vec<Reg>, _cx: &mut Ctx) -> Result<Reg> {
+    Ok(host.next_reg())
 }

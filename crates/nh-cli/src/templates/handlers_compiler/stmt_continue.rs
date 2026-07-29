@@ -1,16 +1,11 @@
-//! Handler for `stmt_continue`.
-//!
-//! See `stmt_break.rs`. The only difference is which of the enclosing loop's
-//! two targets this jump is patched to — the end, or the step.
-
 use nh_runtime::{Ctx, Result};
+use crate::{Interp, Reg};
 
-use crate::Interp;
-
-pub fn run(host: &mut Interp, cx: &mut Ctx) -> Result<()> {
+pub fn run(host: &mut Interp, cx: &mut Ctx) -> Result<Reg> {
     let jump = host.emit_jump();
-    match host.continue_to(jump) {
-        true => Ok(()),
-        false => cx.err("`continue` is not inside a loop"),
+    if host.continue_to(jump) {
+        Ok(host.next_reg())
+    } else {
+        cx.err("`continue` is not inside a loop")
     }
 }
