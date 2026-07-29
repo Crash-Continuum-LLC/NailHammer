@@ -38,6 +38,12 @@ pub struct Node {
     /// The alternative as written in the grammar.
     pub source: String,
     pub args: Vec<Arg>,
+    /// Handlers reached through parts of this rule that no binding names.
+    ///
+    /// Not every rule binds everything it matches — `rule program = SOI line+
+    /// EOI;` binds nothing at all. Walking only the bindings dropped the whole
+    /// tree beneath such a rule and showed a bare `program` with nothing in it.
+    pub inside: Vec<Node>,
     pub kind: Kind,
 }
 
@@ -50,6 +56,23 @@ pub enum Kind {
     Operator,
     /// Text a `recover` got past. It routes nowhere.
     Unparsed,
+    /// A rule with no `-> label`, so no handler is generated for it. Its
+    /// contents still route somewhere, which is why it is shown rather than
+    /// skipped.
+    Pass,
+}
+
+impl Arg {
+    fn empty() -> Self {
+        Arg {
+            name: String::new(),
+            ty: String::new(),
+            text: None,
+            lazy: false,
+            matched: false,
+            from: Vec::new(),
+        }
+    }
 }
 
 pub struct Arg {
@@ -160,17 +183,41 @@ fn build<'a>(index: &Index<'_>, pair: Pair<'a>) -> Node {
         handler: alt.map(|a| a.pest_rule.clone()).unwrap_or(rule),
         source: alt.map(|a| a.source.clone()).unwrap_or_default(),
         args: Vec::new(),
+        inside: Vec::new(),
         kind: Kind::Handler,
     };
-    let Some(a) = alt else { return node };
+    let Some(a) = alt else {
+        // A rule with no `-> label` generates no handler. Its contents still
+        // route somewhere, so walk through and report what they reach.
+        node.kind = Kind::Pass;
+        node.source = "no `-> label`, so no handler is generated".into();
+        let mut arg = Arg::empty();
+        for c in pair.into_inner() {
+            collect(index, c, &mut arg);
+        }
+        node.inside = arg.from;
+        return node;
+    };
 
     // A repetition tags every element with the same name, so this is a list.
     let mut tagged: HashMap<String, Vec<Pair<'a>>> = HashMap::new();
+    let mut untagged: Vec<Pair<'a>> = Vec::new();
     for c in pair.into_inner() {
-        if let Some(t) = c.as_node_tag() {
-            tagged.entry(t.to_string()).or_default().push(c);
+        match c.as_node_tag() {
+            Some(t) => tagged.entry(t.to_string()).or_default().push(c),
+            None => untagged.push(c),
         }
     }
+
+    // Anything a binding does not name still evaluates, so it is walked too —
+    // just reported as `inside` rather than as an argument.
+    let named: Vec<String> = a.bindings.iter().map(|b| b.name.clone()).collect();
+    let mut loose = Arg::empty();
+    for c in untagged {
+        collect(index, c, &mut loose);
+    }
+    node.inside = loose.from;
+    let _ = named;
 
     for p in params(a) {
         let mut arg = Arg {
@@ -223,6 +270,7 @@ fn collect(index: &Index<'_>, pair: Pair<'_>, into: &mut Arg) {
             handler: format!("<{what} did not parse>"),
             source: format!("recovered here; no handler runs for `{}`", pair.as_str().trim()),
             args: Vec::new(),
+            inside: Vec::new(),
             kind: Kind::Unparsed,
         });
         return;
@@ -251,6 +299,7 @@ fn fold_expr(index: &Index<'_>, pair: Pair<'_>) -> Node {
         handler: "<empty expression>".into(),
         source: String::new(),
         args: Vec::new(),
+        inside: Vec::new(),
         kind: Kind::Unparsed,
     })
 }
@@ -344,6 +393,7 @@ fn binary(lit: &str, info: &OpInfo, lhs: Node, rhs: Node) -> Node {
         handler: format!("Operators::{}", info.role),
         source: format!("`{lit}` — {}", how(info)),
         kind: Kind::Operator,
+        inside: Vec::new(),
         args: vec![
             Arg {
                 name: "lhs".into(),
@@ -372,6 +422,7 @@ fn unary(lit: &str, info: &OpInfo, operand: Node) -> Node {
         handler: format!("Operators::{}", info.role),
         source: format!("`{lit}` — {}", how(info)),
         kind: Kind::Operator,
+        inside: Vec::new(),
         args: vec![Arg {
             name: "operand".into(),
             ty: "Self::Out".into(),
@@ -406,6 +457,7 @@ fn clone_node(n: &Node) -> Node {
         handler: n.handler.clone(),
         source: n.source.clone(),
         kind: n.kind,
+        inside: n.inside.iter().map(clone_node).collect(),
         args: n
             .args
             .iter()
@@ -439,8 +491,9 @@ fn render_node(node: &Node, depth: usize, dir: &str, out: &mut String) {
             out.push_str(&format!("{pad}  · {}\n", node.source));
             return;
         }
-        // No file: there is no handler for an operator.
+        // No file: there is no handler for either of these.
         Kind::Operator => out.push_str(&format!("{pad}{}\n", node.handler)),
+        Kind::Pass => out.push_str(&format!("{pad}{}\n", node.handler)),
         Kind::Handler => {
             out.push_str(&format!("{pad}{}  → {dir}/{}.rs\n", node.handler, node.handler))
         }
@@ -463,6 +516,10 @@ fn render_node(node: &Node, depth: usize, dir: &str, out: &mut String) {
         for child in &a.from {
             render_node(child, depth + 2, dir, out);
         }
+    }
+
+    for child in &node.inside {
+        render_node(child, depth + 1, dir, out);
     }
 }
 
@@ -493,14 +550,16 @@ pub fn to_json(node: &Node) -> String {
         .collect();
 
     format!(
-        "{{\"kind\":\"{}\",\"handler\":\"{}\",\"source\":\"{}\",\"args\":[{}]}}",
+        "{{\"kind\":\"{}\",\"handler\":\"{}\",\"source\":\"{}\",\"args\":[{}],\"inside\":[{}]}}",
         match node.kind {
             Kind::Handler => "handler",
             Kind::Operator => "operator",
             Kind::Unparsed => "unparsed",
+            Kind::Pass => "pass",
         },
         esc(&node.handler),
         esc(&node.source),
-        args.join(",")
+        args.join(","),
+        node.inside.iter().map(to_json).collect::<Vec<_>>().join(",")
     )
 }

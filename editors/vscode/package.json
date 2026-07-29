@@ -2,7 +2,7 @@
   "name": "nailhammer",
   "displayName": "NailHammer",
   "description": "Grammar authoring for NailHammer: syntax highlighting, live diagnostics, scaffolding, and tasks for .nh files.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "publisher": "crash-continuum",
   "license": "MIT",
   "engines": {

@@ -323,6 +323,44 @@ fn a_recovered_statement_is_shown_as_going_nowhere() {
     );
 }
 
+/// A rule with no `-> label` generates no handler — and everything inside it
+/// still routes somewhere.
+///
+/// `examples/basic.nh` opens `rule program = SOI line+ EOI;`: no label, and
+/// `line+` bound to nothing. Walking only the *bindings* dropped the entire
+/// tree beneath it, so the trace was a bare `program` and nothing else. It also
+/// claimed `→ handlers/program.rs`, a file that does not exist.
+#[test]
+fn an_unlabelled_rule_shows_what_is_inside_it() {
+    let out = nh()
+        .arg("trace")
+        .arg(repo("examples/basic.nh"))
+        .args(["--source", "PRINT \"hi\"\nX = 3\n"])
+        .output()
+        .expect("running nh trace");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let s = String::from_utf8_lossy(&out.stdout);
+
+    assert!(
+        !s.contains("handlers/program.rs"),
+        "`program` has no `-> label`, so there is no handler file for it:\n{s}"
+    );
+    assert!(
+        s.contains("no `-> label`"),
+        "and the trace should say why it routes nowhere:\n{s}"
+    );
+
+    // The statements underneath are the point, and they were missing entirely.
+    assert!(s.contains("stmt_print"), "{s}");
+    assert!(s.contains("stmt_let"), "{s}");
+    assert!(s.contains("primary_str"), "arguments too:\n{s}");
+    assert!(s.contains("\\\"hi\\\""), "with their text:\n{s}");
+}
+
 /// It works on the grammars this repository ships, which are not scaffolds.
 #[test]
 fn the_worked_examples_trace() {
