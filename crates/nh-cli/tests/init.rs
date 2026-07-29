@@ -849,6 +849,126 @@ fn a_project_becomes_thread_safe_by_a_feature_alone() {
     );
 }
 
+/// A language can grow `AWAIT` in expression position, and the machine still
+/// mentions no runtime.
+///
+/// The interesting case is the **single-threaded** driver: that is exactly where
+/// `block_in_place` panics, so a design that blocks on futures cannot serve it.
+/// Suspending can, and the same bytecode serves both.
+#[test]
+#[ignore = "compiles a scaffolded project with tokio"]
+fn a_compiled_language_can_await_in_an_expression() {
+    // Not `await`: `nh init` refuses a Rust keyword as a crate name, which is
+    // its own guard doing its job.
+    let dir = scaffold_with("awaiting", &["--style", "basic", "--compiler"]);
+
+    // Three lines of grammar, three of host code.
+    let g = dir.join("awaiting.nh");
+    let grammar = std::fs::read_to_string(&g)
+        .unwrap()
+        .replace(
+            r#"    prefix  word "NOT" -> not;"#,
+            "    prefix  word \"NOT\" -> not;\n    prefix  word \"AWAIT\" -> await;",
+        )
+        .replace(r#"reserved from IDENT { "LET""#, r#"reserved from IDENT { "AWAIT" "LET""#);
+    std::fs::write(&g, grammar).unwrap();
+
+    let lib = dir.join("src/lib.rs");
+    let host = std::fs::read_to_string(&lib).unwrap().replace(
+        "    fn not(&mut self, a: Reg) -> nh_runtime::Result<Reg> {",
+        "    fn r#await(&mut self, a: Reg) -> nh_runtime::Result<Reg> {\n\
+        \x20       Ok(self.emit_await(a))\n\
+        \x20   }\n\n\
+        \x20   fn not(&mut self, a: Reg) -> nh_runtime::Result<Reg> {",
+    );
+    std::fs::write(&lib, host).unwrap();
+
+    let manifest = std::fs::read_to_string(dir.join("Cargo.toml")).unwrap();
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        format!(
+            "{manifest}\n[dev-dependencies]\n\
+             tokio = {{ version = \"1\", features = [\"rt\", \"macros\"] }}\n"
+        ),
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(dir.join("tests")).unwrap();
+    std::fs::write(dir.join("tests/suspend.rs"), SUSPEND_TEST).unwrap();
+
+    let out = Command::new(env!("CARGO"))
+        .current_dir(&dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
+        .args(["test", "--quiet", "--test", "suspend"])
+        .output()
+        .expect("running cargo");
+
+    assert!(
+        out.status.success(),
+        "a compiled `AWAIT` should need no runtime in the VM:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// Written into the scaffolded project, so it is compiled against the real
+/// generated code rather than asserted about from outside.
+const SUSPEND_TEST: &str = r##"
+use nh_runtime::{Ctx, SourceMap};
+use awaiting::{generated, Interp, Step};
+
+fn compile(src: &str) -> Interp {
+    let mut sources = SourceMap::new();
+    let file = sources.add("t.txt", src);
+    let mut cx = Ctx::new(sources);
+    let mut host = Interp::default();
+    generated::eval_source(&mut host, &mut cx, file).expect("compiles");
+    host
+}
+
+/// No runtime at all.
+#[test]
+fn a_blocking_driver_needs_no_runtime() {
+    let prog = compile("LET x = AWAIT 41\nPRINT x + 1\n");
+    let mut m = prog.machine();
+    let mut suspensions = 0;
+    loop {
+        match m.resume() {
+            Step::Done => break,
+            Step::Failed(e) => panic!("{e}"),
+            Step::Awaiting(h) => {
+                suspensions += 1;
+                m.resume_with(h + 1.0);
+            }
+        }
+    }
+    assert_eq!(suspensions, 1);
+    assert_eq!(m.output, vec!["43"]);
+}
+
+/// The same bytecode, on the runtime flavour where blocking would panic — and
+/// awaiting twice inside one expression, which precedence has to survive.
+#[tokio::test(flavor = "current_thread")]
+async fn a_single_threaded_driver_serves_the_same_bytecode() {
+    let prog = compile("PRINT (AWAIT 1) + (AWAIT 10) * 2\n");
+    let mut m = prog.machine();
+    let mut suspensions = 0;
+    loop {
+        match m.resume() {
+            Step::Done => break,
+            Step::Failed(e) => panic!("{e}"),
+            Step::Awaiting(h) => {
+                suspensions += 1;
+                tokio::task::yield_now().await;
+                m.resume_with(h * 10.0);
+            }
+        }
+    }
+    assert_eq!(suspensions, 2, "each AWAIT suspends on its own");
+    assert_eq!(m.output, vec!["210"], "(1*10) + (10*10)*2");
+}
+"##;
+
 /// DESIGN.md §5.4: adding an alternative to the grammar breaks the build until
 /// a handler exists.
 ///

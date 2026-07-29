@@ -1925,6 +1925,56 @@ The rename cost one bug, and it is a good example of its kind: `qualify_rc` foun
 middle of the word and emitted `ast::red<Stmt>`. The length is taken from the
 needle now — a magic number should not be able to do that.
 
+### A language with its own futures: suspend, do not await
+
+The obvious reading of "my language needs `await` in an expression" is that the
+evaluator must become async. It is the wrong reading for a compiled host, and the
+right answer costs nothing.
+
+A tree-walking interpreter has only two options, and both are bad:
+
+* **Block** on the future. Needs a multi-thread runtime — `block_in_place` panics
+  on a current-thread one — costs a worker thread per await, and if the *language*
+  has concurrency, blocking one program blocks the interpreter entirely.
+* **Async evaluator.** Every `eval_*` returns a boxed future, because async
+  recursion requires `Box::pin`. A heap allocation per node, whether or not a
+  language ever awaits.
+
+A compiled host has a third, and it is what every real async VM does: `await` is
+an **instruction**, and the machine **suspends** rather than awaiting.
+
+```rust
+pub enum Step {
+    Done,
+    Failed(String),
+    Awaiting(f64),   // waiting on this; resolve it and `resume_with`
+}
+```
+
+The machine never touches a runtime. Whoever drives it does the waiting, so the
+same bytecode serves a blocking loop with no runtime at all, a multi-thread tokio
+host, and a single-threaded one — verified for all three, including two `AWAIT`s
+inside one expression with precedence preserved.
+
+For the grammar author this is three lines of grammar and three of host code,
+because the operator table already routes a prefix word to a role and the role
+already escapes a Rust keyword to `r#await`.
+
+**What had to change, and why it had to change now.** Nothing about `Await`
+itself — an opcode is one enum variant anyone can add. It was where the machine
+kept its state. `run()` held `pc`, the frames and the globals in local variables,
+and a loop like that cannot be stopped and started at all; converting it is a
+rewrite of the interpreter. So the scaffold keeps them in a `Machine` struct
+whether or not a language ever suspends. It costs nothing at run time, and it is
+the only part that cannot be added afterwards.
+
+`run()` survives as a convenience for programs that never suspend, and refuses
+rather than guessing:
+
+```
+error: this program suspends; drive `machine()` instead
+```
+
 ### Async is offered, not assumed
 
 `nh init --async` remains one answer rather than the answer, and now says what it

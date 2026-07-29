@@ -41,6 +41,13 @@ pub enum Op {
     Move { dst: Reg, src: Reg },
     Print { src: Reg },
     Jump(usize),
+    /// Suspend, so whoever is driving can wait on something.
+    ///
+    /// `src` holds whatever your language calls a future — a handle, an index, a
+    /// tagged value — and `dst` receives the answer. Note what this is *not*: a
+    /// Rust `.await`. The machine stops instead, which is what keeps the choice
+    /// of runtime with the host. See [`Step::Awaiting`].
+    Await { dst: Reg, src: Reg },
     JumpIfFalse { src: Reg, target: usize },
     JumpIfTrue { src: Reg, target: usize },
 {{vm_ops}}}
@@ -179,6 +186,13 @@ impl Interp {
 
     pub fn here(&self) -> usize {
         self.code.len()
+    }
+
+    /// Emits a suspension, giving back the register the answer lands in.
+    pub fn emit_await(&mut self, src: Reg) -> Reg {
+        let dst = self.reuse(&[src]);
+        self.emit(Op::Await { dst, src });
+        dst
     }
 
     pub fn emit_jump(&mut self) -> usize {
@@ -323,20 +337,113 @@ struct Frame {
 }
 
 impl Interp {
-    pub fn run(&self) -> Run {
-        let mut run = Run::default();
-        let mut globals: HashMap<String, f64> = HashMap::new();
-        let mut frames = vec![Frame {
-            regs: vec![0.0; self.frame_size()],
-            ret_pc: usize::MAX,
-            ret_reg: 0,
-        }];
+    /// A program part-way through running. See [`Machine`].
+    pub fn machine(&self) -> Machine<'_> {
+        Machine {
+            program: self,
+            pc: 0,
+            globals: std::collections::HashMap::new(),
+            frames: vec![Frame {
+                regs: vec![0.0; self.frame_size()],
+                ret_pc: usize::MAX,
+                ret_reg: 0,
+            }],
+            output: Vec::new(),
+            awaiting: None,
+        }
+    }
 
-        let mut pc = 0usize;
-        while pc < self.code.len() {
-            let op = &self.code[pc];
-            pc += 1;
-            let top = frames.len() - 1;
+    /// Runs to completion.
+    ///
+    /// A program that suspends cannot finish here, and this says so rather than
+    /// guessing a runtime on your behalf — drive [`Machine`] instead.
+    pub fn run(&self) -> Run {
+        let mut m = self.machine();
+        let error = loop {
+            match m.resume() {
+                Step::Done => break None,
+                Step::Failed(e) => break Some(e),
+                Step::Awaiting(_) => {
+                    break Some("this program suspends; drive `machine()` instead".into())
+                }
+            }
+        };
+        Run {
+            output: m.output,
+            error,
+        }
+    }
+}
+
+/// Where a program stopped, and why.
+///
+/// **The whole of the async story is this enum.** The machine never awaits — it
+/// *suspends*, and says what it is waiting for. Whoever drives it does the
+/// waiting, in whatever runtime they chose, and hands the answer back.
+///
+/// Which is why nothing in this file mentions a runtime, a future, or a thread.
+/// The same bytecode runs under a blocking driver, a multi-thread one, and a
+/// single-threaded one — and the last is where "just block on it" panics.
+pub enum Step {
+    Done,
+    Failed(String),
+    /// Waiting on the value the program left in a register. Resolve it however
+    /// you like, then `resume_with`.
+    ///
+    /// Nothing emits `Op::Await` until your language has something that means it.
+    /// Bind a prefix operator to the `await` role —
+    ///
+    /// ```text
+    /// prefix word "AWAIT" -> await;
+    /// ```
+    ///
+    /// — and write the one method it asks for:
+    ///
+    /// ```ignore
+    /// fn r#await(&mut self, a: Reg) -> Result<Reg> {
+    ///     Ok(self.emit_await(a))
+    /// }
+    /// ```
+    ///
+    /// `r#await` because the role is named after a Rust keyword; the generator
+    /// escapes rather than mangles.
+    Awaiting(f64),
+}
+
+/// A program part-way through running.
+///
+/// State lives here rather than in local variables, and that is the only reason
+/// suspending is possible at all. A loop holding `pc`, the frames and the globals
+/// on the Rust stack cannot be stopped and started — and turning one into this
+/// afterwards is a rewrite of the interpreter, which is a poor thing to discover
+/// once a language has grown `AWAIT`.
+///
+/// It costs nothing to have it this way round, so it is this way round.
+pub struct Machine<'a> {
+    program: &'a Interp,
+    pc: usize,
+    globals: std::collections::HashMap<String, f64>,
+    frames: Vec<Frame>,
+    pub output: Vec<String>,
+    awaiting: Option<Reg>,
+}
+
+impl Machine<'_> {
+    /// Hands back the value the machine asked for and lets it carry on.
+    pub fn resume_with(&mut self, value: f64) {
+        let dst = self.awaiting.take().expect("resume_with without Awaiting");
+        let top = self.frames.len() - 1;
+        self.frames[top].regs[dst as usize] = value;
+    }
+
+    /// Runs until the program finishes, fails, or needs something.
+    pub fn resume(&mut self) -> Step {
+        while self.pc < self.program.code.len() {
+            let op = &self.program.code[self.pc];
+            self.pc += 1;
+            let top = self.frames.len() - 1;
+            let frames = &mut self.frames;
+            let globals = &mut self.globals;
 
             macro_rules! r {
                 ($i:expr) => {
@@ -345,13 +452,17 @@ impl Interp {
             }
 
             match op {
+                // The suspension point. No `.await` here, and no runtime.
+                Op::Await { dst, src } => {
+                    self.awaiting = Some(*dst);
+                    return Step::Awaiting(r!(*src));
+                }
                 Op::LoadK { dst, value } => r!(*dst) = *value,
                 Op::Move { dst, src } => r!(*dst) = r!(*src),
                 Op::LoadGlobal { dst, name } => match globals.get(name).copied() {
                     Some(v) => r!(*dst) = v,
                     None => {
-                        run.error = Some(format!("undefined variable `{name}`"));
-                        break;
+                        return Step::Failed(format!("undefined variable `{name}`"));
                     }
                 },
                 Op::StoreGlobal { name, src } => {
@@ -376,21 +487,21 @@ impl Interp {
                     };
                     r!(*dst) = if yes { 1.0 } else { 0.0 }
                 }
-                Op::Print { src } => run.output.push(format!("{}", r!(*src))),
-                Op::Jump(t) => pc = *t,
+                Op::Print { src } => self.output.push(format!("{}", r!(*src))),
+                Op::Jump(t) => self.pc = *t,
                 Op::JumpIfFalse { src, target } => {
                     if r!(*src) == 0.0 {
-                        pc = *target
+                        self.pc = *target
                     }
                 }
                 Op::JumpIfTrue { src, target } => {
                     if r!(*src) != 0.0 {
-                        pc = *target
+                        self.pc = *target
                     }
                 }
 {{vm_exec}}
             }
         }
-        run
+        Step::Done
     }
 }

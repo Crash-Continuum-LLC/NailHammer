@@ -843,16 +843,14 @@ const COMPILER_FN_OPS: &str = r##"    /// Args live in `base .. base + argc`; th
 "##;
 
 const COMPILER_FN_EXEC: &str = r##"                Op::Call { dst, base, argc, key, shown } => {
-                    let Some(f) = self.fns.get(key).copied() else {
-                        run.error = Some(format!("undefined function `{shown}`"));
-                        break;
+                    let Some(f) = self.program.fns.get(key).copied() else {
+                        return Step::Failed(format!("undefined function `{shown}`"));
                     };
                     if f.arity != *argc {
-                        run.error = Some(format!(
+                        return Step::Failed(format!(
                             "`{shown}` takes {} argument(s), got {argc}",
                             f.arity
                         ));
-                        break;
                     }
                     // The arguments are already contiguous and the callee's
                     // parameters are slots 0..n, so the calling convention is a
@@ -861,20 +859,20 @@ const COMPILER_FN_EXEC: &str = r##"                Op::Call { dst, base, argc, k
                     for i in 0..*argc {
                         regs[i] = frames[top].regs[*base as usize + i];
                     }
-                    frames.push(Frame { regs, ret_pc: pc, ret_reg: *dst });
-                    pc = f.addr;
+                    frames.push(Frame { regs, ret_pc: self.pc, ret_reg: *dst });
+                    self.pc = f.addr;
                 }
                 Op::Return { src } => {
                     let v = frames[top].regs[*src as usize];
                     let f = frames.pop().expect("return outside a call");
                     let caller = frames.len() - 1;
                     frames[caller].regs[f.ret_reg as usize] = v;
-                    pc = f.ret_pc;
+                    self.pc = f.ret_pc;
                 }
                 Op::ReturnUnit => {
                     let f = frames.pop().expect("return outside a call");
                     let caller = frames.len() - 1;
                     frames[caller].regs[f.ret_reg as usize] = 0.0;
-                    pc = f.ret_pc;
+                    self.pc = f.ret_pc;
                 }
 "##;

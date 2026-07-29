@@ -1459,6 +1459,58 @@ other way round would have been a dictate too.
 > the program can move or be shared. Whether your interpreter can is about your
 > own state, and is yours.
 
+### `AWAIT` in an expression, for a compiled language
+
+If your language has futures of its own, the answer is not an async evaluator. It
+is an **opcode and a suspendable machine** — and the compiler scaffold is already
+shaped for it.
+
+Three lines of grammar:
+
+```text
+prefix word "AWAIT" -> await;
+```
+
+Three of host code:
+
+```rust
+fn r#await(&mut self, a: Reg) -> Result<Reg> {
+    Ok(self.emit_await(a))
+}
+```
+
+`r#await` because the role is named after a Rust keyword; the generator escapes
+rather than mangles. Now `AWAIT` works anywhere an expression does, including
+several times in one:
+
+```basic
+PRINT (AWAIT a) + (AWAIT b) * 2
+```
+
+**The machine never awaits.** It stops, and says what it is waiting for:
+
+```rust
+loop {
+    match m.resume() {
+        Step::Done => break,
+        Step::Failed(e) => return Err(e),
+        // Whatever *you* call waiting, in whatever runtime you chose.
+        Step::Awaiting(handle) => m.resume_with(resolve(handle).await),
+    }
+}
+```
+
+So the same bytecode is driven by a blocking loop with no runtime at all, by a
+multi-thread tokio host, and by a **single-threaded** one — and that last is
+exactly where "block on the future" panics. Nothing in the generated VM mentions
+a runtime, a future or a thread.
+
+The one thing that makes this possible is where the machine keeps its state: in a
+struct, not in local variables. A loop holding `pc` and the frames on the Rust
+stack cannot be stopped and started, and converting one afterwards is a rewrite.
+That is why the scaffold is built that way even for languages that never suspend
+— it costs nothing, and it is the only part you cannot add later.
+
 ### `--async`: one way to reach a future, not the way
 
 `nh init --async` adds tokio and a `block_on` helper to *your* `lib.rs`. It is a
@@ -1470,9 +1522,8 @@ starting point you own and can delete, and it makes assumptions worth knowing:
   future rather than awaiting it. That costs a worker thread for the duration.
 
 That trade is right for a handler that occasionally reaches the network. It is
-wrong if your *language* has async semantics of its own, where the interpreter
-would need to yield to a scheduler rather than block — and in that case the
-helper is not what you want. Nothing forces you to take it: skip `--async` and
+wrong if your *language* has async semantics of its own — for that, compile and
+suspend, as above. Nothing forces you to take it: skip `--async` and
 the generated code neither mentions nor needs a runtime.
 
 The evaluator is synchronous on purpose. Making it async would mean every
