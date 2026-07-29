@@ -1,25 +1,18 @@
-//! Handler for `primary_call` — calling a function.
-//!
-//! The arguments emitted themselves, left to right, before this ran — so they
-//! are already on the stack in the order the callee expects. Eager bindings
-//! give a compiler its calling convention for free.
-//!
-//! The callee is looked up by name at *run* time rather than patched here, so
-//! a function can be called before it is defined, and can call itself.
-
+//! The arguments emitted themselves, left to right, into an allocator that
+//! hands out the top of the register file — so they are already in consecutive
+//! registers, which is exactly the calling convention.
 use nh_runtime::{Ctx, Result};
-{{name_import}}
-
-use crate::Interp;
+{{name_import}}use crate::{Interp, Reg};
 
 pub fn run(
     host: &mut Interp,
     name: {{name_ty}},
-    first: Option<()>,
-    rest: Vec<()>,
+    first: Option<Reg>,
+    rest: Vec<Reg>,
     _cx: &mut Ctx,
-) -> Result<()> {
-    let argc = usize::from(first.is_some()) + rest.len();
-    host.emit_call(name, argc);
-    Ok(())
+) -> Result<Reg> {
+    let mut args: Vec<Reg> = Vec::with_capacity(rest.len() + 1);
+    args.extend(first);
+    args.extend(rest);
+    Ok(host.emit_call(name, &args))
 }

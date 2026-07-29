@@ -1,12 +1,9 @@
-//! Handler for `line` — one statement and the newline that ends it.
-//!
-//! Only the line-oriented style has this. Nothing to emit: the statement
+//! One statement and the newline that ends it. Nothing to emit: the statement
 //! already did.
 
 use nh_runtime::{Ctx, Result};
+use crate::{Interp, Reg};
 
-use crate::Interp;
-
-pub fn run(_host: &mut Interp, _body: (), _cx: &mut Ctx) -> Result<()> {
-    Ok(())
+pub fn run(host: &mut Interp, _body: Reg, _cx: &mut Ctx) -> Result<Reg> {
+    Ok(host.next_reg())
 }

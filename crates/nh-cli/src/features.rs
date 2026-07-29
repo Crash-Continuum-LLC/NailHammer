@@ -531,8 +531,7 @@ fn host_chunk(f: Feature, is_compiler: bool) -> HostChunks {
             types: LOOP_FRAME.into(),
             state: "    /// One per loop being compiled. Innermost last.\n    pub loops: Vec<LoopFrame>,\n".into(),
             methods: LOOP_METHODS.into(),
-            vm_ops: "    /// `<=`, for a counting loop's test.\n    Le,\n".into(),
-            vm_exec: "                Op::Le => bin(&mut stack, |a, b| if a <= b { 1.0 } else { 0.0 }),\n".into(),
+            ..HostChunks::default()
         },
 
         (Feature::Functions, false) => HostChunks {
@@ -543,8 +542,8 @@ fn host_chunk(f: Feature, is_compiler: bool) -> HostChunks {
         },
 
         (Feature::Functions, true) => HostChunks {
-            types: COMPILER_FNINFO.into(),
-            state: "    /// Where each function starts, and how many arguments it takes.\n    pub fns: std::collections::HashMap<String, FnInfo>,\n".into(),
+            types: format!("{COMPILER_FNINFO}{COMPILER_SAVED}"),
+            state: "    /// Where each function starts, its arity and its frame size.\n    pub fns: std::collections::HashMap<String, FnInfo>,\n".into(),
             methods: COMPILER_FN_METHODS.into(),
             vm_ops: COMPILER_FN_OPS.into(),
             vm_exec: COMPILER_FN_EXEC.into(),
@@ -567,8 +566,6 @@ const LOOP_FRAME: &str = r##"/// One loop being compiled.
 /// handler fills them in once it knows where its own end and step are.
 #[derive(Debug, Default)]
 pub struct LoopFrame {
-    /// Where the loop starts, so frames can be told apart.
-    pub start: usize,
     pub breaks: Vec<usize>,
     pub continues: Vec<usize>,
 }
@@ -576,20 +573,43 @@ pub struct LoopFrame {
 "##;
 
 const LOOP_METHODS: &str = r##"
-    pub fn emit_add(&mut self) {
-        self.emit(Op::Add)
-    }
-
-    pub fn emit_le(&mut self) {
-        self.emit(Op::Le)
-    }
-
-    /// Starts collecting the jumps out of a loop.
-    pub fn enter_loop(&mut self, start: usize) {
-        self.loops.push(LoopFrame {
-            start,
-            ..LoopFrame::default()
+    /// `a <= b` — the counting loop's test. Frees `a` but not `b`, because `b`
+    /// is the limit and has to survive every iteration.
+    pub fn compare_le(&mut self, a: Reg, b: Reg) -> Reg {
+        let dst = self.reuse(&[a]);
+        self.emit(Op::Compare {
+            dst,
+            op: generated::dispatch::CompareOp::{{le_variant}},
+            a,
+            b,
         });
+        dst
+    }
+
+    /// `name = name + 1`.
+    ///
+    /// One instruction when the variable is a slot; a load, an add and a store
+    /// when it is a global. The difference is the whole point of slots, and
+    /// keeping it here means `stmt_for` never asks which it got.
+    pub fn emit_increment(&mut self, name: &str) {
+        let one = self.emit_const(1.0);
+        match self.lookup(name) {
+            Some(slot) => {
+                self.emit(Op::Add { dst: slot, a: slot, b: one });
+                self.free(one);
+            }
+            None => {
+                let cur = self.read_var(name);
+                let dst = self.reuse(&[cur, one]);
+                self.emit(Op::Add { dst, a: cur, b: one });
+                self.emit(Op::StoreGlobal { name: name.to_string(), src: dst });
+                self.free(dst);
+            }
+        }
+    }
+
+    pub fn enter_loop(&mut self) {
+        self.loops.push(LoopFrame::default());
     }
 
     /// Finishes a loop: every `break` lands after it, every `continue` on
@@ -609,23 +629,16 @@ const LOOP_METHODS: &str = r##"
         }
     }
 
-    /// Records a `break`. False when there is no loop to leave.
     pub fn break_to(&mut self, jump: usize) -> bool {
         match self.loops.last_mut() {
-            Some(frame) => {
-                frame.breaks.push(jump);
-                true
-            }
+            Some(f) => { f.breaks.push(jump); true }
             None => false,
         }
     }
 
     pub fn continue_to(&mut self, jump: usize) -> bool {
         match self.loops.last_mut() {
-            Some(frame) => {
-                frame.continues.push(jump);
-                true
-            }
+            Some(f) => { f.continues.push(jump); true }
             None => false,
         }
     }
@@ -704,51 +717,106 @@ const INTERP_CALL: &str = r##"
     }
 "##;
 
-const COMPILER_FNINFO: &str = r##"/// Where a function starts, and how many arguments it takes.
+const COMPILER_FNINFO: &str = r##"/// Where a function starts, how many arguments it takes, and how many
+/// registers its frame needs.
 #[derive(Clone, Copy, Debug)]
 pub struct FnInfo {
     pub addr: usize,
     pub arity: usize,
+    pub frame: usize,
 }
 
 "##;
 
 const COMPILER_FN_METHODS: &str = r##"
-    /// A call carries both spellings: one to find the function when the
-    /// program runs, one to name it if that fails. Baking only the folded form
-    /// into the instruction would mean a caller who wrote `Double` was told
-    /// about `double`.
-    pub fn emit_call(&mut self, name: {{name_ty}}, argc: usize) {
+    pub fn define_fn(&mut self, name: &str, addr: usize, arity: usize, frame: usize) {
+        self.fns.insert(name.to_string(), FnInfo { addr, arity, frame });
+    }
+
+    /// Starts a function body: parameters occupy slots `0..n`, and the caller
+    /// puts the arguments straight there.
+    pub fn enter_function(&mut self, params: &[String]) -> Saved {
+        let saved = Saved {
+            locals_end: self.locals_end,
+            next: self.next,
+            high: self.high,
+            scope: std::mem::take(&mut self.scope),
+            in_fn: self.in_fn,
+        };
+        self.locals_end = params.len() as Reg;
+        self.next = self.locals_end;
+        self.high = self.next;
+        self.in_fn = true;
+        for (i, p) in params.iter().enumerate() {
+            self.scope.insert(p.clone(), i as Reg);
+        }
+        saved
+    }
+
+    /// Ends it, returning the frame size the function needs.
+    pub fn exit_function(&mut self, saved: Saved) -> usize {
+        let frame = self.high as usize + 1;
+        self.locals_end = saved.locals_end;
+        self.next = saved.next;
+        self.high = saved.high;
+        self.scope = saved.scope;
+        self.in_fn = saved.in_fn;
+        frame
+    }
+
+    /// A call reads its arguments from consecutive registers. They already are
+    /// consecutive: eager parameters evaluated left to right, into an allocator
+    /// that hands out the top of the file.
+    pub fn emit_call(&mut self, name: {{name_ty}}, args: &[Reg]) -> Reg {
+        if let Some(first) = args.first() {
+            debug_assert!(
+                args.iter().enumerate().all(|(i, r)| *r == first + i as Reg),
+                "arguments must be contiguous: {args:?}"
+            );
+        }
+        let base = args.first().copied().unwrap_or_else(|| self.next_reg());
+        let dst = self.reuse(args);
         self.emit(Op::Call {
+            dst,
+            base,
+            argc: args.len(),
             key: name{{key}}.to_string(),
             shown: name{{text}}.to_string(),
-            argc,
         });
+        dst
     }
 
-    pub fn emit_return(&mut self) {
-        self.emit(Op::Return);
+    pub fn emit_return(&mut self, src: Option<Reg>) {
+        match src {
+            Some(src) => self.emit(Op::Return { src }),
+            None => self.emit(Op::ReturnUnit),
+        };
     }
 "##;
 
-const COMPILER_FN_OPS: &str = r##"    /// Call by name, with a known argument count. Resolved when the program
-    /// runs rather than patched here, so a function can be called before it is
-    /// defined — and can call itself.
-    Call {
-        /// Folded, to find the function.
-        key: String,
-        /// As written, for the diagnostic if it is not there.
-        shown: String,
-        argc: usize,
-    },
-    Return,
+/// The allocator state a function body borrows and gives back.
+const COMPILER_SAVED: &str = r##"/// The allocator state a function body borrows and gives back.
+#[derive(Debug)]
+pub struct Saved {
+    locals_end: Reg,
+    next: Reg,
+    high: Reg,
+    scope: std::collections::HashMap<String, Reg>,
+    in_fn: bool,
+}
+
 "##;
 
-const COMPILER_FN_EXEC: &str = r##"                Op::Call { key, shown, argc } => {
-                    // A real failure, reported through `run.error` so it
-                    // reaches stderr and the exit code. Pushing it into
-                    // `output` would put a diagnostic on stdout and still
-                    // exit 0.
+const COMPILER_FN_OPS: &str = r##"    /// Args live in `base .. base + argc`; the result lands in `dst`. The
+    /// callee is found by name when the program runs, so a function can be
+    /// called before it is defined — and can call itself.
+    Call { dst: Reg, base: Reg, argc: usize, key: String, shown: String },
+    Return { src: Reg },
+    /// Falling off the end of a function returns nothing in particular.
+    ReturnUnit,
+"##;
+
+const COMPILER_FN_EXEC: &str = r##"                Op::Call { dst, base, argc, key, shown } => {
                     let Some(f) = self.fns.get(key).copied() else {
                         run.error = Some(format!("undefined function `{shown}`"));
                         break;
@@ -760,14 +828,27 @@ const COMPILER_FN_EXEC: &str = r##"                Op::Call { key, shown, argc }
                         ));
                         break;
                     }
-                    frames.push(Frame {
-                        ret: pc,
-                        ..Frame::default()
-                    });
+                    // The arguments are already contiguous and the callee's
+                    // parameters are slots 0..n, so the calling convention is a
+                    // copy with no names involved.
+                    let mut regs = vec![0.0; f.frame];
+                    for i in 0..*argc {
+                        regs[i] = frames[top].regs[*base as usize + i];
+                    }
+                    frames.push(Frame { regs, ret_pc: pc, ret_reg: *dst });
                     pc = f.addr;
                 }
-                Op::Return => {
-                    let frame = frames.pop().expect("return outside a call");
-                    pc = frame.ret;
+                Op::Return { src } => {
+                    let v = frames[top].regs[*src as usize];
+                    let f = frames.pop().expect("return outside a call");
+                    let caller = frames.len() - 1;
+                    frames[caller].regs[f.ret_reg as usize] = v;
+                    pc = f.ret_pc;
+                }
+                Op::ReturnUnit => {
+                    let f = frames.pop().expect("return outside a call");
+                    let caller = frames.len() - 1;
+                    frames[caller].regs[f.ret_reg as usize] = 0.0;
+                    pc = f.ret_pc;
                 }
 "##;

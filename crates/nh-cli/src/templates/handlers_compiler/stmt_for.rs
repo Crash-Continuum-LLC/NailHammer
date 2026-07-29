@@ -1,67 +1,42 @@
-//! Handler for `stmt_for` — a counting loop.
+//! A counting loop.
 //!
-//! `from` and `to` are already on the stack: they are eager bindings, so their
-//! code was emitted before this ran, which is right — the bounds are fixed when
-//! the loop starts.
-//!
-//! ```text
-//! for i = a to b { body }
-//!
-//!   <a> · Store i · Pop · <b> · Store limit · Pop
-//!   top: Load i · Load limit · LtEq · JumpIfFalse end
-//!        <body>
-//!   next: Load i · Push 1 · Add · Store i · Pop · Jump top
-//!   end:
-//! ```
-//!
-//! `continue` lands on `next`, not `top` — skipping the increment would make
-//! it an infinite loop. That is the whole reason a loop frame carries two
-//! targets rather than one.
+//! Nothing here knows whether the counter is a slot or a global — `read_var`
+//! and `emit_increment` answer that, and the difference is three instructions
+//! per iteration against one.
 
 use std::rc::Rc;
-
 use nh_runtime::{Ctx, Result};
-{{name_import}}
-
-use crate::generated::ast::Block;
+{{name_import}}use crate::generated::ast::Block;
 use crate::generated::dispatch::Eval;
-use crate::Interp;
+use crate::{Interp, Reg};
 
 pub fn run(
     host: &mut Interp,
     var: {{name_ty}},
-    _from: (),
-    _to: (),
+    from: Reg,
+    to: Reg,
     body: &Rc<Block>,
     cx: &mut Ctx,
-) -> Result<()> {
-    // The bounds are on the stack, `to` on top. A hidden variable holds the
-    // limit so the body cannot reach it.
-    let limit = format!(" limit {}", var{{key}});
-    host.emit_store(&limit);
-    host.emit_pop();
-    host.emit_store(var{{key}});
-    host.emit_pop();
+) -> Result<Reg> {
+    let home = host.write_var(var{{key}}, from);
+    host.free(home);
 
     let top = host.here();
-    host.emit_load(var{{key}});
-    host.emit_load(&limit);
-    host.emit_le();
-    let to_end = host.emit_jump_if_false();
+    let cur = host.read_var(var{{key}});
+    let test = host.compare_le(cur, to);
+    let to_end = host.emit_jump_if_false(test);
+    host.free(test);
 
-    host.enter_loop(top);
+    host.enter_loop();
     body.eval(host, cx)?;
 
-    // Where `continue` goes: the increment, then back to the test.
-    let next = host.here();
-    host.emit_load(var{{key}});
-    host.emit_push(1.0);
-    host.emit_add();
-    host.emit_store(var{{key}});
-    host.emit_pop();
+    // Where `continue` lands. Skipping the increment would never terminate.
+    let step = host.here();
+    host.emit_increment(var{{key}});
     host.emit_jump_to(top);
 
     host.patch_to_here(to_end);
-    host.exit_loop(next);
-    Ok(())
+    host.exit_loop(step);
+    host.free(to);
+    Ok(host.next_reg())
 }

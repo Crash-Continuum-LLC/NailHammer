@@ -1,12 +1,7 @@
-//! Handler for `block` — a group of statements.
-//!
-//! Each statement emitted its own code before this ran, in order, so the block
-//! is already in the instruction stream and there is nothing left to do.
-
+//! A group of statements. Already emitted, in order.
 use nh_runtime::{Ctx, Result};
+use crate::{Interp, Reg};
 
-use crate::Interp;
-
-pub fn run(_host: &mut Interp, _stmts: Vec<()>, _cx: &mut Ctx) -> Result<()> {
-    Ok(())
+pub fn run(host: &mut Interp, _stmts: Vec<Reg>, _cx: &mut Ctx) -> Result<Reg> {
+    Ok(host.next_reg())
 }

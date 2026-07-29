@@ -386,6 +386,9 @@ fn render(template: &str, opts: &Options) -> String {
                 Style::Basic => "use nh_runtime::Name;\n",
             },
         )
+        // Spelled per style, and substituted after the chunks so the chunks
+        // can use them too.
+        .replace("{{le_variant}}", "LtEq")
         // The two questions a folded name can answer. `{{key}}` looks one up;
         // `{{text}}` reports it back the way it was written.
         .replace(

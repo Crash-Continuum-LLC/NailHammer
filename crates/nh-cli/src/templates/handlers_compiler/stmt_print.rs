@@ -1,12 +1,8 @@
-//! Handler for `stmt_print`.
-//!
-//! From `| "print" value:expr ";" -> print`
-
 use nh_runtime::{Ctx, Result};
+use crate::{Interp, Reg};
 
-use crate::Interp;
-
-pub fn run(host: &mut Interp, _value: (), _cx: &mut Ctx) -> Result<()> {
-    host.emit_print();
-    Ok(())
+pub fn run(host: &mut Interp, value: Reg, _cx: &mut Ctx) -> Result<Reg> {
+    host.emit_print(value);
+    host.free(value);
+    Ok(host.next_reg())
 }
