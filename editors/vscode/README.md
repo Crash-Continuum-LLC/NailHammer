@@ -69,14 +69,20 @@ completion is wanted.
 
 ## Evaluation playground
 
-`NailHammer: Evaluation Playground` opens two panes **beside** your grammar —
-one holding a program, one showing where that program goes. Your grammar stays
-where it is.
+`NailHammer: Evaluation Playground` opens a pane **beside** your grammar, split
+in two: a program on top, where it goes underneath. Your grammar stays where it
+is.
 
 ```
-  your .nh    │  a program        │  where it goes
-  (untouched) │  (edit this)      │  (updates as you type)
+                 │  playground.mylang   (edit this)
+  your .nh       ├──────────────────────────────────
+  (untouched)    │  where it goes       (updates as
+                 │                       you type)
 ```
+
+The program is an in-memory buffer — nothing is written to disk — but it is a
+*named* one, so the tab reads `playground.mylang` and picks up whatever language
+mode that suffix has.
 
 **There is nothing to press.** It opens already running: the middle pane starts
 from your project's `sample.*` file, so the trace is populated the moment it

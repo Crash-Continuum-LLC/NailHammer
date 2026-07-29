@@ -25,7 +25,11 @@ const stub = {
       fired.push(x);
     }
   },
-  Uri: { parse: (s) => ({ toString: () => s, scheme: s.split(":")[0] }) },
+  Uri: {
+    parse: (s) => ({ toString: () => s, scheme: s.split(":")[0], path: s.split(":")[1] }),
+  },
+  Position: class { constructor(l, c) { this.line = l; this.character = c; } },
+  WorkspaceEdit: class { insert() {} },
   ViewColumn: { One: 1, Two: 2 },
   workspace: {
     registerTextDocumentContentProvider() {},
@@ -35,10 +39,11 @@ const stub = {
   },
   window: {
     showTextDocument: async () => {},
+    visibleTextEditors: [],
     createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {} }),
   },
   StatusBarAlignment: { Left: 1, Right: 2 },
-  commands: { registerCommand() {} },
+  commands: { registerCommand() {}, executeCommand: async () => {} },
 };
 
 const load = Module._load;
@@ -73,20 +78,33 @@ check("the scratch file is named after the grammar", () => {
 // buffer you opened to understand it, which is the wrong way round.
 check("the panes go beside the grammar, never over it", () => {
   const at1 = playground.columns(1);
-  assert.strictEqual(at1.scratch, 2);
-  assert.strictEqual(at1.trace, 3);
   assert.ok(at1.scratch !== 1 && at1.trace !== 1, "column one belongs to the grammar");
 
-  // A grammar already in column two pushes both panes right, rather than
-  // reopening on top of something else.
-  const at2 = playground.columns(2);
-  assert.deepStrictEqual(at2, { scratch: 3, trace: 4 });
+  // One column, split top and bottom -- not two more columns. A trace is a deep
+  // tree and wants height; three narrow columns gave the wrong dimension to
+  // everything.
+  assert.strictEqual(at1.scratch, at1.trace, "program and trace share a column");
+  assert.strictEqual(at1.scratch, 2);
+
+  // A grammar already in column two pushes the playground right, rather than
+  // opening on top of whatever is there.
+  assert.deepStrictEqual(playground.columns(2), { scratch: 3, trace: 3 });
 
   // `activeTextEditor` can be undefined, and `viewColumn` can be a negative
   // sentinel. Neither should produce a nonsense column.
   for (const odd of [undefined, null, -1, -2, 0]) {
-    assert.deepStrictEqual(playground.columns(odd), { scratch: 2, trace: 3 }, String(odd));
+    assert.deepStrictEqual(playground.columns(odd), { scratch: 2, trace: 2 }, String(odd));
   }
+});
+
+// A real file on disk was never needed for a real tab name.
+check("the program buffer is named, and still in memory", () => {
+  const uri = playground.scratchUri("/x/mylang.nh");
+  assert.strictEqual(uri.scheme, "untitled", "nothing is written to disk");
+  assert.ok(
+    uri.toString().endsWith("playground.mylang"),
+    `the tab should read the language's name, got ${uri.toString()}`,
+  );
 });
 
 // The complaint that prompted this: two blank panes and no button is a poor

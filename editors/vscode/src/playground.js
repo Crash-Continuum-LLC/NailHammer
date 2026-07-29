@@ -150,15 +150,31 @@ async function refresh(run) {
 }
 
 /**
- * Where the two panes go, given the column the grammar is in.
+ * Which column the playground occupies, given where the grammar is.
  *
  * **Not column one.** That is where the grammar usually is, and opening over it
- * hides the file you are editing behind the scratch buffer you opened to
- * understand it — which is the wrong way round.
+ * hides the file you are editing behind the buffer you opened to understand it
+ * — which is the wrong way round.
+ *
+ * One column, not two: the program and its trace share it, split top and
+ * bottom. A trace is a deep tree, so it wants height; a program is usually a
+ * few lines. Three narrow columns gave the wrong dimension to both.
  */
 function columns(grammarColumn) {
   const at = typeof grammarColumn === "number" && grammarColumn > 0 ? grammarColumn : 1;
-  return { scratch: at + 1, trace: at + 2 };
+  return { scratch: at + 1, trace: at + 1 };
+}
+
+/**
+ * The URI of the in-memory program buffer.
+ *
+ * `untitled:` with a path, rather than an anonymous buffer: the tab then reads
+ * `playground.mylang` instead of `Untitled-1`, and the extension gives it
+ * whatever language mode that suffix is registered for. Nothing is written to
+ * disk either way — a real file was never needed for a real name.
+ */
+function scratchUri(grammar) {
+  return vscode.Uri.parse(`untitled:${sampleName(grammar)}`);
 }
 
 /**
@@ -177,13 +193,18 @@ async function open(activeGrammar, run) {
 
   // Reuse the buffer if one is already open. Running the command twice used to
   // leave a second untitled document behind, and only the newest was traced.
-  const alreadyOpen = vscode.workspace.textDocuments;
-  const scratch =
-    session && alreadyOpen.includes(session.doc)
-      ? session.doc
-      : // Untitled, so nothing is written to disk and closing it asks nothing.
-        // Seeded from the project's sample, so it opens already running.
-        await vscode.workspace.openTextDocument({ content: seed(grammar) });
+  const uri = scratchUri(grammar);
+  const scratch = await vscode.workspace.openTextDocument(uri);
+
+  // Seeded from the project's sample, so the playground opens already running.
+  if (!scratch.getText()) {
+    const text = seed(grammar);
+    if (text) {
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(uri, new vscode.Position(0, 0), text);
+      await vscode.workspace.applyEdit(edit);
+    }
+  }
 
   session = { grammar, doc: scratch };
 
@@ -191,12 +212,27 @@ async function open(activeGrammar, run) {
     vscode.Uri.parse(`${SCHEME}:${sampleName(grammar)} → handlers`),
   );
 
-  // Trace first, then the scratch buffer, so focus ends where you type.
-  await vscode.window.showTextDocument(traceDoc, {
-    viewColumn: where.trace,
+  await vscode.window.showTextDocument(scratch, {
+    viewColumn: where.scratch,
     preview: false,
-    preserveFocus: true,
   });
+
+  // Split the column so the trace sits *under* the program rather than beside
+  // it. Only when it is not already laid out — running the command twice
+  // should not keep halving the pane.
+  const already = vscode.window.visibleTextEditors.some(
+    (e) => e.document.uri.scheme === SCHEME,
+  );
+  if (!already) {
+    await vscode.commands.executeCommand("workbench.action.splitEditorDown");
+  }
+  await vscode.window.showTextDocument(traceDoc, {
+    viewColumn: vscode.ViewColumn.Active,
+    preview: false,
+    preserveFocus: false,
+  });
+
+  // Focus ends where you type.
   await vscode.window.showTextDocument(scratch, {
     viewColumn: where.scratch,
     preview: false,
@@ -268,6 +304,7 @@ module.exports = {
   columns,
   header,
   seed,
+  scratchUri,
   SCHEME,
   TraceProvider,
 };
