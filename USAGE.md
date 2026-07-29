@@ -50,7 +50,7 @@ To skip the Rust toolchain entirely, take a prebuilt binary from a release.
 Builds exist for macOS (arm64 and x86_64), Linux, and Windows:
 
 ```console
-$ gh release download v0.1.0 --repo Crash-Continuum-LLC/NailHammer \
+$ gh release download v0.2.0 --repo Crash-Continuum-LLC/NailHammer \
     --pattern '*macos-arm64*'
 $ tar xzf nh-macos-arm64.tar.gz
 $ sudo mv nh-macos-arm64/nh /usr/local/bin/

@@ -47,7 +47,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "nh-analysis"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nh-operators",
  "nh-syntax",
@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "nh-build"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nh-analysis",
  "nh-codegen",
@@ -66,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "nh-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nh-analysis",
  "nh-codegen",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "nh-codegen"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nh-lower",
  "nh-operators",
@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "nh-lower"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nh-operators",
  "nh-syntax",
@@ -99,14 +99,14 @@ dependencies = [
 
 [[package]]
 name = "nh-operators"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "nh-syntax",
 ]
 
 [[package]]
 name = "nh-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pest",
  "pest_meta",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "nh-syntax"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pest",
  "pest_derive",
