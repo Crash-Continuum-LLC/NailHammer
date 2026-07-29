@@ -83,7 +83,7 @@ fn field(name: &str, value: &str) -> String {
 /// Diagnostics contain quotes and backslashes constantly — every message that
 /// names a `"literal"` or a `\n` escape — so this is the part that has to be
 /// right.
-fn quote(s: &str) -> String {
+pub fn quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {

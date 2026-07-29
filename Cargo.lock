@@ -73,6 +73,7 @@ dependencies = [
  "nh-lower",
  "nh-operators",
  "nh-syntax",
+ "pest",
  "pest_meta",
  "pest_vm",
 ]

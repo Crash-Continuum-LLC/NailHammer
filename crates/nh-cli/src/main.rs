@@ -12,6 +12,7 @@ use nh_syntax::{render, resolve, Ast, Errors, SourceMap};
 mod features;
 mod init;
 mod json;
+mod trace;
 mod vendor;
 
 const USAGE: &str = "\
@@ -22,6 +23,8 @@ USAGE:
                [--with loops,functions] [--compiler] [--async] [--force]
     nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
     nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
+    nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
+    nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
     nh explain <file.nh> [--source]
     nh --help | --version
 
@@ -50,7 +53,10 @@ OPTIONS:
     -o <path>  build: write the .pest here instead of alongside the .nh file
     --rust <d> build: also generate views, dispatch, and handler stubs into <d>
     --prune    build: remove handler files with no matching grammar alternative
-    --source   explain: print the table as .nh source you could paste
+    --source   trace: the program to trace, as text
+               explain: print the table as .nh source you could paste
+    --input    trace: the program to trace, as a file
+    --rule     trace: start at this rule instead of the first one declared
 
 New here? `nh init mylang && cd mylang && cargo run`
 ";
@@ -72,6 +78,7 @@ fn main() -> ExitCode {
         "check" => check(&args[1..]),
         "build" => build(&args[1..]),
         "explain" => explain(&args[1..]),
+        "trace" => trace_cmd(&args[1..]),
         other => {
             eprintln!("error: unknown command `{other}`\n");
             eprint!("{USAGE}");
@@ -563,6 +570,68 @@ fn prune_orphans(dir: &Path, expected: &[String], prune: bool, force: bool) -> R
         eprintln!("ok: removed {removed} orphaned handler(s)");
     }
     Ok(())
+}
+
+/// `nh trace <grammar.nh> --input <program>` — what a program routes to.
+///
+/// Nothing is compiled: `pest_vm` interprets the lowered grammar, so this is as
+/// fast as parsing. That is the whole reason it is worth having — the question
+/// "which handler gets this, and with what?" is otherwise a generate-compile-
+/// print round trip to learn something the grammar already decided.
+fn trace_cmd(args: &[String]) -> ExitCode {
+    let parsed = match parse_args(args, &["--json"], &["--input", "--source", "--rule"]) {
+        Ok(p) => p,
+        Err(e) => return usage_error(e),
+    };
+    let Some(path) = parsed.path.clone() else {
+        return usage_error("`nh trace` needs a grammar file".into());
+    };
+
+    let program = match (parsed.value("--source"), parsed.value("--input")) {
+        (Some(s), _) => s.to_string(),
+        (None, Some(f)) => match std::fs::read_to_string(f) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: cannot read `{f}`: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        (None, None) => {
+            return usage_error("`nh trace` needs --input <file> or --source <text>".into())
+        }
+    };
+
+    let mut sm = SourceMap::new();
+    let (ast, table) = match load(&path, &mut sm) {
+        Ok(v) => v,
+        Err(e) => return report(&e, &sm),
+    };
+    let lowered = match nh_lower::lower(&ast, &table) {
+        Ok(l) => l,
+        Err(e) => return report(&e, &sm),
+    };
+
+    // The entry rule is the first one declared, unless told otherwise.
+    let entry = parsed
+        .value("--rule")
+        .map(str::to_string)
+        .or_else(|| lowered.rules.first().map(|r| r.name.clone()))
+        .unwrap_or_else(|| "program".into());
+
+    match trace::trace(&lowered, &table, &entry, &program) {
+        Ok(node) => {
+            if parsed.has("--json") {
+                println!("{}", trace::to_json(&node));
+            } else {
+                print!("{}", trace::render(&node, "handlers"));
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn explain(args: &[String]) -> ExitCode {
