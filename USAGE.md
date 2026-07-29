@@ -742,10 +742,13 @@ type Out = ();      // stack compiler: nothing is returned; results live on the 
 type Out = Reg;     // register compiler: which register holds the result
 ```
 
-`nh init --compiler` scaffolds the third, because it is the one worth building
-on — see [Registers, and why slots matter](#registers-and-why-slots-matter)
-below. `examples/bytecode` is the second, kept because a stack machine is the
-shortest way to see the idea.
+**The third is the default.** `nh init` scaffolds a register machine, because it
+is the shape that scales and the only one that can suspend — see
+[Registers, and why slots matter](#registers-and-why-slots-matter) and
+[`AWAIT` in an expression](#await-in-an-expression-for-a-compiled-language)
+below. `nh init --interpreter` gives you the tree-walker.
+`examples/bytecode` is the second, kept because a stack machine is the shortest
+way to see the idea.
 
 **Eager parameters give a compiler stack order for free.** They are evaluated
 left to right *before* the handler runs, and for a compiler "evaluated" means
@@ -1511,24 +1514,22 @@ stack cannot be stopped and started, and converting one afterwards is a rewrite.
 That is why the scaffold is built that way even for languages that never suspend
 — it costs nothing, and it is the only part you cannot add later.
 
-### `--async`: one way to reach a future, not the way
+### A tree-walking interpreter has no async story
 
-`nh init --async` adds tokio and a `block_on` helper to *your* `lib.rs`. It is a
-starting point you own and can delete, and it makes assumptions worth knowing:
+On purpose, and nothing is scaffolded for it.
 
-* **tokio specifically**, and its **multi-thread** flavour. The helper uses
-  `block_in_place`, which panics on a current-thread runtime.
-* **Sync-over-async.** The evaluator is synchronous, so a handler blocks on a
-  future rather than awaiting it. That costs a worker thread for the duration.
+Both ways of giving one to a tree-walker are bad. **Blocking** on a future needs
+a multi-thread runtime — the usual `block_in_place` spelling panics on a
+current-thread one — costs a worker thread for the duration, and stalls every
+other program if your language has concurrency of its own. An **async evaluator**
+means every `eval_*` returns a boxed future, because async recursion requires
+`Box::pin`: a heap allocation per node, whether or not a language ever awaits.
 
-That trade is right for a handler that occasionally reaches the network. It is
-wrong if your *language* has async semantics of its own — for that, compile and
-suspend, as above. Nothing forces you to take it: skip `--async` and
-the generated code neither mentions nor needs a runtime.
+So `nh init` offers neither, and no scaffold mentions a runtime — a test asserts
+that for both shapes. If you want to block inside an interpreter handler, add
+tokio and four lines yourself. Being able to is different from being handed it.
 
-The evaluator is synchronous on purpose. Making it async would mean every
-`eval_*` returned a boxed future — a heap allocation per node — whether or not a
-language ever awaits anything.
+If your *language* has futures, compile: see above.
 
 ---
 

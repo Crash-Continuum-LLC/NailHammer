@@ -14,6 +14,11 @@ It works, it is not a skeleton: variables, arithmetic with real precedence,
 branches, printing and error recovery — plus loops and functions if you asked
 for them.
 
+By default this is a **compiler**: handlers emit three-address code for a
+register machine, and `cargo run` prints the instructions before running them.
+`nh init --interpreter` scaffolds a tree-walker instead, where handlers return
+values.
+
 ## The loop
 
 ```console

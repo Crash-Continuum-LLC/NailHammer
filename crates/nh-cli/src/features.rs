@@ -212,8 +212,9 @@ mod tests {
     /// a script and `nh init` at a prompt produce different projects.
     #[test]
     fn a_script_gets_what_a_person_pressing_enter_would_get() {
-        let (style, features) = choose(None, None, false).unwrap();
+        let (style, features, interpreter) = choose(None, None, false, false).unwrap();
         assert_eq!(style, Style::C, "the prompt's default style");
+        assert!(!interpreter, "the prompt's default shape is the compiler");
         assert_eq!(
             features,
             Features::all(),
@@ -224,10 +225,10 @@ mod tests {
     /// An explicit flag still wins, and still means exactly what it says.
     #[test]
     fn a_flag_overrides_the_default_in_either_direction() {
-        assert_eq!(choose(None, Some("none"), false).unwrap().1, Features::none());
+        assert_eq!(choose(None, Some("none"), false, false).unwrap().1, Features::none());
         assert_eq!(
-            choose(Some("basic"), Some("loops"), false).unwrap(),
-            (Style::Basic, Features::from_list(&[Feature::Loops]))
+            choose(Some("basic"), Some("loops"), true, false).unwrap(),
+            (Style::Basic, Features::from_list(&[Feature::Loops]), true)
         );
     }
 
@@ -375,21 +376,28 @@ pub const ARG_RULE: &str = "rule more_arg = \",\" value:expr -> one;\n";
 pub fn choose(
     style_flag: Option<&str>,
     with_flag: Option<&str>,
+    interpreter_flag: bool,
     interactive: bool,
-) -> Result<(Style, Features), String> {
+) -> Result<(Style, Features, bool), String> {
     let style = style_flag.map(Style::parse).transpose()?;
     let features = with_flag.map(Features::parse).transpose()?;
 
+    // An explicit `--interpreter` is an answer, so it is not asked again.
     if let (Some(s), Some(f)) = (style, features.clone()) {
-        return Ok((s, f));
+        return Ok((s, f, interpreter_flag));
     }
     if !interactive {
         // The same answer a person gets for pressing Enter. A default that
         // depends on whether anybody is watching is a surprise: `nh init` in a
         // script and `nh init` in a terminal should build the same project.
-        return Ok((style.unwrap_or_default(), features.unwrap_or_else(Features::all)));
+        return Ok((
+            style.unwrap_or_default(),
+            features.unwrap_or_else(Features::all),
+            interpreter_flag,
+        ));
     }
 
+    let interpreter = if interpreter_flag { true } else { ask_shape()? };
     let style = match style {
         Some(s) => s,
         None => ask_style()?,
@@ -398,7 +406,23 @@ pub fn choose(
         Some(f) => f,
         None => ask_features()?,
     };
-    Ok((style, features))
+    Ok((style, features, interpreter))
+}
+
+/// Asked first, because it is the choice the other two sit inside.
+fn ask_shape() -> Result<bool, String> {
+    println!("\nWhich shape?");
+    println!("  1) compiler     bytecode for a register machine, and it can suspend");
+    println!("  2) interpreter  a tree-walker: shorter to read, no `await`");
+
+    loop {
+        let answer = prompt("shape [1]: ")?;
+        match answer.to_ascii_lowercase().as_str() {
+            "" | "1" | "compiler" | "compile" => return Ok(false),
+            "2" | "interpreter" | "interpret" => return Ok(true),
+            other => println!("  expected `compiler` or `interpreter`, got `{other}`"),
+        }
+    }
 }
 
 fn prompt(question: &str) -> Result<String, String> {

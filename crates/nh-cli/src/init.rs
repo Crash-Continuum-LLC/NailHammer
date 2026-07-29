@@ -41,7 +41,7 @@ fn sample_template(style: Style) -> &'static str {
 }
 
 fn lib_template(opts: &Options) -> &'static str {
-    match (opts.is_compiler, opts.style) {
+    match (!opts.is_interpreter, opts.style) {
         (false, Style::C) => LIB_RS,
         (false, Style::Basic) => LIB_RS_BASIC,
         (true, Style::C) => LIB_RS_COMPILER,
@@ -144,49 +144,22 @@ const PRODUCED_COMPILER: &str = r#"        // Compiling produced instructions; r
         }
         run.error"#;
 
-/// Added to `Cargo.toml` by `--async`.
-const TOKIO_DEP: &str = r#"
-# Added by `nh init --async`. `rt-multi-thread` is not optional: the helper in
-# `src/lib.rs` uses `block_in_place`, which panics on the current-thread
-# runtime.
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
-"#;
+/// A tree-walking interpreter has no async story, on purpose.
+///
+/// Both ways of giving it one are bad. Blocking on a future needs a multi-thread
+/// runtime — `block_in_place` panics on a current-thread one — costs a worker
+/// thread per await, and stalls every other program if the language has
+/// concurrency of its own. An async evaluator means every `eval_*` returns a
+/// boxed future, because async recursion needs `Box::pin`: a heap allocation per
+/// node whether a language awaits or not.
+///
+/// So nothing is scaffolded for it. A compiled host suspends instead — `Op::Await`
+/// and `Step::Awaiting`, with no runtime anywhere in the machine — and that is
+/// the default shape. Somebody who wants to block inside an interpreter handler
+/// can add tokio and four lines themselves; being able to is different from being
+/// handed it.
+const _ASYNC: () = ();
 
-/// The helper `--async` adds to the host, and the reason it exists.
-const ASYNC_SUPPORT: &str = r#"
-impl Interp {
-    /// Runs a future from inside a handler.
-    ///
-    /// Handlers are synchronous, because the evaluator is: making it async
-    /// would mean every `eval_*` returned a boxed future — a heap allocation
-    /// per node — whether or not a language ever awaits anything.
-    ///
-    /// So async work is *blocked on* instead. The obvious spelling of that,
-    ///
-    /// ```ignore
-    /// Handle::current().block_on(fut)   // panics
-    /// ```
-    ///
-    /// fails with "Cannot start a runtime from within a runtime", because the
-    /// thread is already driving the executor. `block_in_place` hands the
-    /// thread's other work to a sibling worker first, which is what makes the
-    /// block legal.
-    ///
-    /// ```ignore
-    /// let body = host.block_on(reqwest::get(url));
-    /// ```
-    ///
-    /// The cost is a tokio worker thread for the duration of the call. That is
-    /// the right trade for a handler that occasionally reaches the network; it
-    /// is the wrong one if the *language* has async semantics of its own, where
-    /// the interpreter would need to yield to a scheduler rather than block.
-    pub fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
-        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))
-    }
-}
-"#;
-
-/// Kept in step with the workspace version.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Path to this checkout's `nh-runtime`.
@@ -205,17 +178,15 @@ pub struct Options {
     pub style: Style,
     /// Optional capabilities: loops, functions.
     pub features: Features,
-    /// Scaffold a bytecode compiler rather than an interpreter.
+    /// Scaffold a **tree-walking interpreter** rather than the default compiler.
     ///
-    /// The grammar, the generated code, and `eval_source` are the same either
-    /// way — only `src/lib.rs` and the handlers differ, and only in that `Out`
-    /// is `()` and bodies emit instead of compute.
-    pub is_compiler: bool,
-    /// Set up the project for async work in handlers.
-    ///
-    /// The evaluator stays synchronous — see `ASYNC_NOTE` for why, and for the
-    /// one trap this exists to remove.
-    pub is_async: bool,
+    /// The grammar, the generated code and `eval_source` are the same either way.
+    /// The compiler is the default because it is the shape that scales: a
+    /// register machine with slot-allocated locals is faster, and it can suspend,
+    /// which is the only way a language gets `await` without the interpreter
+    /// blocking a thread per call. An interpreter is the shorter path to a
+    /// working language, and stays worth having for that.
+    pub is_interpreter: bool,
 }
 
 impl Options {
@@ -228,8 +199,7 @@ impl Options {
         name: Option<String>,
         ext: Option<String>,
         force: bool,
-        is_async: bool,
-        is_compiler: bool,
+        is_interpreter: bool,
         style: Style,
         features: Features,
     ) -> Result<Self, String> {
@@ -265,8 +235,7 @@ impl Options {
             grammar,
             ext,
             force,
-            is_async,
-            is_compiler,
+            is_interpreter,
             style,
             features,
         })
@@ -333,7 +302,7 @@ fn render(template: &str, opts: &Options) -> String {
     } else {
         ""
     };
-    let chunks = opts.features.host_chunks(opts.is_compiler);
+    let chunks = opts.features.host_chunks(!opts.is_interpreter);
 
     template
         .replace("{{reserved}}", &parts.reserved)
@@ -344,10 +313,6 @@ fn render(template: &str, opts: &Options) -> String {
         .replace("{{name}}", &opts.name)
         .replace("{{Name}}", &opts.grammar)
         .replace("{{ext}}", &opts.ext)
-        .replace("{{tokiodep}}", if opts.is_async { TOKIO_DEP } else { "" })
-        .replace("{{tokiomain}}", if opts.is_async { "#[tokio::main(flavor = \"multi_thread\")]\n" } else { "" })
-        .replace("{{mainasync}}", if opts.is_async { "async " } else { "" })
-        .replace("{{asyncsupport}}", if opts.is_async { ASYNC_SUPPORT } else { "" })
         .replace(
             "{{sample_loops}}",
             match (opts.features.has(Feature::Loops), opts.style) {
@@ -407,7 +372,7 @@ fn render(template: &str, opts: &Options) -> String {
         )
         .replace(
             "{{produced}}",
-            if opts.is_compiler {
+            if !opts.is_interpreter {
                 PRODUCED_COMPILER
             } else {
                 PRODUCED_INTERP
@@ -469,7 +434,7 @@ pub fn scaffold(opts: &Options) -> Result<Created, String> {
         ),
         (src.join("main.rs"), render(MAIN_RS, opts)),
     ];
-    let handler_set = if opts.is_compiler {
+    let handler_set = if !opts.is_interpreter {
         HANDLERS_COMPILER
     } else {
         HANDLERS
@@ -523,7 +488,7 @@ mod tests {
     #[test]
     fn a_scaffold_depends_only_on_pest_and_the_vendored_runtime() {
         let toml = render(CARGO_TOML, &Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false, Style::C, Features::none(),
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, Style::C, Features::none(),
         ).unwrap());
 
         assert!(
@@ -543,7 +508,7 @@ mod tests {
     #[test]
     fn the_build_script_shells_out_rather_than_depending_on_the_generator() {
         let build = render(BUILD_RS, &Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false, Style::C, Features::none(),
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, Style::C, Features::none(),
         ).unwrap());
 
         assert!(build.contains("Command::new"), "{build}");
@@ -556,7 +521,7 @@ mod tests {
     fn a_keyword_name_is_refused() {
         // `nh init pub` would generate `use pub::...`, which does not compile.
         let err = Options::new(
-            PathBuf::from("/tmp/pub"), Some("pub".into()), None, false, false, false,
+            PathBuf::from("/tmp/pub"), Some("pub".into()), None, false, false,
             Style::C, Features::none(),
         )
             .expect_err("a Rust keyword cannot name a crate");
@@ -573,7 +538,7 @@ mod tests {
     #[test]
     fn templates_have_no_unreplaced_placeholders() {
         let opts = Options::new(
-            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false, false,
+            PathBuf::from("/tmp/x"), Some("demo".into()), None, false, false,
             Style::C, Features::all(),
         ).unwrap();
         for t in [GRAMMAR_C, GRAMMAR_BASIC, CARGO_TOML, MAIN_RS, README, GITIGNORE, SAMPLE_C, SAMPLE_BASIC] {

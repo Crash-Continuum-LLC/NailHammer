@@ -20,7 +20,7 @@ nh — NailHammer grammar toolkit
 
 USAGE:
     nh init    [dir] [--name <name>] [--ext <ext>] [--style c|basic]
-               [--with loops,functions] [--compiler] [--async] [--force]
+               [--with loops,functions] [--interpreter] [--force]
     nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
     nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
     nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
@@ -41,8 +41,9 @@ OPTIONS:
                (line-oriented). Both drive the same handlers
     --with     init: what to include — `loops`, `functions`, `none`.
                Defaults to all of them; a terminal asks, a script does not
-    --compiler init: scaffold a bytecode compiler instead of an interpreter
-    --async    init: add tokio and a `block_on` helper for async work in handlers
+    --interpreter
+               init: scaffold a tree-walking interpreter. The default is a
+               bytecode compiler, which is faster and can suspend
     --force    init: write into a non-empty directory
                build: with --prune, remove implemented handlers too
     --quiet    check: report diagnostics only
@@ -155,7 +156,7 @@ fn report(errors: &Errors, sm: &SourceMap) -> ExitCode {
 // ---------------------------------------------------------------------------
 
 fn init_cmd(args: &[String]) -> ExitCode {
-    let parsed = match parse_args(args, &["--force", "--async", "--compiler"], &["--name", "--ext", "--style", "--with"]) {
+    let parsed = match parse_args(args, &["--force", "--interpreter"], &["--name", "--ext", "--style", "--with"]) {
         Ok(p) => p,
         Err(e) => return usage_error(e),
     };
@@ -164,9 +165,10 @@ fn init_cmd(args: &[String]) -> ExitCode {
 
     // A person at a prompt gets asked; a script gets the defaults.
     let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
-    let (style, features) = match features::choose(
+    let (style, features, is_interpreter) = match features::choose(
         parsed.value("--style"),
         parsed.value("--with"),
+        parsed.has("--interpreter"),
         interactive,
     ) {
         Ok(pair) => pair,
@@ -178,8 +180,7 @@ fn init_cmd(args: &[String]) -> ExitCode {
         parsed.value("--name").map(str::to_string),
         parsed.value("--ext").map(str::to_string),
         parsed.has("--force"),
-        parsed.has("--async"),
-        parsed.has("--compiler"),
+        is_interpreter,
         style,
         features,
     ) {

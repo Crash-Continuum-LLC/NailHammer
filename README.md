@@ -256,16 +256,37 @@ type Out = Value;   // an interpreter: what a node evaluated to
 type Out = Reg;     // a compiler: which register holds the result
 ```
 
-`nh init --compiler` scaffolds the second — a **register machine** emitting
-three-address code, with locals allocated to slots at compile time. The operator
-trait reads as three-address code without any change to the toolkit:
+**The compiler is the default.** `nh init` scaffolds a **register machine**
+emitting three-address code, with locals allocated to slots at compile time; the
+operator trait reads as three-address code without any change to the toolkit:
 
 ```rust
 fn add(&mut self, a: Reg, b: Reg) -> Result<Reg>
 ```
 
-An `#[ignore]`d end-to-end test builds all sixteen style × feature × shape
-combinations and asserts the two shapes print the same thing.
+`nh init --interpreter` gives you the tree-walker instead — shorter to read, and
+the quicker path to a working language. An `#[ignore]`d end-to-end test builds
+all sixteen style × feature × shape combinations and asserts the two shapes print
+the same thing.
+
+### Why the compiler is the default
+
+It is the shape that scales, and it is the only one that can **suspend**. If your
+language grows `await`, a compiled host stops and lets its driver do the waiting:
+
+```rust
+Step::Awaiting(handle) => m.resume_with(resolve(handle).await),
+```
+
+Nothing in the generated machine mentions a runtime, a future, or a thread, so the
+same bytecode is driven by a blocking loop, a multi-thread host, or a
+single-threaded one — and the last is where "just block on it" panics.
+
+A tree-walker cannot do that. Blocking on a future needs a multi-thread runtime,
+costs a worker thread per await, and stalls every other program if the language
+has concurrency of its own; an async evaluator boxes a future per AST node whether
+a language awaits or not. **So nothing is scaffolded for it.** Wiring it yourself
+is perfectly possible, and different from being handed it.
 
 ## Threads
 

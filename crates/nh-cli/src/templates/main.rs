@@ -16,7 +16,7 @@
 use nh_runtime::{Ctx, SourceMap};
 use {{name}}::{generated, Interp};
 
-{{tokiomain}}{{mainasync}}fn main() -> std::process::ExitCode {
+fn main() -> std::process::ExitCode {
     let path = std::env::args().nth(1).unwrap_or_else(|| "sample.{{ext}}".into());
 
     // Yours: where the source comes from.

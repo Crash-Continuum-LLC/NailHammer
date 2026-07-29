@@ -1975,15 +1975,33 @@ rather than guessing:
 error: this program suspends; drive `machine()` instead
 ```
 
+### The compiler became the default, and `--async` went away
+
+Two decisions that turned out to be one.
+
+`--async` added tokio and a `block_on` helper. Its only purpose was papering over
+a tree-walker's inability to suspend, and both ways of giving one async are bad
+(above). Offering the less-bad one is worse than offering neither: it reads as a
+supported path. So the flag is gone, and a test asserts **no scaffold mentions a
+runtime** — not tokio, not `block_in_place`, not `async fn` — for either shape.
+Somebody who wants to block inside an interpreter handler adds four lines
+themselves. Being able to is different from being handed it.
+
+With that gone, the shapes are no longer symmetric: one can suspend and one
+cannot, and the one that can is also faster. So `nh init` scaffolds the compiler
+and `--interpreter` opts out, rather than the other way round. The tree-walker
+stays because it is the shorter path to a working language and much the easier one
+to read — not because it is the one to build on.
+
+The interactive picker asks shape first, since style and feature set sit inside
+that choice.
+
 ### Async is offered, not assumed
 
-`nh init --async` remains one answer rather than the answer, and now says what it
-assumes: tokio, its multi-thread flavour specifically (`block_in_place` panics on
-a current-thread runtime), and sync-over-async at the cost of a worker thread.
-Right for a handler that occasionally reaches the network; wrong for a language
-with async semantics of its own, which would need the interpreter to yield rather
-than block. Skip the flag and the generated code neither mentions nor needs a
-runtime.
+*Superseded by the section above: the flag is gone.* It assumed tokio, its
+multi-thread flavour specifically, and sync-over-async at the cost of a worker
+thread — defensible for a handler that occasionally reaches the network, and the
+wrong shape to hand anybody as *the* answer.
 
 The evaluator stays synchronous for the reason it always did: an async one means
 every `eval_*` returns a boxed future, a heap allocation per node, whether or not

@@ -159,8 +159,9 @@ fn handlers_are_implemented_not_stubbed() {
         "the scaffold must ship working handlers:\n{handler}"
     );
     assert!(
-        handler.contains("name: &str, value: Value"),
-        "and they take their bindings as parameters:\n{handler}"
+        handler.contains("name: &str, value: Reg"),
+        "and they take their bindings as parameters — `Reg`, because the default\n\
+         shape is a register-machine compiler:\n{handler}"
     );
 }
 
@@ -368,7 +369,7 @@ fn scaffolded_project_builds_and_runs() {
 #[test]
 #[ignore = "compiles a whole cargo project"]
 fn the_compiler_scaffold_gives_the_same_answers_as_the_interpreter() {
-    let dir = scaffold_with("e2ec", &["--compiler"]);
+    let dir = scaffold("e2ec");
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
@@ -407,7 +408,7 @@ fn the_compiler_scaffold_gives_the_same_answers_as_the_interpreter() {
 /// `fn add(&mut self, a: Reg, b: Reg) -> Result<Reg>`.
 #[test]
 fn the_compiler_scaffold_asks_no_questions_about_values() {
-    let dir = scaffold_with("shape", &["--compiler"]);
+    let dir = scaffold("shape");
     let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
 
     assert!(
@@ -432,8 +433,8 @@ fn the_compiler_scaffold_asks_no_questions_about_values() {
 /// which is the boilerplate the scaffold exists to provide.
 #[test]
 fn both_shapes_get_the_same_error_handling() {
-    for extra in [&[][..], &["--compiler"][..]] {
-        let dir = scaffold_with(if extra.is_empty() { "mi" } else { "mc" }, extra);
+    for extra in [&["--interpreter"][..], &[][..]] {
+        let dir = scaffold_with(if extra.is_empty() { "mc" } else { "mi" }, extra);
         let main = std::fs::read_to_string(dir.join("src/main.rs")).unwrap();
 
         assert!(
@@ -472,7 +473,7 @@ fn every_combination_runs_and_the_two_shapes_agree() {
             );
             let compiler = scaffold_with(
                 &format!("mx{style}{with}c"),
-                &["--style", style, "--with", with, "--compiler"],
+                &["--style", style, "--with", with],
             );
 
             let a = run_scaffold(&interp);
@@ -610,10 +611,10 @@ NEXT
 ";
 
     for (label, extra) in [
-        ("interpreter", &["--style", "basic", "--with", "all"][..]),
+        ("interpreter", &["--style", "basic", "--with", "all", "--interpreter"][..]),
         (
             "compiler",
-            &["--style", "basic", "--with", "all", "--compiler"][..],
+            &["--style", "basic", "--with", "all"][..],
         ),
     ] {
         let dir = scaffold_with(&format!("fold{}", &label[..4]), extra);
@@ -652,10 +653,10 @@ NEXT
 #[ignore = "compiles two cargo projects"]
 fn a_diagnostic_reports_the_spelling_that_was_typed() {
     for (shape, extra) in [
-        ("interp", vec!["--style", "basic", "--with", "functions"]),
+        ("interp", vec!["--style", "basic", "--with", "functions", "--interpreter"]),
         (
             "compiler",
-            vec!["--style", "basic", "--with", "functions", "--compiler"],
+            vec!["--style", "basic", "--with", "functions"],
         ),
     ] {
         let dir = scaffold_with(&format!("spell{shape}"), &extra);
@@ -700,8 +701,8 @@ fn the_two_shapes_agree_about_an_undeclared_name() {
     ] {
         let mut seen = Vec::new();
         for (shape, extra) in [
-            ("interp", vec!["--style", style]),
-            ("compiler", vec!["--style", style, "--compiler"]),
+            ("interp", vec!["--style", style, "--interpreter"]),
+            ("compiler", vec!["--style", style]),
         ] {
             let dir = scaffold_with(&format!("und{style}{shape}"), &extra);
             std::fs::write(dir.join("prog.txt"), program).unwrap();
@@ -755,7 +756,7 @@ fn a_runtime_failure_in_compiled_code_reaches_stderr_and_the_exit_code() {
     ] {
         let dir = scaffold_with(
             &format!("rt{style}"),
-            &["--style", style, "--with", "functions", "--compiler"],
+            &["--style", style, "--with", "functions"],
         );
         std::fs::write(dir.join("prog.txt"), program).unwrap();
 
@@ -860,7 +861,7 @@ fn a_project_becomes_thread_safe_by_a_feature_alone() {
 fn a_compiled_language_can_await_in_an_expression() {
     // Not `await`: `nh init` refuses a Rust keyword as a crate name, which is
     // its own guard doing its job.
-    let dir = scaffold_with("awaiting", &["--style", "basic", "--compiler"]);
+    let dir = scaffold_with("awaiting", &["--style", "basic"]);
 
     // Three lines of grammar, three of host code.
     let g = dir.join("awaiting.nh");
@@ -1143,8 +1144,7 @@ fn help_lists_every_flag_and_claims_nothing_untrue() {
         "--ext",
         "--style",
         "--with",
-        "--compiler",
-        "--async",
+        "--interpreter",
     ] {
         assert!(help.contains(flag), "`{flag}` is undocumented:\n{help}");
     }
@@ -1154,56 +1154,33 @@ fn help_lists_every_flag_and_claims_nothing_untrue() {
     );
 }
 
-/// `--async` sets a project up for async work in handlers, and a project
-/// without it must not pay for tokio at all.
+/// **A scaffold never mentions a runtime.** Not the interpreter, not the
+/// compiler, not the generated code.
+///
+/// `--async` used to add tokio and a `block_on` helper, which existed only to
+/// paper over a tree-walker's inability to suspend. Both ways of giving an
+/// interpreter async are bad — blocking needs a multi-thread runtime and stalls
+/// every other program, and an async evaluator boxes a future per node — so the
+/// flag is gone rather than offering the less-bad one.
+///
+/// A compiled host suspends instead, and suspension needs no runtime at all: the
+/// machine stops and its driver waits. Which is why this holds for both shapes.
 #[test]
-fn async_scaffolds_differ_only_where_they_should() {
-    let plain = scaffold("plainproj");
-    for f in ["Cargo.toml", "src/main.rs", "src/lib.rs"] {
-        assert!(
-            !read(&plain, f).contains("tokio"),
-            "a plain scaffold must not mention tokio in {f}"
-        );
+fn no_scaffold_mentions_a_runtime() {
+    for (label, extra) in [
+        ("compiler", &[][..]),
+        ("interpreter", &["--interpreter"][..]),
+    ] {
+        let dir = scaffold_with(&format!("nort{}", &label[..4]), extra);
+        for f in ["Cargo.toml", "src/main.rs", "src/lib.rs"] {
+            let text = read(&dir, f);
+            for word in ["tokio", "block_in_place", "async fn", "#[tokio::main"] {
+                assert!(
+                    !text.contains(word),
+                    "{label}: {f} mentions `{word}`; a scaffold picks no runtime"
+                );
+            }
+        }
     }
-
-    let dir = scaffold_with("asyncproj", &["--async"]);
-
-    // `rt-multi-thread` is not optional: `block_in_place` panics on the
-    // current-thread runtime, so the feature and the flavor must agree.
-    let toml = read(&dir, "Cargo.toml");
-    assert!(toml.contains("tokio"), "{toml}");
-    assert!(toml.contains("rt-multi-thread"), "{toml}");
-
-    let main = read(&dir, "src/main.rs");
-    assert!(main.contains(r#"#[tokio::main(flavor = "multi_thread")]"#), "{main}");
-    assert!(main.contains("async fn main"), "{main}");
-
-    // The helper exists, and uses `block_in_place` rather than the spelling
-    // that panics inside a runtime.
-    let lib = read(&dir, "src/lib.rs");
-    assert!(lib.contains("pub fn block_on"), "{lib}");
-    assert!(
-        lib.contains("block_in_place"),
-        "`Handle::block_on` alone panics inside a runtime:\n{lib}"
-    );
 }
 
-/// ...and the async scaffold has to actually build and run.
-#[test]
-#[ignore = "compiles a scaffolded project"]
-fn an_async_scaffold_builds_and_runs() {
-    let dir = scaffold_with("asyncbuild", &["--async"]);
-    let out = Command::new(env!("CARGO"))
-        .current_dir(&dir)
-        .env("NH", env!("CARGO_BIN_EXE_nh"))
-        .env("CARGO_TARGET_DIR", shared_target())
-        .args(["run", "--quiet"])
-        .output()
-        .expect("running cargo");
-
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert_eq!(
-        String::from_utf8_lossy(&out.stdout).lines().collect::<Vec<_>>(),
-        SAMPLE_OUTPUT,
-    );
-}
