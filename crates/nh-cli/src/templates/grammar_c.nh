@@ -1,7 +1,8 @@
-// {{Name}} — a starter grammar.
+// {{Name}} — a starter grammar, C-flavoured.
 //
-// This is a small but complete language: variables, arithmetic, and printing.
-// Run `cargo run` to see it work, then change it.
+// Braces and semicolons: a statement ends at `;`, a block is `{ }`, and
+// newlines are ordinary whitespace. `nh init --style basic` writes the same
+// language line-oriented instead.
 //
 // Every comment below marks something easy to get wrong and hard to discover.
 // Delete them once you have read them.
@@ -28,7 +29,7 @@ token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 // Declare keywords here instead of hand-writing lookaheads. This guards BOTH
 // directions: `let` will not match inside `letter`, and `let` cannot be used as
 // a variable name. Getting this right by hand is genuinely hard.
-reserved from IDENT { "let" "print" }
+reserved from IDENT { "let" "print" "if" "else"{{reserved}} }
 
 // ---------------------------------------------------------------------------
 // Rules
@@ -39,18 +40,30 @@ reserved from IDENT { "let" "print" }
 // or a comment will not parse. `SOI`/`EOI` are pest builtins.
 rule program = SOI stmts:stmt* EOI -> doc;
 
+// A braced group of statements. Its handler evaluates them in order, so every
+// construct that owns a body — `if`, and the loops if you enabled them — takes
+// one of these and needs to know nothing about what is inside.
+rule block = "{" stmts:stmt* "}" -> body;
+
 // `name:X` is a BINDING — it becomes a named accessor on the generated view, so
 // handler code never indexes children by position.
 //
 // `-> label` names the handler for an alternative. The generated rule is
 // `<rule>_<label>`, which is also the handler filename, so labels need not
 // repeat the rule name: `-> bind` here gives `stmt_bind`.
+//
+// `lazy` hands the handler the *unevaluated* node. Everything else arrives
+// already evaluated, which is what you want almost everywhere — but a branch
+// must not run before it is chosen, and a loop body must run more than once.
 rule stmt
-  = "let" name:IDENT "=" value:expr ";" -> bind
-  | "print" value:expr ";"              -> print
-  | value:expr ";"                      -> eval
+  = "let" name:IDENT "=" value:expr ";"                      -> bind
+  | "print" value:expr ";"                                   -> print
+  | "if" cond:expr lazy then:block lazy otherwise:else_tail? -> iff
+{{stmt_loops}}{{stmt_functions}}  | value:expr ";"                                           -> eval
   ;
 
+rule else_tail = "else" lazy body:block -> tail;
+{{rules_extra}}
 // The rule the operator driver folds over.
 rule atom = primary;
 
@@ -59,7 +72,7 @@ rule atom = primary;
 // add indexing later.
 rule primary
   = digits:NUMBER      -> num
-  | name:IDENT         -> var place
+{{primary_call}}  | name:IDENT         -> var place
   | "(" inner:expr ")" -> pass
   ;
 

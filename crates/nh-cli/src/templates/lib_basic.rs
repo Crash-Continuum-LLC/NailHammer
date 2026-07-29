@@ -128,6 +128,25 @@ impl generated::dispatch::Operators for Interp {
         }
     }
 
+    /// `MOD`, from `left word "MOD" -> rem;` in the grammar. The method is
+    /// named for the *role*, never for the spelling — rename the word and this
+    /// does not move.
+    fn rem(&mut self, lhs: Value, rhs: Value) -> nh_runtime::Result<Value> {
+        let (a, b) = self.nums(&lhs, &rhs, "MOD")?;
+        if b == 0.0 {
+            return Err(nh_runtime::Error::runtime("MOD by zero"));
+        }
+        Ok(Value::Num(a % b))
+    }
+
+    /// `NOT`, which in this style is a word rather than a symbol. `word "NOT"`
+    /// in the table guards the identifier boundary for you, so `NOTE` is still
+    /// a variable.
+    fn not(&mut self, operand: Value) -> nh_runtime::Result<Value> {
+        let t = <Self as generated::dispatch::Values>::truthy(self, &operand);
+        Ok(Value::Bool(!t))
+    }
+
     /// One method covers the whole comparison tier, because the table binds
     /// them all to one role and hands over a discriminant.
     fn compare(
@@ -137,9 +156,11 @@ impl generated::dispatch::Operators for Interp {
         rhs: Value,
     ) -> nh_runtime::Result<Value> {
         use generated::dispatch::CompareOp as C;
-        if matches!(op, C::EqEq | C::BangEq) {
+        // `=` is equality here. Assignment is a statement (`LET x = 1`), which
+        // is exactly why BASIC has the `LET` keyword.
+        if matches!(op, C::Eq | C::LtGt) {
             let equal = lhs == rhs;
-            return Ok(Value::Bool(if op == C::EqEq { equal } else { !equal }));
+            return Ok(Value::Bool(if op == C::Eq { equal } else { !equal }));
         }
         let (a, b) = self.nums(&lhs, &rhs, op.spelling())?;
         Ok(Value::Bool(match op {
@@ -147,43 +168,10 @@ impl generated::dispatch::Operators for Interp {
             C::LtEq => a <= b,
             C::Gt => a > b,
             C::GtEq => a >= b,
-            C::EqEq | C::BangEq => unreachable!("handled above"),
+            C::Eq | C::LtGt => unreachable!("handled above"),
         }))
     }
 
-    /// Stores a value at a place. The place arrives with its parts already
-    /// evaluated, exactly once.
-    fn assign(
-        &mut self,
-        place: generated::place::Place<'_, Value>,
-        value: Value,
-    ) -> nh_runtime::Result<Value> {
-        use generated::place::Place;
-        match place {
-            Place::PrimaryVar { name, .. } => {
-                self.set(name, value.clone());
-                Ok(value)
-            }
-        }
-    }
-
-    /// Reads the current value at a place, for compound assignment. Add
-    /// `right "+=" below "=" -> assign;` to the grammar and `+=` works with no
-    /// further code — its default is written in terms of these two methods.
-    fn place_read(
-        &mut self,
-        place: &generated::place::Place<'_, Value>,
-    ) -> nh_runtime::Result<Value> {
-        use generated::place::Place;
-        match place {
-            Place::PrimaryVar { name, .. } => self
-                .get(name)
-                .cloned()
-                .ok_or_else(|| {
-                    nh_runtime::Error::runtime(format!("undefined variable `{name}`"))
-                }),
-        }
-    }
 }
 
 // Writes the `Handlers` impl: one delegating method per grammar alternative.

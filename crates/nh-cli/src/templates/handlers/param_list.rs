@@ -1,0 +1,15 @@
+//! Handler for `param_list`.
+//!
+//! Never evaluated. `params` is bound `lazy` in the grammar because a
+//! definition wants the parameter *names* — evaluating them would look them up
+//! as variables that do not exist yet — so `stmt_fn` walks this node instead.
+//! The trait still requires a handler, and being honest about it is better
+//! than a body that pretends.
+
+use nh_runtime::{Ctx, Result};
+
+use crate::{Interp, Value};
+
+pub fn run(_host: &mut Interp, _first: &str, _rest: Vec<Value>, _cx: &mut Ctx) -> Result<Value> {
+    unreachable!("a parameter list is read for its names, never evaluated")
+}

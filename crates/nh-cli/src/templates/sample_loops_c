@@ -1,0 +1,18 @@
+
+// `cond` and `body` are both lazy: a loop re-tests and re-runs.
+let n = 3;
+while n > 0 {
+  print n;
+  n = n - 1;
+}
+
+// The bounds are eager — fixed when the loop starts.
+for i = 1 to 5 {
+  if i == 3 { continue; }
+  if i == 5 { break; }
+  print i * 10;
+}
+
+do {
+  print 99;
+} while 0;
