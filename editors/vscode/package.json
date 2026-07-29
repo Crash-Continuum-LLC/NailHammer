@@ -66,6 +66,11 @@
         "category": "NailHammer"
       },
       {
+        "command": "nailhammer.playground",
+        "title": "NailHammer: Evaluation Playground",
+        "category": "NailHammer"
+      },
+      {
         "command": "nailhammer.explain",
         "title": "NailHammer: Explain Operator Table",
         "category": "NailHammer"
@@ -181,7 +186,7 @@
     "url": "https://github.com/Crash-Continuum-LLC/NailHammer.git"
   },
   "scripts": {
-    "test": "node test/grammar.test.js && node test/language.test.js && node test/colors.test.js && tsc --noEmit -p jsconfig.json",
+    "test": "node test/grammar.test.js && node test/language.test.js && node test/colors.test.js && node test/playground.test.js && tsc --noEmit -p jsconfig.json",
     "typecheck": "tsc --noEmit -p jsconfig.json",
     "package": "vsce package --no-dependencies"
   }

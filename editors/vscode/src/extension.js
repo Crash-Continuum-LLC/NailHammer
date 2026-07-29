@@ -11,6 +11,7 @@
 const vscode = require("vscode");
 const { execFile } = require("child_process");
 const path = require("path");
+const playground = require("./playground");
 const language = require("./language");
 const colors = require("./colors");
 
@@ -36,6 +37,8 @@ function activate(context) {
     vscode.commands.registerCommand("nailhammer.addColors", colors.addColors),
     vscode.commands.registerCommand("nailhammer.removeColors", colors.removeColors),
   );
+
+  playground.register(context, activeGrammar, run);
 
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(check),

@@ -67,6 +67,37 @@ of the file's rules and tokens. All of it runs off a scan of the open document,
 which keeps working while the file is mid-edit and does not parse — exactly when
 completion is wanted.
 
+## Evaluation playground
+
+`NailHammer: Evaluation Playground` opens a scratch buffer beside your grammar
+and shows, as you type, what each construct routes to:
+
+```
+stmt_iff  → handlers/stmt_iff.rs
+  · "if" cond:expr lazy then:block lazy otherwise:else_tail? -> iff
+  cond: Self::Out   ⟵ evaluated first, by:
+    `>` → Operators::compare
+    primary_var  → handlers/primary_var.rs
+      name: &str = "x"
+  then: &Rc<Block>   ⟵ lazy: the node, unevaluated
+  otherwise: Option<&Rc<ElseTail>>   ⟵ absent here
+```
+
+Three things it makes explicit, all of them otherwise a
+generate-compile-add-print-statements round trip:
+
+* **which handler** gets each construct, and the file to open;
+* **what it receives** — parameter names, types, and a token's actual text;
+* **which arguments have not been evaluated yet.** `lazy` is the one case where
+  the thing below has *not* run before the call, and it is what people get
+  wrong.
+
+Operators are shown as the role they bind rather than a handler, because there
+is no handler for `+` — it goes to `Operators::add`.
+
+Nothing is compiled. It runs `nh trace`, which interprets your grammar, so the
+answer arrives as fast as parsing — which is what makes typing into it useful.
+
 ## Snippets
 
 `grammar`, `rule`, `token`, `skip`, `reserved`, `guard`, `precedence`,
