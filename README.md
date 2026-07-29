@@ -1,6 +1,28 @@
 # NailHammer
 A metaphorical hammer built specifically for the metaphorical nail you are trying to (maybe metaphorical or not) hit...
 
+> ### ⚠︎ Under active development
+>
+> **Things can and will move.** The grammar language, the generated APIs, and
+> the CLI are all still changing, sometimes in ways that will not be quietly
+> compatible. Recent releases have renamed traits, changed what a handler
+> receives, and altered what `nh init` scaffolds by default.
+>
+> What that means in practice:
+>
+> * **Pin a release** and upgrade deliberately, rather than tracking `main`.
+>   `nh init` vendors the runtime, so a generated project keeps working against
+>   the `nh` that made it even after the toolkit moves on.
+> * **Expect to re-run `nh build`** after upgrading, and to fix compile errors in
+>   your handlers. That is by design — a grammar change that alters what a
+>   handler receives should stop the build, not misbehave at run time — but it
+>   applies to *toolkit* changes too.
+> * **Read the release notes.** They say what moved and why.
+>
+> The design record in [DESIGN.md](DESIGN.md) is kept honestly, including the
+> decisions that were reversed. If something reads as settled there, it probably
+> is; if it reads as recently argued with, it may move again.
+
 Write a grammar. Get a parser, typed accessors, and one small handler file per
 rule — with operator precedence, error recovery, and determinism checks you did
 not have to write.
@@ -250,7 +272,12 @@ combinations and asserts the two shapes print the same thing.
 Every planned milestone is complete: parsing, lowering, code generation, the
 operator driver, determinism analysis, error recovery, self-hosting, an owned AST
 that makes subroutines, stored code and non-local jumps expressible, both host
-shapes, and `nh trace`. 365 tests.
+shapes, and `nh trace`. 367 tests.
+
+**Complete is not the same as settled.** The milestones are done; the interfaces
+are not frozen. Most of what has moved recently moved *because* the tool was used
+to build something and the design turned out to be wrong — that is the intent,
+and it is why the warning at the top is there.
 
 **Not published, and it does not need to be.** `nh init` vendors the runtime
 into the project it creates, so a generated project depends on pest and nothing
