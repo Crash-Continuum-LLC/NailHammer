@@ -2,7 +2,7 @@
   "name": "nailhammer",
   "displayName": "NailHammer",
   "description": "Grammar authoring for NailHammer: syntax highlighting, live diagnostics, scaffolding, and tasks for .nh files.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "crash-continuum",
   "license": "MIT",
   "engines": {
@@ -72,8 +72,9 @@
       },
       {
         "command": "nailhammer.traceNow",
-        "title": "NailHammer: Trace Now",
-        "category": "NailHammer"
+        "title": "NailHammer: Trace This Program",
+        "category": "NailHammer",
+        "icon": "$(play)"
       },
       {
         "command": "nailhammer.explain",
@@ -102,6 +103,13 @@
           "when": "resourceLangId == nh",
           "command": "nailhammer.build",
           "group": "nailhammer@2"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "nailhammer.traceNow",
+          "when": "resourceScheme == untitled && resourceFilename =~ /^playground\\./",
+          "group": "navigation@1"
         }
       ]
     },

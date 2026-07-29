@@ -84,11 +84,14 @@ The program is an in-memory buffer — nothing is written to disk — but it is 
 *named* one, so the tab reads `playground.mylang` and picks up whatever language
 mode that suffix has.
 
-**There is nothing to press.** It opens already running: the middle pane starts
-from your project's `sample.*` file, so the trace is populated the moment it
-appears. Edit the program and the right pane follows, 200ms after you stop
-typing. A status bar item on the left shows it is live — click it, or press
-`Cmd`/`Ctrl`+`Enter`, to trace again on demand.
+Type a program in the top pane — a line of *your* language, not the grammar —
+and the pane below shows where it goes, 200ms after you stop typing. If your
+project has a `sample.*` beside its grammar, the playground opens already
+running from it.
+
+There is a **▶ button in the program's tab bar** when you want it run
+deliberately, and `Cmd`/`Ctrl`+`Enter` does the same. A status bar item shows
+whether the last run parsed.
 
 What the right pane tells you:
 

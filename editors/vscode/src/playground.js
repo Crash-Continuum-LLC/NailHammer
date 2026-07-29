@@ -84,7 +84,8 @@ function header(grammar) {
     `NailHammer — evaluation playground`,
     `grammar: ${name}`,
     ``,
-    `Edit the program to the left. This updates as you type.`,
+    `Edit the program above. This updates as you type — or press the ▶ button`,
+    `in its tab bar, or ${process.platform === "darwin" ? "Cmd" : "Ctrl"}+Enter.`,
     `─`.repeat(64),
     ``,
   ].join("\n");
@@ -132,7 +133,15 @@ async function refresh(run) {
   const source = doc.getText();
 
   if (!source.trim()) {
-    provider.update(header(grammar) + asNote("Nothing to trace yet — type a program."));
+    provider.update(
+      header(grammar) +
+        asNote(
+          "Nothing to trace yet.\n\n" +
+            "Type a program in the pane above — a line of the language your\n" +
+            "grammar describes, not the grammar itself. This pane will show\n" +
+            "which handler each part of it reaches, and what gets passed.",
+        ),
+    );
     status(grammar, "empty");
     return;
   }
@@ -162,7 +171,27 @@ async function refresh(run) {
  */
 function columns(grammarColumn) {
   const at = typeof grammarColumn === "number" && grammarColumn > 0 ? grammarColumn : 1;
-  return { scratch: at + 1, trace: at + 1 };
+  return { scratch: at + 1, trace: at + 2 };
+}
+
+/**
+ * An editor layout with the playground stacked beside the grammar.
+ *
+ * Set explicitly rather than by `workbench.action.splitEditorDown`, which
+ * *duplicates* the active editor into the new group — the trace then opened as
+ * a second tab behind a copy of the program, and the pane you wanted to read
+ * was hidden behind one you did not.
+ *
+ * Orientation 0 is side by side; the nested pair is the column split into two
+ * rows. Columns are numbered in order, so the grammar keeps its own and the
+ * playground gets the two after it.
+ */
+function layout(grammarColumn) {
+  const before = Array.from({ length: Math.max(0, grammarColumn - 1) }, () => ({}));
+  return {
+    orientation: 0,
+    groups: [...before, {}, { groups: [{}, {}] }],
+  };
 }
 
 /**
@@ -212,32 +241,27 @@ async function open(activeGrammar, run) {
     vscode.Uri.parse(`${SCHEME}:${sampleName(grammar)} → handlers`),
   );
 
-  await vscode.window.showTextDocument(scratch, {
-    viewColumn: where.scratch,
-    preview: false,
-  });
-
-  // Split the column so the trace sits *under* the program rather than beside
-  // it. Only when it is not already laid out — running the command twice
-  // should not keep halving the pane.
-  const already = vscode.window.visibleTextEditors.some(
-    (e) => e.document.uri.scheme === SCHEME,
+  // The layout first, so both panes land in groups that already exist and
+  // neither has to be split out from under the other.
+  await vscode.commands.executeCommand(
+    "vscode.setEditorLayout",
+    layout(where.scratch - 1),
   );
-  if (!already) {
-    await vscode.commands.executeCommand("workbench.action.splitEditorDown");
-  }
-  await vscode.window.showTextDocument(traceDoc, {
-    viewColumn: vscode.ViewColumn.Active,
-    preview: false,
-    preserveFocus: false,
-  });
 
-  // Focus ends where you type.
+  await vscode.window.showTextDocument(traceDoc, {
+    viewColumn: where.trace,
+    preview: false,
+    preserveFocus: true,
+  });
+  // Last, so focus ends where you type.
   await vscode.window.showTextDocument(scratch, {
     viewColumn: where.scratch,
     preview: false,
   });
 
+  // Visible immediately, rather than only once a trace has run — the point of
+  // it is to say the playground is live.
+  status(grammar, "empty");
   await refresh(run);
 }
 
@@ -305,6 +329,7 @@ module.exports = {
   header,
   seed,
   scratchUri,
+  layout,
   SCHEME,
   TraceProvider,
 };

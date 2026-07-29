@@ -83,21 +83,38 @@ check("the panes go beside the grammar, never over it", () => {
   // One column, split top and bottom -- not two more columns. A trace is a deep
   // tree and wants height; three narrow columns gave the wrong dimension to
   // everything.
-  assert.strictEqual(at1.scratch, at1.trace, "program and trace share a column");
-  assert.strictEqual(at1.scratch, 2);
+  // Two groups stacked in one column: `setEditorLayout` numbers them in order,
+  // so the rows of the second column are view columns 2 and 3.
+  assert.deepStrictEqual(at1, { scratch: 2, trace: 3 });
 
   // A grammar already in column two pushes the playground right, rather than
   // opening on top of whatever is there.
-  assert.deepStrictEqual(playground.columns(2), { scratch: 3, trace: 3 });
+  assert.deepStrictEqual(playground.columns(2), { scratch: 3, trace: 4 });
 
   // `activeTextEditor` can be undefined, and `viewColumn` can be a negative
   // sentinel. Neither should produce a nonsense column.
   for (const odd of [undefined, null, -1, -2, 0]) {
-    assert.deepStrictEqual(playground.columns(odd), { scratch: 2, trace: 2 }, String(odd));
+    assert.deepStrictEqual(playground.columns(odd), { scratch: 2, trace: 3 }, String(odd));
   }
 });
 
 // A real file on disk was never needed for a real tab name.
+// splitEditorDown *duplicates* the active editor into the new group, so the
+// trace opened as a second tab behind a copy of the program -- and the pane you
+// wanted to read was hidden behind one you did not.
+check("the layout is set explicitly, never split from under an editor", () => {
+  const l = playground.layout(1);
+  assert.strictEqual(l.orientation, 0, "grammar beside the playground");
+  assert.strictEqual(l.groups.length, 2, "one column for each");
+  assert.deepStrictEqual(l.groups[0], {}, "the grammar keeps a plain column");
+  assert.strictEqual(l.groups[1].groups.length, 2, "the playground column is two rows");
+
+  // A grammar further right keeps the columns before it intact.
+  const l3 = playground.layout(3);
+  assert.strictEqual(l3.groups.length, 4);
+  assert.ok(l3.groups.slice(0, 3).every((g) => !g.groups), "only the last is split");
+});
+
 check("the program buffer is named, and still in memory", () => {
   const uri = playground.scratchUri("/x/mylang.nh");
   assert.strictEqual(uri.scheme, "untitled", "nothing is written to disk");
