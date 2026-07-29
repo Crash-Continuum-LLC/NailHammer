@@ -93,7 +93,25 @@ generate-compile-add-print-statements round trip:
   wrong.
 
 Operators are shown as the role they bind rather than a handler, because there
-is no handler for `+` — it goes to `Operators::add`.
+is no handler for `+` — it goes to `Operators::add`. They are also **folded the
+way the driver folds them**, which is the part nothing else can tell you:
+precedence lives in the operator table, not in the grammar, so the parse tree is
+flat and shows no order at all.
+
+```
+Operators::add
+  · `+` — left-associative, precedence 4
+  lhs: Self::Out   ⟵ evaluated first, by:
+    primary_num  → handlers/primary_num.rs
+      digits: &str = "2"
+  rhs: Self::Out   ⟵ evaluated first, by:
+    Operators::mul
+      · `*` — left-associative, precedence 5
+```
+
+Parentheses, associativity and short-circuiting all show correctly: `10 - 3 - 2`
+nests on the left, `a = b = 1` on the right, and `&&` marks its right operand
+lazy because it may never evaluate it.
 
 Nothing is compiled. It runs `nh trace`, which interprets your grammar, so the
 answer arrives as fast as parsing — which is what makes typing into it useful.

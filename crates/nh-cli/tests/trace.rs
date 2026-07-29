@@ -117,10 +117,14 @@ fn an_optional_binding_that_did_not_match_says_so() {
     assert!(!line(&with).contains("absent"), "{}", line(&with));
 }
 
-/// Operators do not route to a handler. Saying which role they bind is the
-/// only way to find out where `+` actually goes.
+/// Operators do not route to a handler, and the driver's fold is shown.
+///
+/// The flat list pest produces answers "which roles are involved". The question
+/// people actually have is **in what order**, and precedence lives in the table
+/// rather than in the grammar (DESIGN §5.2) — so nothing in the parse tree
+/// shows it.
 #[test]
-fn operators_are_reported_as_roles_not_handlers() {
+fn operators_are_folded_by_precedence() {
     let g = grammar("t4", &[]);
     let out = trace(&g, "print 2 + 3 * 4;", &[]);
 
@@ -129,6 +133,98 @@ fn operators_are_reported_as_roles_not_handlers() {
     assert!(
         !out.contains("handlers/add.rs"),
         "there is no handler for an operator:\n{out}"
+    );
+
+    // `*` binds tighter, so `mul` is *inside* `add` — and deeper.
+    let lines: Vec<&str> = out.lines().collect();
+    let at = |n: &str| lines.iter().position(|l| l.contains(n)).unwrap();
+    let indent = |i: usize| lines[i].len() - lines[i].trim_start().len();
+    assert!(at("Operators::add") < at("Operators::mul"), "{out}");
+    assert!(
+        indent(at("Operators::mul")) > indent(at("Operators::add")),
+        "`mul` must nest inside `add`, not sit beside it:\n{out}"
+    );
+}
+
+/// Parentheses are a nested `expr`, so folding through them would reassociate.
+#[test]
+fn parentheses_survive_the_fold() {
+    let g = grammar("t4b", &[]);
+    let out = trace(&g, "print (2 + 3) * 4;", &[]);
+
+    let lines: Vec<&str> = out.lines().collect();
+    let at = |n: &str| lines.iter().position(|l| l.contains(n)).unwrap();
+    // Now the other way round: `mul` is outermost.
+    assert!(at("Operators::mul") < at("Operators::add"), "{out}");
+}
+
+/// Left-associative means the *left* side is the nested one.
+#[test]
+fn associativity_decides_which_side_nests() {
+    let g = grammar("t4c", &[]);
+
+    // `10 - 3 - 2` is `(10 - 3) - 2`, so the inner `sub` is under `lhs`.
+    let left = trace(&g, "print 10 - 3 - 2;", &[]);
+    let after = |s: &str, from: usize| {
+        s.lines().skip(from).position(|l| l.contains("Operators::sub")).map(|i| i + from)
+    };
+    let lines: Vec<&str> = left.lines().collect();
+    let lhs = lines.iter().position(|l| l.trim_start().starts_with("lhs:")).unwrap();
+    let rhs = lines.iter().position(|l| l.trim_start().starts_with("rhs:")).unwrap();
+    assert!(lhs < rhs);
+    assert!(
+        after(&left, lhs).is_some_and(|i| i < rhs),
+        "a left-associative chain nests on the left:\n{left}"
+    );
+
+    // `=` is right-associative: `a = b = 1` is `a = (b = 1)`.
+    let right = trace(&g, "print a = b = 1;", &[]);
+    let lines: Vec<&str> = right.lines().collect();
+    let rhs = lines.iter().position(|l| l.trim_start().starts_with("rhs:")).unwrap();
+    assert!(
+        lines.iter().skip(rhs).any(|l| l.contains("Operators::assign")),
+        "a right-associative chain nests on the right:\n{right}"
+    );
+}
+
+/// A literal can be two operators. `-` is prefix negation *and* infix
+/// subtraction, and which one it is depends on where it appears.
+///
+/// Keying the table by literal alone kept whichever was declared last, which
+/// silently lost every infix `-` — `10 - 3 - 2` traced as a bare `10`.
+#[test]
+fn a_literal_that_is_two_operators_is_read_by_position() {
+    let g = grammar("t4d", &[]);
+
+    let sub = trace(&g, "print 10 - 3;", &[]);
+    assert!(sub.contains("Operators::sub"), "after an operand, `-` subtracts:\n{sub}");
+    assert!(!sub.contains("Operators::neg"), "{sub}");
+
+    let neg = trace(&g, "print -x;", &[]);
+    assert!(neg.contains("Operators::neg"), "otherwise it negates:\n{neg}");
+
+    let both = trace(&g, "print 1 - -2;", &[]);
+    assert!(
+        both.contains("Operators::sub") && both.contains("Operators::neg"),
+        "and both readings can appear in one expression:\n{both}"
+    );
+}
+
+/// A lazy operand is marked in the fold too — `&&` does not evaluate its right
+/// side unless the left one says to.
+#[test]
+fn a_short_circuit_operand_is_shown_as_lazy() {
+    let g = grammar("t4e", &[]);
+    let out = trace(&g, "print a && b;", &[]);
+
+    assert!(out.contains("Operators::and_then"), "{out}");
+    let rhs = out
+        .lines()
+        .find(|l| l.trim_start().starts_with("rhs:"))
+        .unwrap_or_else(|| panic!("no `rhs`:\n{out}"));
+    assert!(
+        rhs.contains("lazy"),
+        "`&&` gets its right operand unevaluated:\n{rhs}"
     );
 }
 
@@ -191,12 +287,13 @@ fn json_carries_everything_the_text_does() {
         "\"text\"",
         "\"lazy\"",
         "\"matched\"",
-        "\"operators\"",
+        "\"kind\"",
         "\"from\"",
     ] {
         assert!(out.contains(key), "missing {key}:\n{out}");
     }
-    assert!(out.contains("\"role\":\"add\""), "{out}");
+    assert!(out.contains("\"kind\":\"operator\""), "{out}");
+    assert!(out.contains("Operators::add"), "{out}");
     assert!(out.starts_with('{') && out.trim_end().ends_with('}'), "{out}");
 }
 

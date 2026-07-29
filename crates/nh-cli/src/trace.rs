@@ -38,6 +38,18 @@ pub struct Node {
     /// The alternative as written in the grammar.
     pub source: String,
     pub args: Vec<Arg>,
+    pub kind: Kind,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum Kind {
+    /// A labelled alternative — a file in `handlers/`.
+    Handler,
+    /// An operator the driver folds. There is no handler for one; it goes to
+    /// `Operators::<role>`.
+    Operator,
+    /// Text a `recover` got past. It routes nowhere.
+    Unparsed,
 }
 
 pub struct Arg {
@@ -50,23 +62,32 @@ pub struct Arg {
     /// an `x?` that was not there, which is a different thing from an argument
     /// that matched and produced nothing.
     pub matched: bool,
-    /// The handler calls that produce this argument.
+    /// What produces this argument — handler calls and operator applications,
+    /// nested exactly as the driver nests them.
     pub from: Vec<Node>,
-    /// Operators the driver folds while producing it.
-    pub operators: Vec<OpUse>,
 }
 
-pub struct OpUse {
-    pub literal: String,
-    pub role: String,
+/// What the fold needs to know about one operator.
+#[derive(Clone)]
+struct OpInfo {
+    role: String,
+    /// Tier index. Higher binds tighter.
+    prec: usize,
+    fixity: nh_syntax::ast::Fixity,
+    /// Operand positions the driver leaves unevaluated.
+    lazy: Vec<String>,
 }
 
 /// Everything `trace` needs to know about the grammar, indexed for lookup.
 struct Index<'a> {
     /// pest rule name -> the alternative it stands for.
     alts: HashMap<&'a str, &'a LoweredAlternative>,
-    /// literal -> the role it binds.
-    ops: HashMap<String, String>,
+    /// literal -> every reading of it.
+    ///
+    /// A `Vec`, because a literal can be two operators: `-` is prefix negation
+    /// *and* infix subtraction. Keying by literal alone kept whichever was
+    /// declared last, which silently lost every infix `-`.
+    ops: HashMap<String, Vec<OpInfo>>,
     /// Which bindings are `lazy`.
     lazy: HashMap<(&'a str, &'a str), bool>,
     /// The rules a failed parse is recovered into, and what they stand for.
@@ -84,10 +105,16 @@ impl<'a> Index<'a> {
             }
         }
 
+        // Tier 0 binds loosest, so the index *is* the precedence.
         let mut ops = HashMap::new();
-        for tier in &table.tiers {
+        for (prec, tier) in table.tiers.iter().enumerate() {
             for op in &tier.operators {
-                ops.insert(op.literal.clone(), op.role.clone());
+                ops.entry(op.literal.clone()).or_insert_with(Vec::new).push(OpInfo {
+                    role: tier.grouped_role.clone().unwrap_or_else(|| op.role.clone()),
+                    prec,
+                    fixity: tier.fixity,
+                    lazy: op.lazy.clone(),
+                });
             }
         }
 
@@ -133,6 +160,7 @@ fn build<'a>(index: &Index<'_>, pair: Pair<'a>) -> Node {
         handler: alt.map(|a| a.pest_rule.clone()).unwrap_or(rule),
         source: alt.map(|a| a.source.clone()).unwrap_or_default(),
         args: Vec::new(),
+        kind: Kind::Handler,
     };
     let Some(a) = alt else { return node };
 
@@ -153,7 +181,6 @@ fn build<'a>(index: &Index<'_>, pair: Pair<'a>) -> Node {
                 .unwrap_or(&false),
             matched: false,
             from: Vec::new(),
-            operators: Vec::new(),
             name: p.name.clone(),
             ty: p.ty.clone(),
         };
@@ -172,38 +199,225 @@ fn build<'a>(index: &Index<'_>, pair: Pair<'a>) -> Node {
     node
 }
 
-/// Walks a tagged subtree, gathering the handler calls and operator uses that
-/// produce one argument.
+/// One item in the flat sequence pest produces for an expression.
+enum Tok {
+    Atom(Node),
+    Op(String, OpInfo),
+}
+
+/// Walks a tagged subtree, gathering what produces one argument.
 ///
-/// Untagged intermediates — `expr` and the operator scaffolding — are walked
-/// *through* rather than reported, because no handler corresponds to them. The
-/// operators found on the way belong to this argument, since that is where the
-/// driver folds them.
+/// Untagged intermediates — `atom`, `primary`, the operator scaffolding — are
+/// walked *through*, because no handler corresponds to them.
 fn collect(index: &Index<'_>, pair: Pair<'_>, into: &mut Arg) {
     let rule = pair.as_rule().to_string();
     if index.alts.contains_key(rule.as_str()) {
         into.from.push(build(index, pair));
         return;
     }
-    // A statement `recover` got past. It routes nowhere — no handler runs for
-    // it — and saying nothing would let it vanish from the trace entirely,
-    // which is exactly the wrong impression to leave.
+    // Text a `recover` got past. It routes nowhere — no handler runs for it —
+    // and saying nothing would let it vanish from the trace entirely, which is
+    // exactly the wrong impression to leave.
     if let Some(what) = index.recovered.get(rule.as_str()) {
         into.from.push(Node {
             handler: format!("<{what} did not parse>"),
             source: format!("recovered here; no handler runs for `{}`", pair.as_str().trim()),
             args: Vec::new(),
+            kind: Kind::Unparsed,
         });
         return;
     }
+    if rule == "expr" {
+        into.from.push(fold_expr(index, pair));
+        return;
+    }
     for child in pair.into_inner() {
-        if let Some(role) = index.ops.get(child.as_str().trim()) {
-            into.operators.push(OpUse {
-                literal: child.as_str().trim().to_string(),
-                role: role.clone(),
-            });
-        }
         collect(index, child, into);
+    }
+}
+
+/// Folds one `expr` the way the generated driver folds it.
+///
+/// pest hands back a flat sequence — `2 · + · 3 · * · 4` — because the grammar
+/// deliberately has no precedence ladder in it (DESIGN §5.2). Precedence lives
+/// in the table, and the driver applies it at run time. Showing the flat list
+/// would answer "which roles are involved" but not the question people actually
+/// have, which is **in what order**.
+fn fold_expr(index: &Index<'_>, pair: Pair<'_>) -> Node {
+    let mut toks = Vec::new();
+    scan(index, pair, &mut toks);
+    let mut pos = 0;
+    parse_expr(&toks, &mut pos, 0).unwrap_or_else(|| Node {
+        handler: "<empty expression>".into(),
+        source: String::new(),
+        args: Vec::new(),
+        kind: Kind::Unparsed,
+    })
+}
+
+/// Flattens an `expr` into atoms and operators.
+///
+/// A nested `expr` is an atom, not more tokens — that is what parentheses are,
+/// and flattening through them would fold `(2 + 3) * 4` as `2 + (3 * 4)`.
+fn scan(index: &Index<'_>, pair: Pair<'_>, out: &mut Vec<Tok>) {
+    for child in pair.into_inner() {
+        let rule = child.as_rule().to_string();
+        if rule == "expr" {
+            out.push(Tok::Atom(fold_expr(index, child)));
+            continue;
+        }
+        if index.alts.contains_key(rule.as_str()) {
+            out.push(Tok::Atom(build(index, child)));
+            continue;
+        }
+        if let Some(readings) = index.ops.get(child.as_str().trim()) {
+            // Which reading depends on position, exactly as it does when you
+            // read the source: after an operand `-` subtracts, otherwise it
+            // negates.
+            let after_operand = matches!(out.last(), Some(Tok::Atom(_)));
+            let pick = readings
+                .iter()
+                .find(|i| infix_like(i.fixity) == after_operand)
+                .or_else(|| readings.first());
+            if let Some(info) = pick {
+                out.push(Tok::Op(child.as_str().trim().to_string(), info.clone()));
+                continue;
+            }
+        }
+        scan(index, child, out);
+    }
+}
+
+/// Precedence climbing, with the table's tiers as the precedence and the tier's
+/// fixity as the associativity.
+fn parse_expr(toks: &[Tok], pos: &mut usize, min_prec: usize) -> Option<Node> {
+    let mut lhs = parse_unary(toks, pos)?;
+
+    while let Some(Tok::Op(lit, info)) = toks.get(*pos) {
+        use nh_syntax::ast::Fixity;
+        if !matches!(info.fixity, Fixity::Left | Fixity::Right) || info.prec < min_prec {
+            break;
+        }
+        *pos += 1;
+        // Left-associative: the right side must bind *tighter* to stay right.
+        let next = if info.fixity == Fixity::Left {
+            info.prec + 1
+        } else {
+            info.prec
+        };
+        let rhs = parse_expr(toks, pos, next)?;
+        lhs = binary(lit, info, lhs, rhs);
+    }
+    Some(lhs)
+}
+
+fn parse_unary(toks: &[Tok], pos: &mut usize) -> Option<Node> {
+    use nh_syntax::ast::Fixity;
+    let mut prefixes = Vec::new();
+    while let Some(Tok::Op(lit, info)) = toks.get(*pos) {
+        if info.fixity != Fixity::Prefix {
+            break;
+        }
+        prefixes.push((lit.clone(), info.clone()));
+        *pos += 1;
+    }
+
+    let mut node = match toks.get(*pos) {
+        Some(Tok::Atom(_)) => {
+            let Some(Tok::Atom(n)) = toks.get(*pos) else { unreachable!() };
+            *pos += 1;
+            clone_node(n)
+        }
+        _ => return None,
+    };
+
+    // Applied outermost-last: `- - x` negates once, then again.
+    for (lit, info) in prefixes.into_iter().rev() {
+        node = unary(&lit, &info, node);
+    }
+    Some(node)
+}
+
+fn binary(lit: &str, info: &OpInfo, lhs: Node, rhs: Node) -> Node {
+    let lazy_rhs = info.lazy.iter().any(|l| l == "rhs");
+    Node {
+        handler: format!("Operators::{}", info.role),
+        source: format!("`{lit}` — {}", how(info)),
+        kind: Kind::Operator,
+        args: vec![
+            Arg {
+                name: "lhs".into(),
+                ty: "Self::Out".into(),
+                text: None,
+                lazy: info.lazy.iter().any(|l| l == "lhs"),
+                matched: true,
+                from: vec![lhs],
+            },
+            Arg {
+                name: "rhs".into(),
+                // A lazy operand arrives as the node, which is what makes
+                // `&&` able to not evaluate it at all.
+                ty: if lazy_rhs { "Rc<Expr>".into() } else { "Self::Out".into() },
+                text: None,
+                lazy: lazy_rhs,
+                matched: true,
+                from: vec![rhs],
+            },
+        ],
+    }
+}
+
+fn unary(lit: &str, info: &OpInfo, operand: Node) -> Node {
+    Node {
+        handler: format!("Operators::{}", info.role),
+        source: format!("`{lit}` — {}", how(info)),
+        kind: Kind::Operator,
+        args: vec![Arg {
+            name: "operand".into(),
+            ty: "Self::Out".into(),
+            text: None,
+            lazy: false,
+            matched: true,
+            from: vec![operand],
+        }],
+    }
+}
+
+fn infix_like(f: nh_syntax::ast::Fixity) -> bool {
+    use nh_syntax::ast::Fixity;
+    matches!(f, Fixity::Left | Fixity::Right | Fixity::Postfix)
+}
+
+fn how(info: &OpInfo) -> String {
+    use nh_syntax::ast::Fixity;
+    let f = match info.fixity {
+        Fixity::Left => "left-associative",
+        Fixity::Right => "right-associative",
+        Fixity::Prefix => "prefix",
+        Fixity::Postfix => "postfix",
+    };
+    format!("{f}, precedence {}", info.prec)
+}
+
+/// `Node` is a tree of owned strings; the fold needs to move an atom out of a
+/// borrowed slice, so it takes a copy rather than complicating the scan.
+fn clone_node(n: &Node) -> Node {
+    Node {
+        handler: n.handler.clone(),
+        source: n.source.clone(),
+        kind: n.kind,
+        args: n
+            .args
+            .iter()
+            .map(|a| Arg {
+                name: a.name.clone(),
+                ty: a.ty.clone(),
+                text: a.text.clone(),
+                lazy: a.lazy,
+                matched: a.matched,
+                from: a.from.iter().map(clone_node).collect(),
+            })
+            .collect(),
     }
 }
 
@@ -219,12 +433,18 @@ pub fn render(node: &Node, handlers_dir: &str) -> String {
 
 fn render_node(node: &Node, depth: usize, dir: &str, out: &mut String) {
     let pad = "  ".repeat(depth);
-    if node.handler.starts_with('<') {
-        out.push_str(&format!("{pad}{}\n", node.handler));
-        out.push_str(&format!("{pad}  · {}\n", node.source));
-        return;
+    match node.kind {
+        Kind::Unparsed => {
+            out.push_str(&format!("{pad}{}\n", node.handler));
+            out.push_str(&format!("{pad}  · {}\n", node.source));
+            return;
+        }
+        // No file: there is no handler for an operator.
+        Kind::Operator => out.push_str(&format!("{pad}{}\n", node.handler)),
+        Kind::Handler => {
+            out.push_str(&format!("{pad}{}  → {dir}/{}.rs\n", node.handler, node.handler))
+        }
     }
-    out.push_str(&format!("{pad}{}  → {dir}/{}.rs\n", node.handler, node.handler));
     if !node.source.is_empty() {
         out.push_str(&format!("{pad}  · {}\n", node.source.trim()));
     }
@@ -240,9 +460,6 @@ fn render_node(node: &Node, depth: usize, dir: &str, out: &mut String) {
             (None, false, _) => out.push_str(&format!("{head}   ⟵ evaluated first, by:\n")),
         }
 
-        for op in &a.operators {
-            out.push_str(&format!("{pad}    `{}` → Operators::{}\n", op.literal, op.role));
-        }
         for child in &a.from {
             render_node(child, depth + 2, dir, out);
         }
@@ -263,32 +480,25 @@ pub fn to_json(node: &Node) -> String {
                 Some(t) => crate::json::quote(t),
                 None => "null".to_string(),
             };
-            let ops: Vec<String> = a
-                .operators
-                .iter()
-                .map(|o| {
-                    format!(
-                        "{{\"literal\":\"{}\",\"role\":\"{}\"}}",
-                        esc(&o.literal),
-                        esc(&o.role)
-                    )
-                })
-                .collect();
             let from: Vec<String> = a.from.iter().map(to_json).collect();
             format!(
-                "{{\"name\":\"{}\",\"ty\":\"{}\",\"text\":{text},\"lazy\":{},\"matched\":{},\"operators\":[{}],\"from\":[{}]}}",
+                "{{\"name\":\"{}\",\"ty\":\"{}\",\"text\":{text},\"lazy\":{},\"matched\":{},\"from\":[{}]}}",
                 esc(&a.name),
                 esc(&a.ty),
                 a.lazy,
                 a.matched,
-                ops.join(","),
                 from.join(",")
             )
         })
         .collect();
 
     format!(
-        "{{\"handler\":\"{}\",\"source\":\"{}\",\"args\":[{}]}}",
+        "{{\"kind\":\"{}\",\"handler\":\"{}\",\"source\":\"{}\",\"args\":[{}]}}",
+        match node.kind {
+            Kind::Handler => "handler",
+            Kind::Operator => "operator",
+            Kind::Unparsed => "unparsed",
+        },
         esc(&node.handler),
         esc(&node.source),
         args.join(",")
