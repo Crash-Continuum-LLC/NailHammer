@@ -20,6 +20,20 @@ fn scaffold(name: &str) -> PathBuf {
     scaffold_with(name, &[])
 }
 
+/// One build directory for every scaffolded project in this file.
+///
+/// Each of these is a whole cargo project that compiles pest from scratch, and
+/// there are around twenty. Left to themselves they produce twenty copies of
+/// the same dependency graph, several gigabytes of it, in a temp directory
+/// nothing ever cleans. Sharing one target directory compiles pest **once** and
+/// reuses it — cargo namespaces artifacts by package, so this is safe as well
+/// as very much faster.
+fn shared_target() -> PathBuf {
+    let dir = std::env::temp_dir().join("nh-init-tests").join("target");
+    std::fs::create_dir_all(&dir).expect("a shared target directory");
+    dir
+}
+
 fn scaffold_with(name: &str, extra: &[&str]) -> PathBuf {
     let dir = std::env::temp_dir()
         .join("nh-init-tests")
@@ -309,6 +323,7 @@ fn scaffolded_project_builds_and_runs() {
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
         .args(["run", "--quiet"])
         .output()
         .expect("running cargo in the scaffolded project");
@@ -343,6 +358,7 @@ fn the_compiler_scaffold_gives_the_same_answers_as_the_interpreter() {
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
         .args(["run", "--quiet"])
         .output()
         .expect("running cargo in the scaffolded compiler");
@@ -454,6 +470,7 @@ fn run_scaffold(dir: &Path) -> Vec<String> {
     let out = Command::new(env!("CARGO"))
         .current_dir(dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
         .args(["run", "--quiet"])
         .output()
         .expect("running cargo in the scaffolded project");
@@ -583,6 +600,7 @@ NEXT
         let out = Command::new(env!("CARGO"))
             .current_dir(&dir)
             .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
             .args(["run", "--quiet", "--", "prog.txt"])
             .output()
             .expect("running cargo");
@@ -624,6 +642,7 @@ fn a_diagnostic_reports_the_spelling_that_was_typed() {
         let out = Command::new(env!("CARGO"))
             .current_dir(&dir)
             .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
             .args(["run", "--quiet", "--", "prog.txt"])
             .output()
             .expect("running cargo");
@@ -668,6 +687,7 @@ fn the_two_shapes_agree_about_an_undeclared_name() {
             let out = Command::new(env!("CARGO"))
                 .current_dir(&dir)
                 .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
                 .args(["run", "--quiet", "--", "prog.txt"])
                 .output()
                 .expect("running cargo");
@@ -720,6 +740,7 @@ fn a_runtime_failure_in_compiled_code_reaches_stderr_and_the_exit_code() {
         let out = Command::new(env!("CARGO"))
             .current_dir(&dir)
             .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
             .args(["run", "--quiet", "--", "prog.txt"])
             .output()
             .expect("running cargo");
@@ -765,6 +786,7 @@ fn an_unhandled_alternative_breaks_the_build() {
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
         .args(["build", "--quiet"])
         .output()
         .expect("running cargo");
@@ -796,6 +818,7 @@ fn a_scaffolded_project_recovers_from_syntax_errors() {
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
         .args(["run", "--quiet", "--", "broken.recov"])
         .output()
         .expect("running the scaffolded project");
@@ -872,6 +895,7 @@ fn an_edited_grammar_without_nh_is_a_build_error() {
     let first = Command::new(env!("CARGO"))
         .current_dir(&dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
         .args(["build", "--quiet"])
         .output()
         .expect("running cargo");
@@ -969,6 +993,7 @@ fn an_async_scaffold_builds_and_runs() {
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .env("CARGO_TARGET_DIR", shared_target())
         .args(["run", "--quiet"])
         .output()
         .expect("running cargo");
