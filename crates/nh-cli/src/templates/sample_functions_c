@@ -1,0 +1,13 @@
+
+// Defining does not run the body; `body` is lazy for exactly that reason.
+fn double(n) {
+  return n * 2;
+}
+
+fn fact(n) {
+  if n < 2 { return 1; }
+  return n * fact(n - 1);
+}
+
+print double(21);
+print fact(5);

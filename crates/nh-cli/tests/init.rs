@@ -325,7 +325,7 @@ fn scaffolded_project_builds_and_runs() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines,
-        vec!["28", "22", "5", "14"],
+        vec!["28", "22", "5", "14", "1"],
         "scaffolded interpreter produced the wrong answers:\n{stdout}"
     );
 }
@@ -357,7 +357,7 @@ fn the_compiler_scaffold_gives_the_same_answers_as_the_interpreter() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines,
-        vec!["28", "22", "5", "14"],
+        vec!["28", "22", "5", "14", "1"],
         "the compiled program must compute what the interpreted one did:\n{stdout}"
     );
 
@@ -416,6 +416,104 @@ fn both_shapes_get_the_same_error_handling() {
     }
 }
 
+/// Every style × feature combination scaffolds, builds, and **the two shapes
+/// agree**.
+///
+/// This is the claim the whole picker rests on: one grammar description drives
+/// an interpreter and a compiler, and picking a syntax or a feature set does
+/// not quietly favour one of them. If these ever disagree, something has become
+/// interpreter-shaped that should not be.
+#[test]
+#[ignore = "compiles sixteen cargo projects"]
+fn every_combination_runs_and_the_two_shapes_agree() {
+    for style in ["c", "basic"] {
+        for with in ["none", "loops", "functions", "all"] {
+            let interp = scaffold_with(
+                &format!("mx{style}{with}"),
+                &["--style", style, "--with", with],
+            );
+            let compiler = scaffold_with(
+                &format!("mx{style}{with}c"),
+                &["--style", style, "--with", with, "--compiler"],
+            );
+
+            let a = run_scaffold(&interp);
+            let b = run_scaffold(&compiler);
+            assert_eq!(
+                a, b,
+                "{style}/{with}: the compiled program must compute what the \
+                 interpreted one did"
+            );
+            assert!(!a.is_empty(), "{style}/{with} produced nothing");
+        }
+    }
+}
+
+/// The sample program's output, or a panic naming what went wrong.
+fn run_scaffold(dir: &Path) -> Vec<String> {
+    let out = Command::new(env!("CARGO"))
+        .current_dir(dir)
+        .env("NH", env!("CARGO_BIN_EXE_nh"))
+        .args(["run", "--quiet"])
+        .output()
+        .expect("running cargo in the scaffolded project");
+
+    assert!(
+        out.status.success(),
+        "{} failed:\n{}",
+        dir.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Both styles share one set of handler files.
+///
+/// `WHILE cond .. WEND` and `while cond { }` bind the same names to the same
+/// shapes, so `stmt_while.rs` does not know which syntax reached it. That is
+/// not a happy accident — it is what binding by name instead of position buys,
+/// and it is why the picker needs one handler per feature rather than two.
+#[test]
+fn both_styles_share_their_handlers() {
+    let c = scaffold_with("shc", &["--style", "c", "--with", "all"]);
+    let b = scaffold_with("shb", &["--style", "basic", "--with", "all"]);
+
+    let names = |dir: &Path| -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(dir.join("src/handlers"))
+            .expect("a handlers directory")
+            .map(|e| e.expect("an entry").file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    };
+
+    let (mut cn, bn) = (names(&c), names(&b));
+    // The line-oriented style needs one extra: a `;` terminates a statement on
+    // its own, a newline needs a rule to hang on.
+    assert!(bn.contains(&"line.rs".to_string()), "{bn:?}");
+    cn.push("line.rs".to_string());
+    cn.sort();
+    assert_eq!(cn, bn, "the two styles must need the same handlers");
+
+    // And identically-named handlers must have identical signatures, or
+    // "shared" is only true of the file names.
+    // `mod.rs` is the generated module list, not a handler.
+    for name in bn.iter().filter(|n| *n != "line.rs" && *n != "mod.rs") {
+        let sig = |dir: &Path| {
+            std::fs::read_to_string(dir.join("src/handlers").join(name))
+                .expect("a handler")
+                .lines()
+                .find(|l| l.starts_with("pub fn run"))
+                .map(str::to_string)
+                .unwrap_or_else(|| panic!("{name} has no `run`"))
+        };
+        assert_eq!(sig(&c), sig(&b), "{name} differs between styles");
+    }
+}
+
 /// DESIGN.md §5.4: adding an alternative to the grammar breaks the build until
 /// a handler exists.
 ///
@@ -428,8 +526,8 @@ fn an_unhandled_alternative_breaks_the_build() {
 
     let grammar = dir.join("unhandled.nh");
     let text = std::fs::read_to_string(&grammar).unwrap().replace(
-        "  | value:expr \";\"                      -> eval",
-        "  | \"show\" value:expr \";\"               -> show\n  | value:expr \";\"                      -> eval",
+        "  | value:expr \";\"                                           -> eval",
+        "  | \"show\" value:expr \";\"                                    -> show\n           | value:expr \";\"                                           -> eval",
     );
     std::fs::write(&grammar, text).unwrap();
 
@@ -515,7 +613,7 @@ fn a_scaffolded_project_builds_without_nh_installed() {
     );
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).lines().collect::<Vec<_>>(),
-        vec!["28", "22", "5", "14"],
+        vec!["28", "22", "5", "14", "1"],
     );
     // `--quiet` suppresses `cargo:warning`, so the notice is checked with a
     // separate ordinary build rather than by loosening the run above.
@@ -636,6 +734,6 @@ fn an_async_scaffold_builds_and_runs() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).lines().collect::<Vec<_>>(),
-        vec!["28", "22", "5", "14"],
+        vec!["28", "22", "5", "14", "1"],
     );
 }

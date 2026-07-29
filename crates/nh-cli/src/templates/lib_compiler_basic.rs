@@ -62,10 +62,12 @@ pub enum Op {
     JumpIfFalse(usize),
     /// Jump if the top of the stack is non-zero, consuming it.
     JumpIfTrue(usize),
-    /// Jump unconditionally. A loop's back-edge and every `break`.
+    /// Jump unconditionally. A loop's back-edge and every `EXIT`.
     Jump(usize),
+    Rem,
+    Not,
     /// The whole comparison tier. The discriminant rides along, so one opcode
-    /// covers `<`, `<=`, `>`, `>=`, `==` and `!=`.
+    /// covers `=`, `<>`, `<=`, `>=`, `<` and `>`.
     Compare(generated::dispatch::CompareOp),
 {{vm_ops}}}
 
@@ -222,19 +224,25 @@ impl Interp {
                     }
                 }
                 Op::Jump(t) => pc = *t,
+                Op::Rem => bin(&mut stack, |a, b| a % b),
+                Op::Not => {
+                    let a = stack.pop().unwrap();
+                    stack.push(if a == 0.0 { -1.0 } else { 0.0 })
+                }
                 Op::Compare(op) => {
                     use generated::dispatch::CompareOp as C;
                     let b = stack.pop().unwrap();
                     let a = stack.pop().unwrap();
                     let yes = match op {
+                        C::Eq => a == b,
+                        C::LtGt => a != b,
                         C::Lt => a < b,
                         C::LtEq => a <= b,
                         C::Gt => a > b,
                         C::GtEq => a >= b,
-                        C::EqEq => a == b,
-                        C::BangEq => a != b,
                     };
-                    stack.push(if yes { 1.0 } else { 0.0 })
+                    // -1 is true in BASIC, which is what `NOT 0` gives.
+                    stack.push(if yes { -1.0 } else { 0.0 })
                 }
 {{vm_exec}}
             }
@@ -286,10 +294,17 @@ impl generated::dispatch::Operators for Interp {
         self.emit(Op::Neg);
         Ok(())
     }
+    fn rem(&mut self, _: (), _: ()) -> nh_runtime::Result<()> {
+        self.emit(Op::Rem);
+        Ok(())
+    }
+    fn not(&mut self, _: ()) -> nh_runtime::Result<()> {
+        self.emit(Op::Not);
+        Ok(())
+    }
 
     /// One instruction for the whole comparison tier: the discriminant that
-    /// picked the spelling is carried into the opcode, exactly as the
-    /// interpreter carries it into a match.
+    /// picked the spelling is carried into the opcode.
     fn compare(
         &mut self,
         _lhs: (),
@@ -300,33 +315,6 @@ impl generated::dispatch::Operators for Interp {
         Ok(())
     }
 
-    /// Stores a value at a place.
-    ///
-    /// `place` in the grammar is what keeps an assignment target from being
-    /// *read*. Here that is the difference between a Store and a Load.
-    fn assign(
-        &mut self,
-        place: generated::place::Place<'_, ()>,
-        _value: (),
-    ) -> nh_runtime::Result<()> {
-        use generated::place::Place;
-        match place {
-            Place::PrimaryVar { name, .. } => {
-                self.emit(Op::Store(name.to_string()));
-                Ok(())
-            }
-        }
-    }
-
-    fn place_read(&mut self, place: &generated::place::Place<'_, ()>) -> nh_runtime::Result<()> {
-        use generated::place::Place;
-        match place {
-            Place::PrimaryVar { name, .. } => {
-                self.emit(Op::Load(name.to_string()));
-                Ok(())
-            }
-        }
-    }
 }
 
 /// `&&` and `||`, compiled.
