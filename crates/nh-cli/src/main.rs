@@ -39,8 +39,8 @@ OPTIONS:
     --ext      init: source file extension for your language (default: the name)
     --style    init: syntax flavour — `c` (braces, default) or `basic`
                (line-oriented). Both drive the same handlers
-    --with     init: what to include — `loops`, `functions`, `all`, `none`.
-               Run `nh init` in a terminal to be asked instead
+    --with     init: what to include — `loops`, `functions`, `none`.
+               Defaults to all of them; a terminal asks, a script does not
     --compiler init: scaffold a bytecode compiler instead of an interpreter
     --async    init: add tokio and a `block_on` helper for async work in handlers
     --force    init: write into a non-empty directory

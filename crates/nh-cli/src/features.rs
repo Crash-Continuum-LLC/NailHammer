@@ -208,6 +208,29 @@ mod tests {
         assert!(e.contains("`loops`"), "it should say what is on offer: {e}");
     }
 
+    /// A default that depends on whether stdin is a terminal means `nh init` in
+    /// a script and `nh init` at a prompt produce different projects.
+    #[test]
+    fn a_script_gets_what_a_person_pressing_enter_would_get() {
+        let (style, features) = choose(None, None, false).unwrap();
+        assert_eq!(style, Style::C, "the prompt's default style");
+        assert_eq!(
+            features,
+            Features::all(),
+            "the prompt reads `features [all]:`, so a script must get `all` too"
+        );
+    }
+
+    /// An explicit flag still wins, and still means exactly what it says.
+    #[test]
+    fn a_flag_overrides_the_default_in_either_direction() {
+        assert_eq!(choose(None, Some("none"), false).unwrap().1, Features::none());
+        assert_eq!(
+            choose(Some("basic"), Some("loops"), false).unwrap(),
+            (Style::Basic, Features::from_list(&[Feature::Loops]))
+        );
+    }
+
     #[test]
     fn styles_round_trip() {
         for s in [Style::C, Style::Basic] {
@@ -361,7 +384,10 @@ pub fn choose(
         return Ok((s, f));
     }
     if !interactive {
-        return Ok((style.unwrap_or_default(), features.unwrap_or_default()));
+        // The same answer a person gets for pressing Enter. A default that
+        // depends on whether anybody is watching is a surprise: `nh init` in a
+        // script and `nh init` in a terminal should build the same project.
+        return Ok((style.unwrap_or_default(), features.unwrap_or_else(Features::all)));
     }
 
     let style = match style {

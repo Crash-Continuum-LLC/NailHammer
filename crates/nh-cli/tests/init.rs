@@ -11,6 +11,20 @@ use pest_vm::Vm;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// What the scaffold's own sample prints, with the default feature set.
+///
+/// `nh init` with no `--with` scaffolds everything, which is what pressing Enter
+/// at the prompt gives — so a script and a person build the same project. Four
+/// tests asserted the base-only output before those defaults were reconciled.
+const SAMPLE_OUTPUT: &[&str] = &[
+    "28", "22", "5", "14", // arithmetic, precedence, assignment
+    "1", // the `if`
+    "3", "2", "1", // `while`
+    "10", "20", "40", // `for`, with `continue` and `break`
+    "99", // `do`
+    "42", "120", // a call, and recursion
+];
+
 fn nh() -> Command {
     Command::new(env!("CARGO_BIN_EXE_nh"))
 }
@@ -340,7 +354,7 @@ fn scaffolded_project_builds_and_runs() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines,
-        vec!["28", "22", "5", "14", "1"],
+        SAMPLE_OUTPUT,
         "scaffolded interpreter produced the wrong answers:\n{stdout}"
     );
 }
@@ -373,7 +387,7 @@ fn the_compiler_scaffold_gives_the_same_answers_as_the_interpreter() {
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(
         lines,
-        vec!["28", "22", "5", "14", "1"],
+        SAMPLE_OUTPUT,
         "the compiled program must compute what the interpreted one did:\n{stdout}"
     );
 
@@ -875,7 +889,7 @@ fn a_scaffolded_project_builds_without_nh_installed() {
     );
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).lines().collect::<Vec<_>>(),
-        vec!["28", "22", "5", "14", "1"],
+        SAMPLE_OUTPUT,
     );
     // `--quiet` suppresses `cargo:warning`, so the notice is checked with a
     // separate ordinary build rather than by loosening the run above.
@@ -1009,6 +1023,6 @@ fn an_async_scaffold_builds_and_runs() {
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(
         String::from_utf8_lossy(&out.stdout).lines().collect::<Vec<_>>(),
-        vec!["28", "22", "5", "14", "1"],
+        SAMPLE_OUTPUT,
     );
 }

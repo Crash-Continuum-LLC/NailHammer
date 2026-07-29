@@ -6,8 +6,7 @@ rule — with operator precedence, error recovery, and determinism checks you di
 not have to write.
 
 ```console
-$ nh init mylang --with all
-$ cd mylang && cargo run
+$ nh init mylang && cd mylang && cargo run
 28
 22
 5
@@ -28,8 +27,10 @@ That is a working interpreter: variables, arithmetic with real precedence,
 branches, three kinds of loop with `break`/`continue`, functions with recursion,
 and error recovery. Twenty handler files of a few lines each.
 
-Run `nh init` on its own and it asks two questions instead — which syntax, and
-what to include.
+Run it at a prompt and it asks two questions — which syntax, and what to
+include — defaulting to exactly the above. In a script it takes those defaults
+without asking, so the same command builds the same project either way. `--with
+none` gives you the thin version.
 
 ## The problem
 
