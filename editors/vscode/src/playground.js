@@ -16,6 +16,7 @@
 
 const vscode = require("vscode");
 const path = require("path");
+const fs = require("fs");
 
 /** The virtual document the trace is shown in. */
 const SCHEME = "nailhammer-trace";
@@ -70,6 +71,45 @@ function sampleName(grammarPath) {
 }
 
 /**
+ * The header the trace pane always carries.
+ *
+ * The first version of this shipped two blank panes and no button, which is a
+ * poor answer to "how do I run it". Nothing here is decoration: it says what
+ * the pane is, which grammar it is tracing against, and — the part that was
+ * missing — that there is nothing to press.
+ */
+function header(grammar) {
+  const name = path.basename(grammar);
+  return [
+    `NailHammer — evaluation playground`,
+    `grammar: ${name}`,
+    ``,
+    `Edit the program to the left. This updates as you type.`,
+    `─`.repeat(64),
+    ``,
+  ].join("\n");
+}
+
+/**
+ * What to put in the scratch buffer when the playground first opens.
+ *
+ * A project scaffolded by `nh init` has a `sample.<ext>` beside its grammar,
+ * and it is a working program in the language. Starting from it means the
+ * playground is *already running* when it opens — which answers "how do I use
+ * this" better than any instruction could.
+ */
+function seed(grammar) {
+  const dir = path.dirname(grammar);
+  try {
+    const sample = fs.readdirSync(dir).find((f) => f.startsWith("sample."));
+    if (sample) return fs.readFileSync(path.join(dir, sample), "utf8");
+  } catch {
+    // No directory, no sample, no matter — fall through to the note.
+  }
+  return "";
+}
+
+/**
  * Renders a failure the same way a trace is rendered, so the pane never goes
  * blank while you are mid-edit.
  *
@@ -92,18 +132,33 @@ async function refresh(run) {
   const source = doc.getText();
 
   if (!source.trim()) {
-    provider.update(asNote("Type a program on the left to see what it routes to."));
+    provider.update(header(grammar) + asNote("Nothing to trace yet — type a program."));
+    status(grammar, "empty");
     return;
   }
 
   try {
     const out = await run(["trace", grammar, "--source", source], path.dirname(grammar));
-    provider.update(out || asNote("Nothing matched."));
+    provider.update(header(grammar) + (out || asNote("Nothing matched.")));
+    status(grammar, "ok");
   } catch (e) {
     // `nh trace` exits non-zero for a program that does not parse, and that is
     // the ordinary state of a buffer someone is typing into.
-    provider.update(asNote(String(e && e.message ? e.message : e)));
+    provider.update(header(grammar) + asNote(String(e && e.message ? e.message : e)));
+    status(grammar, "error");
   }
+}
+
+/**
+ * Where the two panes go, given the column the grammar is in.
+ *
+ * **Not column one.** That is where the grammar usually is, and opening over it
+ * hides the file you are editing behind the scratch buffer you opened to
+ * understand it — which is the wrong way round.
+ */
+function columns(grammarColumn) {
+  const at = typeof grammarColumn === "number" && grammarColumn > 0 ? grammarColumn : 1;
+  return { scratch: at + 1, trace: at + 2 };
 }
 
 /**
@@ -118,25 +173,33 @@ async function open(activeGrammar, run) {
   if (grammarDoc.isDirty) await grammarDoc.save();
 
   const grammar = grammarDoc.uri.fsPath;
+  const where = columns(vscode.window.activeTextEditor?.viewColumn);
 
-  // Untitled, so nothing is written to disk and closing it asks nothing.
-  const scratch = await vscode.workspace.openTextDocument({
-    content: session?.doc?.getText() ?? "",
-  });
-  await vscode.window.showTextDocument(scratch, {
-    viewColumn: vscode.ViewColumn.One,
-    preview: false,
-  });
+  // Reuse the buffer if one is already open. Running the command twice used to
+  // leave a second untitled document behind, and only the newest was traced.
+  const alreadyOpen = vscode.workspace.textDocuments;
+  const scratch =
+    session && alreadyOpen.includes(session.doc)
+      ? session.doc
+      : // Untitled, so nothing is written to disk and closing it asks nothing.
+        // Seeded from the project's sample, so it opens already running.
+        await vscode.workspace.openTextDocument({ content: seed(grammar) });
 
   session = { grammar, doc: scratch };
 
   const traceDoc = await vscode.workspace.openTextDocument(
     vscode.Uri.parse(`${SCHEME}:${sampleName(grammar)} → handlers`),
   );
+
+  // Trace first, then the scratch buffer, so focus ends where you type.
   await vscode.window.showTextDocument(traceDoc, {
-    viewColumn: vscode.ViewColumn.Two,
+    viewColumn: where.trace,
     preview: false,
     preserveFocus: true,
+  });
+  await vscode.window.showTextDocument(scratch, {
+    viewColumn: where.scratch,
+    preview: false,
   });
 
   await refresh(run);
@@ -150,7 +213,12 @@ async function open(activeGrammar, run) {
  * @param {(args: string[], cwd: string) => Promise<string>} run
  */
 function register(context, activeGrammar, run) {
+  bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  bar.command = "nailhammer.traceNow";
+
   context.subscriptions.push(
+    bar,
+    vscode.commands.registerCommand("nailhammer.traceNow", () => refresh(run)),
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, provider),
     vscode.commands.registerCommand("nailhammer.playground", () =>
       open(activeGrammar, run),
@@ -163,9 +231,43 @@ function register(context, activeGrammar, run) {
     // A closed scratch buffer ends the session; leaving it live would keep
     // tracing a document nobody can see.
     vscode.workspace.onDidCloseTextDocument((doc) => {
-      if (session && doc === session.doc) session = null;
+      if (session && doc === session.doc) {
+        session = null;
+        bar?.hide();
+      }
     }),
   );
 }
 
-module.exports = { register, sampleName, asNote, SCHEME, TraceProvider };
+/**
+ * A status bar item, so there is something visible that says this is live —
+ * and something to click when you want it run again.
+ */
+let bar = null;
+
+function status(grammar, state) {
+  if (!bar) return;
+  const name = path.basename(grammar);
+  const face = {
+    ok: `$(check) nh: ${name}`,
+    error: `$(warning) nh: ${name}`,
+    empty: `$(circle-outline) nh: ${name}`,
+  };
+  bar.text = face[state] || face.empty;
+  bar.tooltip =
+    state === "error"
+      ? "That program does not parse yet. Click to trace again."
+      : "NailHammer playground — updates as you type. Click to trace again.";
+  bar.show();
+}
+
+module.exports = {
+  register,
+  sampleName,
+  asNote,
+  columns,
+  header,
+  seed,
+  SCHEME,
+  TraceProvider,
+};

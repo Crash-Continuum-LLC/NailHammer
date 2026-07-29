@@ -69,22 +69,32 @@ completion is wanted.
 
 ## Evaluation playground
 
-`NailHammer: Evaluation Playground` opens a scratch buffer beside your grammar
-and shows, as you type, what each construct routes to:
+`NailHammer: Evaluation Playground` opens two panes **beside** your grammar —
+one holding a program, one showing where that program goes. Your grammar stays
+where it is.
+
+```
+  your .nh    │  a program        │  where it goes
+  (untouched) │  (edit this)      │  (updates as you type)
+```
+
+**There is nothing to press.** It opens already running: the middle pane starts
+from your project's `sample.*` file, so the trace is populated the moment it
+appears. Edit the program and the right pane follows, 200ms after you stop
+typing. A status bar item on the left shows it is live — click it, or press
+`Cmd`/`Ctrl`+`Enter`, to trace again on demand.
+
+What the right pane tells you:
 
 ```
 stmt_iff  → handlers/stmt_iff.rs
   · "if" cond:expr lazy then:block lazy otherwise:else_tail? -> iff
   cond: Self::Out   ⟵ evaluated first, by:
-    `>` → Operators::compare
-    primary_var  → handlers/primary_var.rs
-      name: &str = "x"
+    Operators::compare
+      · `>` — left-associative, precedence 3
   then: &Rc<Block>   ⟵ lazy: the node, unevaluated
   otherwise: Option<&Rc<ElseTail>>   ⟵ absent here
 ```
-
-Three things it makes explicit, all of them otherwise a
-generate-compile-add-print-statements round trip:
 
 * **which handler** gets each construct, and the file to open;
 * **what it receives** — parameter names, types, and a token's actual text;
@@ -92,29 +102,15 @@ generate-compile-add-print-statements round trip:
   the thing below has *not* run before the call, and it is what people get
   wrong.
 
-Operators are shown as the role they bind rather than a handler, because there
-is no handler for `+` — it goes to `Operators::add`. They are also **folded the
-way the driver folds them**, which is the part nothing else can tell you:
-precedence lives in the operator table, not in the grammar, so the parse tree is
-flat and shows no order at all.
-
-```
-Operators::add
-  · `+` — left-associative, precedence 4
-  lhs: Self::Out   ⟵ evaluated first, by:
-    primary_num  → handlers/primary_num.rs
-      digits: &str = "2"
-  rhs: Self::Out   ⟵ evaluated first, by:
-    Operators::mul
-      · `*` — left-associative, precedence 5
-```
-
-Parentheses, associativity and short-circuiting all show correctly: `10 - 3 - 2`
-nests on the left, `a = b = 1` on the right, and `&&` marks its right operand
-lazy because it may never evaluate it.
+Operators route to the role they bind, not to a handler — there is no
+`handlers/add.rs`, `+` goes to `Operators::add` — and they are **folded the way
+the driver folds them**. That is the part nothing else can show you: precedence
+lives in the operator table, not the grammar, so the parse tree is flat and has
+no order in it at all. Parentheses, associativity and short-circuiting all come
+out right.
 
 Nothing is compiled. It runs `nh trace`, which interprets your grammar, so the
-answer arrives as fast as parsing — which is what makes typing into it useful.
+answer arrives as fast as parsing.
 
 ## Snippets
 

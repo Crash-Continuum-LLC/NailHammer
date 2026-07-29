@@ -33,7 +33,11 @@ const stub = {
     onDidCloseTextDocument() {},
     openTextDocument: async () => ({ getText: () => "" }),
   },
-  window: { showTextDocument: async () => {} },
+  window: {
+    showTextDocument: async () => {},
+    createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {} }),
+  },
+  StatusBarAlignment: { Left: 1, Right: 2 },
   commands: { registerCommand() {} },
 };
 
@@ -63,6 +67,52 @@ function check(name, fn) {
 check("the scratch file is named after the grammar", () => {
   assert.strictEqual(playground.sampleName("/x/mylang.nh"), "playground.mylang");
   assert.strictEqual(playground.sampleName(path.join("a", "b", "calc.nh")), "playground.calc");
+});
+
+// Opening over the grammar hides the file you are editing behind the scratch
+// buffer you opened to understand it, which is the wrong way round.
+check("the panes go beside the grammar, never over it", () => {
+  const at1 = playground.columns(1);
+  assert.strictEqual(at1.scratch, 2);
+  assert.strictEqual(at1.trace, 3);
+  assert.ok(at1.scratch !== 1 && at1.trace !== 1, "column one belongs to the grammar");
+
+  // A grammar already in column two pushes both panes right, rather than
+  // reopening on top of something else.
+  const at2 = playground.columns(2);
+  assert.deepStrictEqual(at2, { scratch: 3, trace: 4 });
+
+  // `activeTextEditor` can be undefined, and `viewColumn` can be a negative
+  // sentinel. Neither should produce a nonsense column.
+  for (const odd of [undefined, null, -1, -2, 0]) {
+    assert.deepStrictEqual(playground.columns(odd), { scratch: 2, trace: 3 }, String(odd));
+  }
+});
+
+// The complaint that prompted this: two blank panes and no button is a poor
+// answer to "how do I run it".
+check("the pane says what it is and that it is live", () => {
+  const h = playground.header("/x/mylang.nh");
+  assert.ok(h.includes("mylang.nh"), "which grammar it traces against");
+  assert.ok(/updates as you type/i.test(h), "and that there is nothing to press");
+  assert.ok(h.trimEnd().split("\n").length >= 4, "a header, not a word");
+});
+
+// Opening onto a working program beats any instruction: the playground is
+// already running when it appears.
+check("it starts from the project's own sample program", () => {
+  const os = require("os");
+  const fsx = require("fs");
+  const dir = fsx.mkdtempSync(path.join(os.tmpdir(), "nh-seed-"));
+  fsx.writeFileSync(path.join(dir, "sample.mylang"), "let a = 1;\n");
+
+  const got = playground.seed(path.join(dir, "mylang.nh"));
+  assert.strictEqual(got, "let a = 1;\n");
+
+  // And a project without one still opens, rather than throwing.
+  const bare = fsx.mkdtempSync(path.join(os.tmpdir(), "nh-seed-"));
+  assert.strictEqual(playground.seed(path.join(bare, "x.nh")), "");
+  assert.strictEqual(playground.seed("/nope/does/not/exist/x.nh"), "");
 });
 
 check("the virtual document has its own scheme", () => {
