@@ -9,7 +9,7 @@
 // this file could act on.
 #![allow(clippy::too_many_arguments)]
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::{Ctx, Diagnostic, Error, Name, Result, Span};
 use nh_runtime::ops::{Assoc, Fixity, OpInfo};
@@ -169,7 +169,7 @@ pub trait Handlers: Operators + Sized {
 
     /// `program` — from `rule program = SOI EOL* lazy lines:line* EOI -> doc`.
     /// * `lines` — the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it (repeated in the grammar)
-    fn program(&mut self, lines: &[Rc<Line>], cx: &mut Ctx) -> Result<Self::Out>;
+    fn program(&mut self, lines: &[Shared<Line>], cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `line` — from `rule line = label:NUMBER? body:stmt EOL* -> line`.
     /// * `label` — the text of the `NUMBER` token (optional in the grammar)
@@ -183,17 +183,17 @@ pub trait Handlers: Operators + Sized {
     /// * `step` — the value of the `step_clause` rule, already evaluated (optional in the grammar)
     /// * `body` — the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it (repeated in the grammar)
     /// * `closing` — the `IDENT` token; folds case, so use `.key()` to look it up (optional in the grammar)
-    fn stmt_loop(&mut self, var: &Name, from: Self::Out, to: Self::Out, step: Option<Self::Out>, body: &[Rc<Line>], closing: Option<&Name>, cx: &mut Ctx) -> Result<Self::Out>;
+    fn stmt_loop(&mut self, var: &Name, from: Self::Out, to: Self::Out, step: Option<Self::Out>, body: &[Shared<Line>], closing: Option<&Name>, cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `stmt_while` — from `rule stmt = "WHILE" lazy cond:expr EOL* lazy body:line* "WEND" -> while`.
     /// * `cond` — the `expr` rule, **unevaluated** — `.eval(host, cx)?` runs it
     /// * `body` — the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it (repeated in the grammar)
-    fn stmt_while(&mut self, cond: &Rc<Expr>, body: &[Rc<Line>], cx: &mut Ctx) -> Result<Self::Out>;
+    fn stmt_while(&mut self, cond: &Shared<Expr>, body: &[Shared<Line>], cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `stmt_define` — from `rule stmt = "SUB" name:IDENT EOL* lazy body:line* "END" "SUB" -> define`.
     /// * `name` — the `IDENT` token; folds case, so use `.key()` to look it up
     /// * `body` — the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it (repeated in the grammar)
-    fn stmt_define(&mut self, name: &Name, body: &[Rc<Line>], cx: &mut Ctx) -> Result<Self::Out>;
+    fn stmt_define(&mut self, name: &Name, body: &[Shared<Line>], cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `stmt_call` — from `rule stmt = "CALL" target:IDENT -> call`.
     /// * `target` — the `IDENT` token; folds case, so use `.key()` to look it up
@@ -203,7 +203,7 @@ pub trait Handlers: Operators + Sized {
     /// * `name` — the `IDENT` token; folds case, so use `.key()` to look it up
     /// * `params` — the `param_list` rule, **unevaluated** — `.eval(host, cx)?` runs it (optional in the grammar)
     /// * `body` — the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it (repeated in the grammar)
-    fn stmt_function(&mut self, name: &Name, params: Option<&Rc<ParamList>>, body: &[Rc<Line>], cx: &mut Ctx) -> Result<Self::Out>;
+    fn stmt_function(&mut self, name: &Name, params: Option<&Shared<ParamList>>, body: &[Shared<Line>], cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `stmt_ret` — from `rule stmt = "RETURN" value:expr -> ret`.
     /// * `value` — the value of the `expr` rule, already evaluated
@@ -231,7 +231,7 @@ pub trait Handlers: Operators + Sized {
     /// `stmt_iff` — from `rule stmt = "IF" cond:expr "THEN" lazy body:stmt -> iff`.
     /// * `cond` — the value of the `expr` rule, already evaluated
     /// * `body` — the `stmt` rule, **unevaluated** — `.eval(host, cx)?` runs it
-    fn stmt_iff(&mut self, cond: Self::Out, body: &Rc<Stmt>, cx: &mut Ctx) -> Result<Self::Out>;
+    fn stmt_iff(&mut self, cond: Self::Out, body: &Shared<Stmt>, cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `stmt_print` — from `rule stmt = "PRINT" head:expr tail:more_print* -> print`.
     /// * `head` — the value of the `expr` rule, already evaluated
@@ -1254,7 +1254,7 @@ macro_rules! nh_handlers {
         impl $crate::generated::dispatch::Handlers for $host {
             fn program(
                 &mut self,
-                lines: &[::std::rc::Rc<$crate::generated::ast::Line>],
+                lines: &[::nh_runtime::Shared<$crate::generated::ast::Line>],
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::program::run(self, lines, cx)
@@ -1273,7 +1273,7 @@ macro_rules! nh_handlers {
                 from: <Self as $crate::generated::dispatch::Semantics>::Out,
                 to: <Self as $crate::generated::dispatch::Semantics>::Out,
                 step: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
-                body: &[::std::rc::Rc<$crate::generated::ast::Line>],
+                body: &[::nh_runtime::Shared<$crate::generated::ast::Line>],
                 closing: Option<&::nh_runtime::Name>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
@@ -1281,8 +1281,8 @@ macro_rules! nh_handlers {
             }
             fn stmt_while(
                 &mut self,
-                cond: &::std::rc::Rc<$crate::generated::ast::Expr>,
-                body: &[::std::rc::Rc<$crate::generated::ast::Line>],
+                cond: &::nh_runtime::Shared<$crate::generated::ast::Expr>,
+                body: &[::nh_runtime::Shared<$crate::generated::ast::Line>],
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_while::run(self, cond, body, cx)
@@ -1290,7 +1290,7 @@ macro_rules! nh_handlers {
             fn stmt_define(
                 &mut self,
                 name: &::nh_runtime::Name,
-                body: &[::std::rc::Rc<$crate::generated::ast::Line>],
+                body: &[::nh_runtime::Shared<$crate::generated::ast::Line>],
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_define::run(self, name, body, cx)
@@ -1305,8 +1305,8 @@ macro_rules! nh_handlers {
             fn stmt_function(
                 &mut self,
                 name: &::nh_runtime::Name,
-                params: Option<&::std::rc::Rc<$crate::generated::ast::ParamList>>,
-                body: &[::std::rc::Rc<$crate::generated::ast::Line>],
+                params: Option<&::nh_runtime::Shared<$crate::generated::ast::ParamList>>,
+                body: &[::nh_runtime::Shared<$crate::generated::ast::Line>],
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_function::run(self, name, params, body, cx)
@@ -1358,7 +1358,7 @@ macro_rules! nh_handlers {
             fn stmt_iff(
                 &mut self,
                 cond: <Self as $crate::generated::dispatch::Semantics>::Out,
-                body: &::std::rc::Rc<$crate::generated::ast::Stmt>,
+                body: &::nh_runtime::Shared<$crate::generated::ast::Stmt>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_iff::run(self, cond, body, cx)

@@ -8,7 +8,7 @@
 //! cannot keep a piece of its own program for later (DESIGN.md §9).
 //!
 //! So the parse tree is converted once, up front, into owned types generated
-//! from the grammar. Every rule-typed field is an `Rc`, which makes recursive
+//! from the grammar. Every rule-typed field is an `Shared`, which makes recursive
 //! types finite, node sharing free, and a `lazy` binding storable anywhere.
 //!
 //! ```text
@@ -18,8 +18,8 @@
 //! ```
 //!
 //! ```ignore
-//! pub enum Stmt { Bind(Rc<StmtBind>), Eval(Rc<StmtEval>) }
-//! pub struct StmtBind { pub name: String, pub value: Rc<Expr>, pub span: Span }
+//! pub enum Stmt { Bind(Shared<StmtBind>), Eval(Shared<StmtEval>) }
+//! pub struct StmtBind { pub name: String, pub value: Shared<Expr>, pub span: Span }
 //! ```
 
 use nh_lower::{Binding, Cardinality, Lowered, LoweredAlternative, LoweredRule, LoweredVariant, RuleShape};
@@ -44,7 +44,7 @@ pub fn generate(lowered: &Lowered, _opts: &Options) -> String {
     let _ = writeln!(
         out,
         "\n#![allow(dead_code)]\n\n\
-         use std::rc::Rc;\n\n\
+         use nh_runtime::Shared;\n\n\
          use nh_runtime::{imports};\n"
     );
 
@@ -91,10 +91,10 @@ fn emit_expr(out: &mut String, by_name: &HashMap<&str, &LoweredRule>, lowered: &
          /// what the driver folded it into, once, when the AST was built.\n\
          #[derive(Clone, Debug)]\n\
          pub enum Expr {{\n\
-        \x20   Atom(Rc<{atom}>),\n\
-        \x20   Prefix {{ op: OpKind, operand: Rc<Expr>, span: Span }},\n\
-        \x20   Postfix {{ operand: Rc<Expr>, op: OpKind, span: Span }},\n\
-        \x20   Infix {{ lhs: Rc<Expr>, op: OpKind, rhs: Rc<Expr>, span: Span }},\n\
+        \x20   Atom(Shared<{atom}>),\n\
+        \x20   Prefix {{ op: OpKind, operand: Shared<Expr>, span: Span }},\n\
+        \x20   Postfix {{ operand: Shared<Expr>, op: OpKind, span: Span }},\n\
+        \x20   Infix {{ lhs: Shared<Expr>, op: OpKind, rhs: Shared<Expr>, span: Span }},\n\
          }}\n\n\
          /// Which operator an [`Expr`] node applies, as a generated rule id.\n\
          pub type OpKind = crate::Rule;\n"
@@ -144,14 +144,14 @@ fn emit_rule(
                     LoweredVariant::Labelled { label, pest_rule } => {
                         let vname = type_name(label);
                         let tname = type_name(pest_rule);
-                        let _ = writeln!(out, "    {vname}(Rc<{tname}>),");
+                        let _ = writeln!(out, "    {vname}(Shared<{tname}>),");
                     }
                     LoweredVariant::Transparent { child: Some(c) } => {
                         let t = resolved_type(c, by_name);
                         let _ = writeln!(
                             out,
                             "    /// A transparent alternative yielding `{c}`.\n\
-                            \x20   {}(Rc<{t}>),",
+                            \x20   {}(Shared<{t}>),",
                             type_name(c)
                         );
                     }
@@ -216,7 +216,7 @@ fn emit_struct(
 
 /// The owned type a binding becomes.
 ///
-/// Every rule-typed field is an `Rc`: that makes the recursion finite, sharing
+/// Every rule-typed field is an `Shared`: that makes the recursion finite, sharing
 /// free, and — the point of the whole exercise — a `lazy` binding storable on
 /// the interpreter long after the handler that received it returned.
 fn field_type(b: &Binding, by_name: &HashMap<&str, &LoweredRule>, lowered: &Lowered) -> String {
@@ -225,7 +225,7 @@ fn field_type(b: &Binding, by_name: &HashMap<&str, &LoweredRule>, lowered: &Lowe
         // to report. Losing either is a bug the type can prevent.
         (Some(t), _) if t.case_insensitive => "Name".to_string(),
         (Some(_), _) => "String".to_string(),
-        (None, Some(rule)) => format!("Rc<{}>", rule_type(rule, by_name, lowered)),
+        (None, Some(rule)) => format!("Shared<{}>", rule_type(rule, by_name, lowered)),
         // A group or a sequence: the text it matched is all there is to keep.
         (None, None) => "String".to_string(),
     };
@@ -362,7 +362,7 @@ fn emit_expr_builder(out: &mut String, lowered: &Lowered) {
     let _ = writeln!(
         out,
         "/// Folds the flat operand/operator stream into a tree, once.\n\
-         pub fn build_expr(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Expr>> {{\n\
+         pub fn build_expr(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Expr>> {{\n\
         \x20   let span = span_of(&pair, file);\n\
         \x20   let tree = nh_runtime::ops::build(\n\
         \x20       pair.into_inner().collect(),\n\
@@ -375,9 +375,9 @@ fn emit_expr_builder(out: &mut String, lowered: &Lowered) {
          fn from_op_tree(\n\
         \x20   tree: &nh_runtime::OpTree<'_, Rule>,\n\
         \x20   file: FileId,\n\
-         ) -> Result<Rc<Expr>> {{\n\
+         ) -> Result<Shared<Expr>> {{\n\
         \x20   use nh_runtime::OpTree;\n\
-        \x20   Ok(Rc::new(match tree {{\n\
+        \x20   Ok(Shared::new(match tree {{\n\
         \x20       OpTree::Atom(p) => Expr::Atom(build_{atom}(p.clone(), file)?),\n\
         \x20       OpTree::Prefix {{ op, operand }} => Expr::Prefix {{\n\
         \x20           op: op.as_rule(),\n\
@@ -413,7 +413,7 @@ fn emit_choice_builder(
     let _ = writeln!(
         out,
         "/// Builds a `{}` node.\n\
-         pub fn {fname}(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<{name}>> {{\n\
+         pub fn {fname}(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<{name}>> {{\n\
         \x20   let mut pair = pair;\n\
         \x20   loop {{\n\
         \x20       let span = span_of(&pair, file);\n\
@@ -427,7 +427,7 @@ fn emit_choice_builder(
                 let _ = writeln!(
                     out,
                     "            Rule::{pest_rule} => {{\n\
-                    \x20               return Ok(Rc::new({name}::{}({}(pair, file)?)))\n\
+                    \x20               return Ok(Shared::new({name}::{}({}(pair, file)?)))\n\
                     \x20           }}",
                     type_name(label),
                     builder_name(pest_rule)
@@ -438,7 +438,7 @@ fn emit_choice_builder(
                 let _ = writeln!(
                     out,
                     "            Rule::{c} => {{\n\
-                    \x20               return Ok(Rc::new({name}::{}({}(pair, file)?)))\n\
+                    \x20               return Ok(Shared::new({name}::{}({}(pair, file)?)))\n\
                     \x20           }}",
                     type_name(c),
                     builder_name(&target)
@@ -451,7 +451,7 @@ fn emit_choice_builder(
     if rule.recovers {
         let _ = writeln!(
             out,
-            "            Rule::nh_error_{} => return Ok(Rc::new({name}::Error(span))),",
+            "            Rule::nh_error_{} => return Ok(Shared::new({name}::Error(span))),",
             rule.pest_rule
         );
     }
@@ -479,9 +479,9 @@ fn emit_struct_builder(
     let _ = writeln!(
         out,
         "/// Builds `{}` from `{}`.\n\
-         pub fn {fname}(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<{name}>> {{\n\
+         pub fn {fname}(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<{name}>> {{\n\
         \x20   let view = {view}::from_pair(pair, file);\n\
-        \x20   Ok(Rc::new({name} {{",
+        \x20   Ok(Shared::new({name} {{",
         name, alt.source
     );
 

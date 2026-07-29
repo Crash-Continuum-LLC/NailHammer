@@ -17,7 +17,7 @@
 //!
 //! Both styles produce the **same handler signatures**, because both bind the
 //! same names to the same shapes. `WHILE cond ... WEND` and `while cond { }`
-//! each give `run(host, cond: &Rc<Expr>, body: &Rc<Block>, cx)`, so
+//! each give `run(host, cond: &Shared<Expr>, body: &Shared<Block>, cx)`, so
 //! `handlers/stmt_while.rs` is one file used by both.
 //!
 //! That is not a coincidence to be grateful for — it is the point of binding by
@@ -672,13 +672,13 @@ const LOOP_METHODS: &str = r##"
 
 const INTERP_FUNCTION: &str = r##"/// A function, as stored by a definition and used by a call.
 ///
-/// The body is an `Rc<Block>` — a node from the owned tree, which outlives the
+/// The body is a `Shared<Block>` — a node from the owned tree, which outlives the
 /// parse. That is what makes storing it possible at all: there is no borrow of
 /// the source text here to keep alive.
 #[derive(Clone, Debug)]
 pub struct Function {
     pub params: Vec<String>,
-    pub body: std::rc::Rc<generated::ast::Block>,
+    pub body: nh_runtime::Shared<generated::ast::Block>,
 }
 
 "##;

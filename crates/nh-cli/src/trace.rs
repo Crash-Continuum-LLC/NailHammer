@@ -407,7 +407,7 @@ fn binary(lit: &str, info: &OpInfo, lhs: Node, rhs: Node) -> Node {
                 name: "rhs".into(),
                 // A lazy operand arrives as the node, which is what makes
                 // `&&` able to not evaluate it at all.
-                ty: if lazy_rhs { "Rc<Expr>".into() } else { "Self::Out".into() },
+                ty: if lazy_rhs { "Shared<Expr>".into() } else { "Self::Out".into() },
                 text: None,
                 lazy: lazy_rhs,
                 matched: true,

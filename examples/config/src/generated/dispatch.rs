@@ -9,7 +9,7 @@
 // this file could act on.
 #![allow(clippy::too_many_arguments)]
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::{Ctx, Diagnostic, Error, Name, Result, Span};
 

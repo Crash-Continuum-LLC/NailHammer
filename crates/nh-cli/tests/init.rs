@@ -788,6 +788,67 @@ fn a_runtime_failure_in_compiled_code_reaches_stderr_and_the_exit_code() {
     }
 }
 
+/// A generated project can be made thread-safe by a feature, and **no signature
+/// moves**.
+///
+/// `Rc<T>` is not `Send`, so with the default a program tree cannot cross a
+/// thread at all — which rules out parsing on one thread and running on another,
+/// or sharing a stored function body between workers. That is a decision the
+/// toolkit has no business making for a host, so it is a cargo feature.
+///
+/// The reason it costs nothing is the *name*: generated code and handlers both
+/// say `Shared<T>`. Spelling `Rc` throughout would have meant rewriting every
+/// handler that takes a `lazy` binding, for a choice made in `Cargo.toml`.
+#[test]
+#[ignore = "compiles a scaffolded project twice"]
+fn a_project_becomes_thread_safe_by_a_feature_alone() {
+    let dir = scaffold_with("thr", &["--with", "functions"]);
+    std::fs::create_dir_all(dir.join("tests")).unwrap();
+    std::fs::write(
+        dir.join("tests/threads.rs"),
+        "fn assert_send<T: Send + Sync>() {}\n\
+         #[test]\n\
+         fn a_program_tree_can_cross_a_thread() {\n\
+         \x20   assert_send::<nh_runtime::Shared<thr::generated::ast::Program>>();\n\
+         }\n",
+    )
+    .unwrap();
+
+    let run = |dir: &Path| {
+        Command::new(env!("CARGO"))
+            .current_dir(dir)
+            .env("NH", env!("CARGO_BIN_EXE_nh"))
+            .env("CARGO_TARGET_DIR", shared_target())
+            .args(["test", "--quiet", "--test", "threads"])
+            .output()
+            .expect("running cargo")
+    };
+
+    // Default: `Rc`, so the tree is deliberately not `Send`.
+    let out = run(&dir);
+    assert!(
+        !out.status.success(),
+        "with `Rc` a tree must not be `Send`; if this passes the default changed"
+    );
+
+    // One line in Cargo.toml, and nothing else.
+    let manifest = dir.join("Cargo.toml");
+    let before = std::fs::read_to_string(&manifest).unwrap();
+    let after = before.replace(
+        r#"nh-runtime = { path = "vendor/nh-runtime" }"#,
+        r#"nh-runtime = { path = "vendor/nh-runtime", features = ["threadsafe"] }"#,
+    );
+    assert_ne!(before, after, "the dependency line was not what we expected");
+    std::fs::write(&manifest, after).unwrap();
+
+    let out = run(&dir);
+    assert!(
+        out.status.success(),
+        "the feature should make the tree `Send + Sync` and change nothing else:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// DESIGN.md §5.4: adding an alternative to the grammar breaks the build until
 /// a handler exists.
 ///

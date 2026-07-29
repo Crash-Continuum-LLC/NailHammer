@@ -18,6 +18,7 @@ pub mod error;
 pub mod name;
 pub mod node;
 pub mod ops;
+pub mod shared;
 pub mod source;
 
 pub use ctx::Ctx;
@@ -26,6 +27,7 @@ pub use error::{Error, Result};
 pub use name::Name;
 pub use node::{tagged, tagged_all, Ident, Node, View};
 pub use ops::{Assoc, Fixity, OpInfo, OpTree};
+pub use shared::Shared;
 pub use source::{FileId, LineCol, SourceMap, Span};
 
 /// Re-exported so generated code has one place to reach for pest types and

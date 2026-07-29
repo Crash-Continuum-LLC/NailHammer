@@ -4,7 +4,7 @@
 //! `0..n`, and every local the body declares takes the next slot. The caller
 //! copies arguments straight into those slots, so a call involves no names.
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 use nh_runtime::{Ctx, Result};
 {{name_import}}use crate::generated::ast::{Block, ParamList};
 use crate::generated::dispatch::Eval;
@@ -13,8 +13,8 @@ use crate::{Interp, Reg};
 pub fn run(
     host: &mut Interp,
     name: {{name_ty}},
-    params: Option<&Rc<ParamList>>,
-    body: &Rc<Block>,
+    params: Option<&Shared<ParamList>>,
+    body: &Shared<Block>,
     cx: &mut Ctx,
 ) -> Result<Reg> {
     let names = param_names(params);
@@ -34,7 +34,7 @@ pub fn run(
     Ok(host.next_reg())
 }
 
-fn param_names(params: Option<&Rc<ParamList>>) -> Vec<String> {
+fn param_names(params: Option<&Shared<ParamList>>) -> Vec<String> {
     match params {
         None => Vec::new(),
         Some(list) => std::iter::once(list.first{{key}}.to_string())

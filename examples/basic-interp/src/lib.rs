@@ -12,7 +12,7 @@
 //!   reach for.
 
 use std::collections::HashMap;
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 pub mod generated;
 pub mod handlers;
@@ -56,7 +56,7 @@ pub struct Interp {
     /// **This is the field that could not exist before M7.** A `lazy` binding
     /// used to borrow the parse tree, so a handler could run it but never keep
     /// it; the tree is owned now, so a body is just data (DESIGN.md §9).
-    pub subs: HashMap<String, Vec<Rc<generated::ast::Line>>>,
+    pub subs: HashMap<String, Vec<Shared<generated::ast::Line>>>,
     /// How deep `CALL` is nested, so runaway recursion reports instead of
     /// overflowing the stack.
     depth: usize,
@@ -91,7 +91,7 @@ const MAX_CALL_DEPTH: usize = 128;
 #[derive(Clone, Debug)]
 pub struct Function {
     pub params: Vec<String>,
-    pub body: Vec<std::rc::Rc<generated::ast::Line>>,
+    pub body: Vec<nh_runtime::Shared<generated::ast::Line>>,
 }
 
 impl Interp {

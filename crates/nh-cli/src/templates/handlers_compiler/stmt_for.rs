@@ -4,7 +4,7 @@
 //! and `emit_increment` answer that, and the difference is three instructions
 //! per iteration against one.
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 use nh_runtime::{Ctx, Result};
 {{name_import}}use crate::generated::ast::Block;
 use crate::generated::dispatch::Eval;
@@ -15,7 +15,7 @@ pub fn run(
     var: {{name_ty}},
     from: Reg,
     to: Reg,
-    body: &Rc<Block>,
+    body: &Shared<Block>,
     cx: &mut Ctx,
 ) -> Result<Reg> {
     let home = host.write_var(var{{key}}, from);

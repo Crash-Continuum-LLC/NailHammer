@@ -5,7 +5,7 @@
 
 #![allow(dead_code)]
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::Span;
 
@@ -15,10 +15,10 @@ use nh_runtime::Span;
 /// what the driver folded it into, once, when the AST was built.
 #[derive(Clone, Debug)]
 pub enum Expr {
-    Atom(Rc<Primary>),
-    Prefix { op: OpKind, operand: Rc<Expr>, span: Span },
-    Postfix { operand: Rc<Expr>, op: OpKind, span: Span },
-    Infix { lhs: Rc<Expr>, op: OpKind, rhs: Rc<Expr>, span: Span },
+    Atom(Shared<Primary>),
+    Prefix { op: OpKind, operand: Shared<Expr>, span: Span },
+    Postfix { operand: Shared<Expr>, op: OpKind, span: Span },
+    Infix { lhs: Shared<Expr>, op: OpKind, rhs: Shared<Expr>, span: Span },
 }
 
 /// Which operator an [`Expr`] node applies, as a generated rule id.
@@ -27,16 +27,16 @@ pub type OpKind = crate::Rule;
 /// From `rule program = SOI stmts:stmt* EOI -> doc`.
 #[derive(Clone, Debug)]
 pub struct Program {
-    pub stmts: Vec<Rc<Stmt>>,
+    pub stmts: Vec<Shared<Stmt>>,
     pub span: Span,
 }
 
 /// `rule stmt`.
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Bind(Rc<StmtBind>),
-    Iff(Rc<StmtIff>),
-    Eval(Rc<StmtEval>),
+    Bind(Shared<StmtBind>),
+    Iff(Shared<StmtIff>),
+    Eval(Shared<StmtEval>),
     /// A span the parser recovered from. Reported once, then poisoned.
     Error(Span),
 }
@@ -45,22 +45,22 @@ pub enum Stmt {
 #[derive(Clone, Debug)]
 pub struct StmtBind {
     pub name: String,
-    pub value: Rc<Expr>,
+    pub value: Shared<Expr>,
     pub span: Span,
 }
 
 /// From `rule stmt = "if" cond:expr "then" lazy body:stmt -> iff`.
 #[derive(Clone, Debug)]
 pub struct StmtIff {
-    pub cond: Rc<Expr>,
-    pub body: Rc<Stmt>,
+    pub cond: Shared<Expr>,
+    pub body: Shared<Stmt>,
     pub span: Span,
 }
 
 /// From `rule stmt = value:expr ";" -> eval`.
 #[derive(Clone, Debug)]
 pub struct StmtEval {
-    pub value: Rc<Expr>,
+    pub value: Shared<Expr>,
     pub span: Span,
 }
 
@@ -70,14 +70,14 @@ pub type Atom = Primary;
 /// `rule primary`.
 #[derive(Clone, Debug)]
 pub enum Primary {
-    Num(Rc<PrimaryNum>),
-    Elem(Rc<PrimaryElem>),
-    Yes(Rc<PrimaryYes>),
-    No(Rc<PrimaryNo>),
-    Trace(Rc<PrimaryTrace>),
-    Var(Rc<PrimaryVar>),
+    Num(Shared<PrimaryNum>),
+    Elem(Shared<PrimaryElem>),
+    Yes(Shared<PrimaryYes>),
+    No(Shared<PrimaryNo>),
+    Trace(Shared<PrimaryTrace>),
+    Var(Shared<PrimaryVar>),
     /// A transparent alternative yielding `expr`.
-    Expr(Rc<Expr>),
+    Expr(Shared<Expr>),
 }
 
 /// From `rule primary = digits:NUMBER -> num`.
@@ -91,7 +91,7 @@ pub struct PrimaryNum {
 #[derive(Clone, Debug)]
 pub struct PrimaryElem {
     pub name: String,
-    pub index: Rc<Expr>,
+    pub index: Shared<Expr>,
     pub span: Span,
 }
 
@@ -110,7 +110,7 @@ pub struct PrimaryNo {
 /// From `rule primary = "trace" "(" inner:expr ")" -> trace`.
 #[derive(Clone, Debug)]
 pub struct PrimaryTrace {
-    pub inner: Rc<Expr>,
+    pub inner: Shared<Expr>,
     pub span: Span,
 }
 
@@ -156,7 +156,7 @@ fn only_child(pair: Pair<'_, Rule>) -> Result<Pair<'_, Rule>> {
 }
 
 /// Folds the flat operand/operator stream into a tree, once.
-pub fn build_expr(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Expr>> {
+pub fn build_expr(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Expr>> {
     let span = span_of(&pair, file);
     let tree = nh_runtime::ops::build(
         pair.into_inner().collect(),
@@ -170,9 +170,9 @@ pub fn build_expr(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Expr>> {
 fn from_op_tree(
     tree: &nh_runtime::OpTree<'_, Rule>,
     file: FileId,
-) -> Result<Rc<Expr>> {
+) -> Result<Shared<Expr>> {
     use nh_runtime::OpTree;
-    Ok(Rc::new(match tree {
+    Ok(Shared::new(match tree {
         OpTree::Atom(p) => Expr::Atom(build_primary(p.clone(), file)?),
         OpTree::Prefix { op, operand } => Expr::Prefix {
             op: op.as_rule(),
@@ -194,30 +194,30 @@ fn from_op_tree(
 }
 
 /// Builds `Program` from `SOI stmts:stmt* EOI -> doc`.
-pub fn build_program(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Program>> {
+pub fn build_program(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Program>> {
     let view = ProgramView::from_pair(pair, file);
-    Ok(Rc::new(Program {
+    Ok(Shared::new(Program {
         stmts: { let mut v = Vec::new(); for n in view.stmts() { v.push(build_stmt(n.into_pair(), file)?); } v },
         span: view.span(),
     }))
 }
 
 /// Builds a `stmt` node.
-pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Stmt>> {
+pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Stmt>> {
     let mut pair = pair;
     loop {
         let span = span_of(&pair, file);
         match pair.as_rule() {
             Rule::stmt_bind => {
-                return Ok(Rc::new(Stmt::Bind(build_stmt_bind(pair, file)?)))
+                return Ok(Shared::new(Stmt::Bind(build_stmt_bind(pair, file)?)))
             }
             Rule::stmt_iff => {
-                return Ok(Rc::new(Stmt::Iff(build_stmt_iff(pair, file)?)))
+                return Ok(Shared::new(Stmt::Iff(build_stmt_iff(pair, file)?)))
             }
             Rule::stmt_eval => {
-                return Ok(Rc::new(Stmt::Eval(build_stmt_eval(pair, file)?)))
+                return Ok(Shared::new(Stmt::Eval(build_stmt_eval(pair, file)?)))
             }
-            Rule::nh_error_stmt => return Ok(Rc::new(Stmt::Error(span))),
+            Rule::nh_error_stmt => return Ok(Shared::new(Stmt::Error(span))),
             // A wrapper rule: the node is one level down.
             _ => pair = only_child(pair).map_err(|e| e.at(span))?,
         }
@@ -225,9 +225,9 @@ pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Stmt>> {
 }
 
 /// Builds `StmtBind` from `"let" name:IDENT "=" value:expr ";" -> bind`.
-pub fn build_stmt_bind(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtBind>> {
+pub fn build_stmt_bind(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtBind>> {
     let view = StmtBindView::from_pair(pair, file);
-    Ok(Rc::new(StmtBind {
+    Ok(Shared::new(StmtBind {
         name: view.name().text().to_string(),
         value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
@@ -235,9 +235,9 @@ pub fn build_stmt_bind(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtBind
 }
 
 /// Builds `StmtIff` from `"if" cond:expr "then" lazy body:stmt -> iff`.
-pub fn build_stmt_iff(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtIff>> {
+pub fn build_stmt_iff(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtIff>> {
     let view = StmtIffView::from_pair(pair, file);
-    Ok(Rc::new(StmtIff {
+    Ok(Shared::new(StmtIff {
         cond: build_expr(view.cond().into_pair(), file)?,
         body: build_stmt(view.body().into_pair(), file)?,
         span: view.span(),
@@ -245,40 +245,40 @@ pub fn build_stmt_iff(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtIff>>
 }
 
 /// Builds `StmtEval` from `value:expr ";" -> eval`.
-pub fn build_stmt_eval(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtEval>> {
+pub fn build_stmt_eval(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtEval>> {
     let view = StmtEvalView::from_pair(pair, file);
-    Ok(Rc::new(StmtEval {
+    Ok(Shared::new(StmtEval {
         value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
     }))
 }
 
 /// Builds a `primary` node.
-pub fn build_primary(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Primary>> {
+pub fn build_primary(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Primary>> {
     let mut pair = pair;
     loop {
         let span = span_of(&pair, file);
         match pair.as_rule() {
             Rule::primary_num => {
-                return Ok(Rc::new(Primary::Num(build_primary_num(pair, file)?)))
+                return Ok(Shared::new(Primary::Num(build_primary_num(pair, file)?)))
             }
             Rule::primary_elem => {
-                return Ok(Rc::new(Primary::Elem(build_primary_elem(pair, file)?)))
+                return Ok(Shared::new(Primary::Elem(build_primary_elem(pair, file)?)))
             }
             Rule::primary_yes => {
-                return Ok(Rc::new(Primary::Yes(build_primary_yes(pair, file)?)))
+                return Ok(Shared::new(Primary::Yes(build_primary_yes(pair, file)?)))
             }
             Rule::primary_no => {
-                return Ok(Rc::new(Primary::No(build_primary_no(pair, file)?)))
+                return Ok(Shared::new(Primary::No(build_primary_no(pair, file)?)))
             }
             Rule::primary_trace => {
-                return Ok(Rc::new(Primary::Trace(build_primary_trace(pair, file)?)))
+                return Ok(Shared::new(Primary::Trace(build_primary_trace(pair, file)?)))
             }
             Rule::primary_var => {
-                return Ok(Rc::new(Primary::Var(build_primary_var(pair, file)?)))
+                return Ok(Shared::new(Primary::Var(build_primary_var(pair, file)?)))
             }
             Rule::expr => {
-                return Ok(Rc::new(Primary::Expr(build_expr(pair, file)?)))
+                return Ok(Shared::new(Primary::Expr(build_expr(pair, file)?)))
             }
             // A wrapper rule: the node is one level down.
             _ => pair = only_child(pair).map_err(|e| e.at(span))?,
@@ -287,18 +287,18 @@ pub fn build_primary(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Primary>> 
 }
 
 /// Builds `PrimaryNum` from `digits:NUMBER -> num`.
-pub fn build_primary_num(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryNum>> {
+pub fn build_primary_num(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryNum>> {
     let view = PrimaryNumView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryNum {
+    Ok(Shared::new(PrimaryNum {
         digits: view.digits().text().to_string(),
         span: view.span(),
     }))
 }
 
 /// Builds `PrimaryElem` from `name:IDENT "[" index:expr "]" -> elem place`.
-pub fn build_primary_elem(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryElem>> {
+pub fn build_primary_elem(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryElem>> {
     let view = PrimaryElemView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryElem {
+    Ok(Shared::new(PrimaryElem {
         name: view.name().text().to_string(),
         index: build_expr(view.index().into_pair(), file)?,
         span: view.span(),
@@ -306,34 +306,34 @@ pub fn build_primary_elem(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Prima
 }
 
 /// Builds `PrimaryYes` from `"true" -> yes`.
-pub fn build_primary_yes(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryYes>> {
+pub fn build_primary_yes(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryYes>> {
     let view = PrimaryYesView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryYes {
+    Ok(Shared::new(PrimaryYes {
         span: view.span(),
     }))
 }
 
 /// Builds `PrimaryNo` from `"false" -> no`.
-pub fn build_primary_no(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryNo>> {
+pub fn build_primary_no(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryNo>> {
     let view = PrimaryNoView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryNo {
+    Ok(Shared::new(PrimaryNo {
         span: view.span(),
     }))
 }
 
 /// Builds `PrimaryTrace` from `"trace" "(" inner:expr ")" -> trace`.
-pub fn build_primary_trace(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryTrace>> {
+pub fn build_primary_trace(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryTrace>> {
     let view = PrimaryTraceView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryTrace {
+    Ok(Shared::new(PrimaryTrace {
         inner: build_expr(view.inner().into_pair(), file)?,
         span: view.span(),
     }))
 }
 
 /// Builds `PrimaryVar` from `name:IDENT -> var place`.
-pub fn build_primary_var(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryVar>> {
+pub fn build_primary_var(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryVar>> {
     let view = PrimaryVarView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryVar {
+    Ok(Shared::new(PrimaryVar {
         name: view.name().text().to_string(),
         span: view.span(),
     }))

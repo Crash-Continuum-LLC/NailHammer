@@ -358,22 +358,22 @@ fn a_lazy_binding_arrives_unevaluated() {
     ));
     let stub = file(&g, "handlers/stmt.rs");
     assert!(
-        stub.contains("body: &Rc<Stmt>"),
+        stub.contains("body: &Shared<Stmt>"),
         "a lazy binding must not be evaluated for the handler:\n{stub}"
     );
-    assert!(stub.contains("use std::rc::Rc;"), "{stub}");
+    assert!(stub.contains("use nh_runtime::Shared;"), "{stub}");
     assert!(stub.contains("use crate::generated::ast::Stmt;"), "{stub}");
     assert!(stub.contains("**unevaluated**"), "the doc must say so:\n{stub}");
 }
 
-/// ...and a handler with nothing deferred should not import `Rc`, leaving an
+/// ...and a handler with nothing deferred should not import `Shared`, leaving an
 /// unused import in a file the user now owns.
 #[test]
 fn a_stub_imports_only_what_it_uses() {
     let g = gen(DOCS);
     let stub = file(&g, "handlers/primary.rs");
     assert!(stub.contains("use crate::generated::dispatch::Handlers;"), "{stub}");
-    assert!(!stub.contains("use std::rc::Rc;"), "{stub}");
+    assert!(!stub.contains("use nh_runtime::Shared;"), "{stub}");
 }
 
 /// A `lazy` binding is owned data, so it needs no operator table at all. The
@@ -388,8 +388,8 @@ fn a_lazy_binding_works_without_an_operator_table() {
     let dispatch = file(&g, "generated/dispatch.rs");
     let ast = file(&g, "generated/ast.rs");
 
-    assert!(dispatch.contains("rest: &Rc<Item>"), "{dispatch}");
-    assert!(ast.contains("pub rest: Rc<Item>,"), "{ast}");
+    assert!(dispatch.contains("rest: &Shared<Item>"), "{dispatch}");
+    assert!(ast.contains("pub rest: Shared<Item>,"), "{ast}");
     assert!(
         !dispatch.contains("Deferred<"),
         "the borrowed handle is gone:\n{dispatch}"
@@ -479,7 +479,7 @@ fn a_lazy_binding_becomes_storable_owned_data() {
     let g = gen(AST);
     let ast = file(&g, "generated/ast.rs");
     assert!(
-        ast.contains("pub body: Vec<Rc<Line>>,"),
+        ast.contains("pub body: Vec<Shared<Line>>,"),
         "a lazy repetition must be owned and shareable:\n{ast}"
     );
     assert!(!ast.contains("Deferred"), "no borrowed handle survives:\n{ast}");
@@ -493,7 +493,7 @@ fn a_choice_rule_is_an_enum_of_its_alternatives() {
     let g = gen(AST);
     let ast = file(&g, "generated/ast.rs");
     assert!(ast.contains("pub enum Stmt {"), "{ast}");
-    for v in ["Bind(Rc<StmtBind>),", "Repeat(Rc<StmtRepeat>),", "Eval(Rc<StmtEval>),"] {
+    for v in ["Bind(Shared<StmtBind>),", "Repeat(Shared<StmtRepeat>),", "Eval(Shared<StmtEval>),"] {
         assert!(ast.contains(v), "missing `{v}`:\n{ast}");
     }
     assert!(ast.contains("pub struct StmtBind {"), "{ast}");
@@ -514,7 +514,7 @@ fn an_alias_rule_becomes_a_type_alias() {
 fn a_transparent_alternative_is_typed_by_what_it_yields() {
     let g = gen(AST);
     let ast = file(&g, "generated/ast.rs");
-    assert!(ast.contains("Expr(Rc<Expr>),"), "{ast}");
+    assert!(ast.contains("Expr(Shared<Expr>),"), "{ast}");
 }
 
 /// Operators are folded **once**, while the AST is built, rather than on every
@@ -524,8 +524,8 @@ fn expressions_are_folded_into_the_ast() {
     let g = gen(AST);
     let ast = file(&g, "generated/ast.rs");
     assert!(ast.contains("pub enum Expr {"), "{ast}");
-    assert!(ast.contains("Infix { lhs: Rc<Expr>, op: OpKind, rhs: Rc<Expr>, span: Span },"), "{ast}");
-    assert!(ast.contains("Atom(Rc<Primary>),"), "the atom rule resolves through its alias:\n{ast}");
+    assert!(ast.contains("Infix { lhs: Shared<Expr>, op: OpKind, rhs: Shared<Expr>, span: Span },"), "{ast}");
+    assert!(ast.contains("Atom(Shared<Primary>),"), "the atom rule resolves through its alias:\n{ast}");
 }
 
 /// A folding token keeps both spellings, because losing either is a bug the

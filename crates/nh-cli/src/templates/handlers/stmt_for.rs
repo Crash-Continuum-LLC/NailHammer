@@ -4,7 +4,7 @@
 //! when the loop starts, so `for i = 1 to n` does not notice `n` changing
 //! inside the body. Only `body` re-runs, so only `body` is lazy.
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::{Ctx, Error, Result};
 {{name_import}}
@@ -17,7 +17,7 @@ pub fn run(
     var: {{name_ty}},
     from: Value,
     to: Value,
-    body: &Rc<Block>,
+    body: &Shared<Block>,
     cx: &mut Ctx,
 ) -> Result<Value> {
     let (start, end) = match (&from, &to) {

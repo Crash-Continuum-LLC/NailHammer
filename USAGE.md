@@ -16,10 +16,11 @@ to write and why. For the reasoning behind the design, see
 8. [Writing handlers](#writing-handlers)
 9. [Control flow](#control-flow)
 10. [Errors and recovery](#errors-and-recovery)
-11. [Seeing where a program goes](#seeing-where-a-program-goes)
-12. [Checking your grammar](#checking-your-grammar)
-13. [Reading the generated `.pest`](#reading-the-generated-pest)
-14. [Known gaps](#known-gaps)
+11. [Threads, and what is not decided for you](#threads-and-what-is-not-decided-for-you)
+12. [Seeing where a program goes](#seeing-where-a-program-goes)
+13. [Checking your grammar](#checking-your-grammar)
+14. [Reading the generated `.pest`](#reading-the-generated-pest)
+15. [Known gaps](#known-gaps)
 
 ---
 
@@ -1417,6 +1418,66 @@ repetition will swallow the token that ends the block. If `rule block = "{"
 body:stmt* "}"` and `stmt` recovers, the error node eats the closing brace and
 `stmt*` never terminates. Attach recovery to a rule used in flat lists — see
 `examples/basic-interp/basic.nh` for a grammar that deliberately does without it.
+
+---
+
+## Threads, and what is not decided for you
+
+Nothing in the generated code starts a thread, chooses a runtime, or assumes how
+many of either you have. Two things *do* touch the question, and both are yours.
+
+### `Shared<T>`: whether a program can cross a thread
+
+Every rule-typed field in the owned AST is a shared pointer, because that is what
+makes the recursion finite and lets a `lazy` binding be stored. Which pointer is a
+cargo feature:
+
+```toml
+nh-runtime = { path = "vendor/nh-runtime", features = ["threadsafe"] }
+```
+
+| | |
+|---|---|
+| default | `Shared<T>` is `Rc<T>` — cheap, one thread |
+| `threadsafe` | `Shared<T>` is `Arc<T>` — the tree is `Send + Sync` |
+
+`Rc<T>` is not `Send`, so with the default a program tree **cannot** cross a
+thread boundary at all. That rules out parsing on one thread and running on
+another, and sharing a stored function body between workers. Turn the feature on
+and both work.
+
+**Flipping it changes no signatures.** Generated code and your handlers both say
+`Shared<T>`, which is the whole reason it is spelled that way — `Rc` throughout
+would have meant rewriting every handler that takes a `lazy` binding, for a
+decision made in a manifest.
+
+It is off by default because a single-threaded interpreter should not pay for
+atomic refcounts it never needs, and most interpreters are single-threaded. The
+other way round would have been a dictate too.
+
+> **What it does not do:** make *your host* thread-safe. `Shared` decides whether
+> the program can move or be shared. Whether your interpreter can is about your
+> own state, and is yours.
+
+### `--async`: one way to reach a future, not the way
+
+`nh init --async` adds tokio and a `block_on` helper to *your* `lib.rs`. It is a
+starting point you own and can delete, and it makes assumptions worth knowing:
+
+* **tokio specifically**, and its **multi-thread** flavour. The helper uses
+  `block_in_place`, which panics on a current-thread runtime.
+* **Sync-over-async.** The evaluator is synchronous, so a handler blocks on a
+  future rather than awaiting it. That costs a worker thread for the duration.
+
+That trade is right for a handler that occasionally reaches the network. It is
+wrong if your *language* has async semantics of its own, where the interpreter
+would need to yield to a scheduler rather than block — and in that case the
+helper is not what you want. Nothing forces you to take it: skip `--async` and
+the generated code neither mentions nor needs a runtime.
+
+The evaluator is synchronous on purpose. Making it async would mean every
+`eval_*` returned a boxed future — a heap allocation per node — whether or not a
+language ever awaits anything.
 
 ---
 

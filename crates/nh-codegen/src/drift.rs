@@ -209,14 +209,14 @@ mod tests {
     /// A type containing a comma must not be split in half.
     #[test]
     fn generic_types_do_not_confuse_the_split() {
-        let src = "pub fn run(h: &mut I, a: Option<&str>, b: &[Rc<Line>], c: HashMap<K, V>, cx: &mut Ctx)";
+        let src = "pub fn run(h: &mut I, a: Option<&str>, b: &[Shared<Line>], c: HashMap<K, V>, cx: &mut Ctx)";
         assert_eq!(signature_params(src).unwrap(), vec!["a", "b", "c"]);
     }
 
     /// Multi-line signatures are the common case for wide rules.
     #[test]
     fn a_wrapped_signature_reads_back() {
-        let src = "pub fn run(\n    host: &mut Interp,\n    var: &Name,\n    body: &[Rc<Line>],\n    cx: &mut Ctx,\n) -> Result<Value> {";
+        let src = "pub fn run(\n    host: &mut Interp,\n    var: &Name,\n    body: &[Shared<Line>],\n    cx: &mut Ctx,\n) -> Result<Value> {";
         assert_eq!(signature_params(src).unwrap(), vec!["var", "body"]);
     }
 

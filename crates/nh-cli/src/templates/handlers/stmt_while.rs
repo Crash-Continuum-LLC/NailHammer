@@ -4,7 +4,7 @@
 //! re-tested every iteration, so evaluating it once — which is what a plain
 //! binding would do — would give you a loop that never stops or never starts.
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::{Ctx, Error, Result};
 
@@ -12,7 +12,7 @@ use crate::generated::ast::{Block, Expr};
 use crate::generated::dispatch::{Eval, Values};
 use crate::{Interp, Value};
 
-pub fn run(host: &mut Interp, cond: &Rc<Expr>, body: &Rc<Block>, cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, cond: &Shared<Expr>, body: &Shared<Block>, cx: &mut Ctx) -> Result<Value> {
     loop {
         let test = cond.eval(host, cx)?;
         if !host.truthy(&test) {

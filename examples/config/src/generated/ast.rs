@@ -5,14 +5,14 @@
 
 #![allow(dead_code)]
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::Span;
 
 /// From `rule document = SOI entries:entry* EOI -> doc`.
 #[derive(Clone, Debug)]
 pub struct Document {
-    pub entries: Vec<Rc<Entry>>,
+    pub entries: Vec<Shared<Entry>>,
     pub span: Span,
 }
 
@@ -20,20 +20,20 @@ pub struct Document {
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub key: String,
-    pub value: Rc<Value>,
+    pub value: Shared<Value>,
     pub span: Span,
 }
 
 /// `rule value`.
 #[derive(Clone, Debug)]
 pub enum Value {
-    String(Rc<ValueString>),
-    Number(Rc<ValueNumber>),
-    Yes(Rc<ValueYes>),
-    No(Rc<ValueNo>),
-    Null(Rc<ValueNull>),
-    List(Rc<ValueList>),
-    Table(Rc<ValueTable>),
+    String(Shared<ValueString>),
+    Number(Shared<ValueNumber>),
+    Yes(Shared<ValueYes>),
+    No(Shared<ValueNo>),
+    Null(Shared<ValueNull>),
+    List(Shared<ValueList>),
+    Table(Shared<ValueTable>),
 }
 
 /// From `rule value = raw:STRING -> string`.
@@ -71,14 +71,14 @@ pub struct ValueNull {
 /// From `rule value = "[" items:value* "]" -> list`.
 #[derive(Clone, Debug)]
 pub struct ValueList {
-    pub items: Vec<Rc<Value>>,
+    pub items: Vec<Shared<Value>>,
     pub span: Span,
 }
 
 /// From `rule value = "{" fields:entry* "}" -> table`.
 #[derive(Clone, Debug)]
 pub struct ValueTable {
-    pub fields: Vec<Rc<Entry>>,
+    pub fields: Vec<Shared<Entry>>,
     pub span: Span,
 }
 
@@ -117,18 +117,18 @@ fn only_child(pair: Pair<'_, Rule>) -> Result<Pair<'_, Rule>> {
 }
 
 /// Builds `Document` from `SOI entries:entry* EOI -> doc`.
-pub fn build_document(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Document>> {
+pub fn build_document(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Document>> {
     let view = DocumentView::from_pair(pair, file);
-    Ok(Rc::new(Document {
+    Ok(Shared::new(Document {
         entries: { let mut v = Vec::new(); for n in view.entries() { v.push(build_entry(n.into_pair(), file)?); } v },
         span: view.span(),
     }))
 }
 
 /// Builds `Entry` from `key:IDENT "=" value:value ";" -> entry`.
-pub fn build_entry(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Entry>> {
+pub fn build_entry(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Entry>> {
     let view = EntryView::from_pair(pair, file);
-    Ok(Rc::new(Entry {
+    Ok(Shared::new(Entry {
         key: view.key().text().to_string(),
         value: build_value(view.value().into_pair(), file)?,
         span: view.span(),
@@ -136,31 +136,31 @@ pub fn build_entry(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Entry>> {
 }
 
 /// Builds a `value` node.
-pub fn build_value(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Value>> {
+pub fn build_value(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Value>> {
     let mut pair = pair;
     loop {
         let span = span_of(&pair, file);
         match pair.as_rule() {
             Rule::value_string => {
-                return Ok(Rc::new(Value::String(build_value_string(pair, file)?)))
+                return Ok(Shared::new(Value::String(build_value_string(pair, file)?)))
             }
             Rule::value_number => {
-                return Ok(Rc::new(Value::Number(build_value_number(pair, file)?)))
+                return Ok(Shared::new(Value::Number(build_value_number(pair, file)?)))
             }
             Rule::value_yes => {
-                return Ok(Rc::new(Value::Yes(build_value_yes(pair, file)?)))
+                return Ok(Shared::new(Value::Yes(build_value_yes(pair, file)?)))
             }
             Rule::value_no => {
-                return Ok(Rc::new(Value::No(build_value_no(pair, file)?)))
+                return Ok(Shared::new(Value::No(build_value_no(pair, file)?)))
             }
             Rule::value_null => {
-                return Ok(Rc::new(Value::Null(build_value_null(pair, file)?)))
+                return Ok(Shared::new(Value::Null(build_value_null(pair, file)?)))
             }
             Rule::value_list => {
-                return Ok(Rc::new(Value::List(build_value_list(pair, file)?)))
+                return Ok(Shared::new(Value::List(build_value_list(pair, file)?)))
             }
             Rule::value_table => {
-                return Ok(Rc::new(Value::Table(build_value_table(pair, file)?)))
+                return Ok(Shared::new(Value::Table(build_value_table(pair, file)?)))
             }
             // A wrapper rule: the node is one level down.
             _ => pair = only_child(pair).map_err(|e| e.at(span))?,
@@ -169,60 +169,60 @@ pub fn build_value(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Value>> {
 }
 
 /// Builds `ValueString` from `raw:STRING -> string`.
-pub fn build_value_string(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ValueString>> {
+pub fn build_value_string(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ValueString>> {
     let view = ValueStringView::from_pair(pair, file);
-    Ok(Rc::new(ValueString {
+    Ok(Shared::new(ValueString {
         raw: view.raw().text().to_string(),
         span: view.span(),
     }))
 }
 
 /// Builds `ValueNumber` from `digits:NUMBER -> number`.
-pub fn build_value_number(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ValueNumber>> {
+pub fn build_value_number(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ValueNumber>> {
     let view = ValueNumberView::from_pair(pair, file);
-    Ok(Rc::new(ValueNumber {
+    Ok(Shared::new(ValueNumber {
         digits: view.digits().text().to_string(),
         span: view.span(),
     }))
 }
 
 /// Builds `ValueYes` from `"true" -> yes`.
-pub fn build_value_yes(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ValueYes>> {
+pub fn build_value_yes(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ValueYes>> {
     let view = ValueYesView::from_pair(pair, file);
-    Ok(Rc::new(ValueYes {
+    Ok(Shared::new(ValueYes {
         span: view.span(),
     }))
 }
 
 /// Builds `ValueNo` from `"false" -> no`.
-pub fn build_value_no(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ValueNo>> {
+pub fn build_value_no(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ValueNo>> {
     let view = ValueNoView::from_pair(pair, file);
-    Ok(Rc::new(ValueNo {
+    Ok(Shared::new(ValueNo {
         span: view.span(),
     }))
 }
 
 /// Builds `ValueNull` from `"null" -> null`.
-pub fn build_value_null(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ValueNull>> {
+pub fn build_value_null(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ValueNull>> {
     let view = ValueNullView::from_pair(pair, file);
-    Ok(Rc::new(ValueNull {
+    Ok(Shared::new(ValueNull {
         span: view.span(),
     }))
 }
 
 /// Builds `ValueList` from `"[" items:value* "]" -> list`.
-pub fn build_value_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ValueList>> {
+pub fn build_value_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ValueList>> {
     let view = ValueListView::from_pair(pair, file);
-    Ok(Rc::new(ValueList {
+    Ok(Shared::new(ValueList {
         items: { let mut v = Vec::new(); for n in view.items() { v.push(build_value(n.into_pair(), file)?); } v },
         span: view.span(),
     }))
 }
 
 /// Builds `ValueTable` from `"{" fields:entry* "}" -> table`.
-pub fn build_value_table(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ValueTable>> {
+pub fn build_value_table(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ValueTable>> {
     let view = ValueTableView::from_pair(pair, file);
-    Ok(Rc::new(ValueTable {
+    Ok(Shared::new(ValueTable {
         fields: { let mut v = Vec::new(); for n in view.fields() { v.push(build_entry(n.into_pair(), file)?); } v },
         span: view.span(),
     }))

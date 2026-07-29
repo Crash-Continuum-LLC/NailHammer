@@ -287,7 +287,7 @@ fn emit_lazy_method(
         \x20   fn {m}(\n\
         \x20       &mut self,\n\
         \x20       lhs: Self::Out,\n\
-        \x20       {arg}rhs: Rc<Expr>,\n\
+        \x20       {arg}rhs: Shared<Expr>,\n\
         \x20       cx: &mut Ctx,\n\
         \x20   ) -> Result<Self::Out>\n\
         \x20   where\n\
@@ -537,7 +537,7 @@ pub fn emit_driver(out: &mut String, ops: &[Emitted<'_>], atom: &str) {
 
     // --- evaluator -----------------------------------------------------
     //
-    // `Deferred` is gone: an operand is an `Rc<Expr>`, which is owned. A lazy
+    // `Deferred` is gone: an operand is an `Shared<Expr>`, which is owned. A lazy
     // operator receives one and decides whether to run it, exactly as before,
     // except that it may now also *keep* it (DESIGN.md §9).
     let _ = writeln!(
@@ -617,7 +617,7 @@ pub fn emit_short_circuit_impl(out: &mut String, ops: &[Emitted<'_>], indent: &s
             "{indent}    fn {m}(\n\
              {indent}        &mut self,\n\
              {indent}        lhs: <Self as $crate::generated::dispatch::Semantics>::Out,\n\
-             {indent}        {arg_ty}rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,\n\
+             {indent}        {arg_ty}rhs: ::nh_runtime::Shared<$crate::generated::ast::Expr>,\n\
              {indent}        cx: &mut ::nh_runtime::Ctx,\n\
              {indent}    ) -> ::nh_runtime::Result<\n\
              {indent}        <Self as $crate::generated::dispatch::Semantics>::Out,\n\

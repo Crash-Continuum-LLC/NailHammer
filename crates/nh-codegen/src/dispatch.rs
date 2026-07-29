@@ -56,7 +56,7 @@ pub fn generate(lowered: &Lowered, table: &OperatorTable, opts: &Options) -> Str
          // is the grammar's shape, not a defect, and not something a reader of\n\
          // this file could act on.\n\
          #![allow(clippy::too_many_arguments)]\n\n\
-         use std::rc::Rc;\n\n\
+         use nh_runtime::Shared;\n\n\
          use nh_runtime::{{Ctx, Diagnostic, Error, Name, Result, Span}};\n\
          {ops_import}\n\
          use super::ast::*;\n\
@@ -324,21 +324,27 @@ fn macro_ty(ty: &str) -> String {
     qualify_rc(&ty)
 }
 
-/// Rewrites `Rc<Foo>` to its fully-qualified form.
+/// Rewrites `Shared<Foo>` to its fully-qualified form.
 ///
 /// Written by hand rather than with a regex because this crate has no regex
-/// dependency and the shape is fixed: `Rc<` then one identifier then `>`.
+/// dependency and the shape is fixed: `Shared<` then one identifier then `>`.
 fn qualify_rc(ty: &str) -> String {
+    // Taken from the needle, not written as a number. It was `3` for `Rc<`, and
+    // renaming the pointer to `Shared` silently cut into the middle of the word
+    // — `ast::red<Stmt>` — which is not the sort of thing a magic length should
+    // be able to do.
+    const OPEN: &str = "Shared<";
+
     let mut out = String::new();
     let mut rest = ty;
 
-    while let Some(at) = rest.find("Rc<") {
+    while let Some(at) = rest.find(OPEN) {
         out.push_str(&rest[..at]);
-        let after = &rest[at + 3..];
+        let after = &rest[at + OPEN.len()..];
         match after.find('>') {
             Some(close) => {
                 let name = &after[..close];
-                out.push_str("::std::rc::Rc<$crate::generated::ast::");
+                out.push_str("::nh_runtime::Shared<$crate::generated::ast::");
                 out.push_str(name);
                 out.push('>');
                 rest = &after[close + 1..];

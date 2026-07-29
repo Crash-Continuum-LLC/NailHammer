@@ -40,7 +40,7 @@ impl<'i> ProgramView<'i> {
     /// Repeated in the grammar (`*` or `+`), so this may be empty.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `lines: &[Rc<Line>]`:
+    /// `lines: &[Shared<Line>]`:
     /// the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it
     /// (repeated in the grammar)
     pub fn lines(&self) -> Vec<Node<'i, Rule>> {
@@ -170,7 +170,7 @@ impl<'i> StmtLoopView<'i> {
     /// Repeated in the grammar (`*` or `+`), so this may be empty.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `body: &[Rc<Line>]`:
+    /// `body: &[Shared<Line>]`:
     /// the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it
     /// (repeated in the grammar)
     pub fn body(&self) -> Vec<Node<'i, Rule>> {
@@ -218,7 +218,7 @@ impl<'i> StmtWhileView<'i> {
     /// `cond` — the `expr` rule.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `cond: &Rc<Expr>`:
+    /// `cond: &Shared<Expr>`:
     /// the `expr` rule, **unevaluated** — `.eval(host, cx)?` runs it
     pub fn cond(&self) -> Node<'i, Rule> {
         self.node.tagged("cond").expect(
@@ -230,7 +230,7 @@ impl<'i> StmtWhileView<'i> {
     /// Repeated in the grammar (`*` or `+`), so this may be empty.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `body: &[Rc<Line>]`:
+    /// `body: &[Shared<Line>]`:
     /// the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it
     /// (repeated in the grammar)
     pub fn body(&self) -> Vec<Node<'i, Rule>> {
@@ -279,7 +279,7 @@ impl<'i> StmtDefineView<'i> {
     /// Repeated in the grammar (`*` or `+`), so this may be empty.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `body: &[Rc<Line>]`:
+    /// `body: &[Shared<Line>]`:
     /// the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it
     /// (repeated in the grammar)
     pub fn body(&self) -> Vec<Node<'i, Rule>> {
@@ -366,7 +366,7 @@ impl<'i> StmtFunctionView<'i> {
     /// Optional in the grammar (`?`), so this may be `None`.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `params: Option<&Rc<ParamList>>`:
+    /// `params: Option<&Shared<ParamList>>`:
     /// the `param_list` rule, **unevaluated** — `.eval(host, cx)?` runs
     /// it (optional in the grammar)
     pub fn params(&self) -> Option<Node<'i, Rule>> {
@@ -377,7 +377,7 @@ impl<'i> StmtFunctionView<'i> {
     /// Repeated in the grammar (`*` or `+`), so this may be empty.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `body: &[Rc<Line>]`:
+    /// `body: &[Shared<Line>]`:
     /// the `line` rule, **unevaluated** — `.eval(host, cx)?` runs it
     /// (repeated in the grammar)
     pub fn body(&self) -> Vec<Node<'i, Rule>> {
@@ -636,7 +636,7 @@ impl<'i> StmtIffView<'i> {
     /// `body` — the `stmt` rule.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `body: &Rc<Stmt>`:
+    /// `body: &Shared<Stmt>`:
     /// the `stmt` rule, **unevaluated** — `.eval(host, cx)?` runs it
     pub fn body(&self) -> Node<'i, Rule> {
         self.node.tagged("body").expect(

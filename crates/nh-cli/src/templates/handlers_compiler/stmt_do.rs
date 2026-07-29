@@ -1,11 +1,11 @@
 //! Body first, then the test. `continue` goes to the test, not the top.
-use std::rc::Rc;
+use nh_runtime::Shared;
 use nh_runtime::{Ctx, Result};
 use crate::generated::ast::{Block, Expr};
 use crate::generated::dispatch::Eval;
 use crate::{Interp, Reg};
 
-pub fn run(host: &mut Interp, body: &Rc<Block>, cond: &Rc<Expr>, cx: &mut Ctx) -> Result<Reg> {
+pub fn run(host: &mut Interp, body: &Shared<Block>, cond: &Shared<Expr>, cx: &mut Ctx) -> Result<Reg> {
     let top = host.here();
     host.enter_loop();
     body.eval(host, cx)?;

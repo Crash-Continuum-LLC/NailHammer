@@ -1885,6 +1885,60 @@ block-scoped, and there is no peephole pass, so `x = x + 1` still emits an `Add`
 into a temporary followed by a `Move` to the slot. Folding that pair is about a
 quarter of the loop body and is the obvious next optimisation.
 
+### The AST dictated a threading model
+
+`Rc` in every rule-typed field. Which meant a parsed program was **not `Send`**,
+so it could not cross a thread boundary at all — no parsing on one thread and
+running on another, no sharing a stored function body between workers, no VM used
+from a work-stealing pool. Measured, not assumed:
+
+```
+error[E0277]: `Rc<Program>` cannot be sent between threads safely
+```
+
+Everything *else* was already fine: `Span`, `Name`, `Diagnostic`, `Error`, `Ctx`
+and `SourceMap` are all `Send`, and the runtime contained no `Rc` at all. The
+constraint was one type, in generated code.
+
+**Neither pointer is right in general**, which is what made it a dictate rather
+than a bug. A single-threaded interpreter should not pay for atomic refcounts it
+never needs; a compiler that emits on another thread cannot use `Rc`. So it is a
+cargo feature on `nh-runtime`, off by default.
+
+The part worth recording is *where the choice is spelled*. Substituting `Arc` for
+`Rc` throughout the emitters would have worked, and would have meant every
+handler taking a `lazy` binding had to be rewritten when the feature flipped —
+churn with no meaning, in files the user owns, for a decision made in a manifest.
+Naming the alias instead:
+
+```rust
+pub type Shared<T> = std::rc::Rc<T>;      // default
+pub type Shared<T> = std::sync::Arc<T>;   // `threadsafe`
+```
+
+means generated code and handlers both say `Shared<T>` and **no signature moves**.
+An e2e test scaffolds a project, asserts the tree is *not* `Send`, changes one
+line of `Cargo.toml`, and asserts it now is.
+
+The rename cost one bug, and it is a good example of its kind: `qualify_rc` found
+`"Rc<"` and then skipped `3` characters. With a 7-character needle it cut into the
+middle of the word and emitted `ast::red<Stmt>`. The length is taken from the
+needle now — a magic number should not be able to do that.
+
+### Async is offered, not assumed
+
+`nh init --async` remains one answer rather than the answer, and now says what it
+assumes: tokio, its multi-thread flavour specifically (`block_in_place` panics on
+a current-thread runtime), and sync-over-async at the cost of a worker thread.
+Right for a handler that occasionally reaches the network; wrong for a language
+with async semantics of its own, which would need the interpreter to yield rather
+than block. Skip the flag and the generated code neither mentions nor needs a
+runtime.
+
+The evaluator stays synchronous for the reason it always did: an async one means
+every `eval_*` returns a boxed future, a heap allocation per node, whether or not
+a language ever awaits anything.
+
 ### What stayed different, and should
 
 Not everything that differs is a defect. Non-local control flow legitimately

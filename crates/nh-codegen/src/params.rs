@@ -12,7 +12,7 @@
 //! | `name:IDENT` | `&str` |
 //! | `name:IDENT` on a `case-insensitive` token | `&Name` — adds `.key()` |
 //! | `value:expr` | `Self::Out`, already evaluated |
-//! | `lazy body:block` | `&Rc<Block>` — owned; `.eval(host, cx)?` runs it |
+//! | `lazy body:block` | `&Shared<Block>` — owned; `.eval(host, cx)?` runs it |
 //! | `x:y?` | `Option<..>` |
 //! | `x:y*` | `Vec<..>` or `&[..]` |
 //!
@@ -70,7 +70,7 @@ pub(crate) fn param(b: &Binding) -> Param {
     // was evaluated for you or is waiting for you to run it.
     let kind = match (&b.token, &b.rule_ref, b.lazy) {
         (_, Some(rule), true) => Kind::Deferred {
-            ty: format!("Rc<{}>", crate::type_name(rule)),
+            ty: format!("Shared<{}>", crate::type_name(rule)),
             doc: format!("the `{rule}` rule, **unevaluated** — `.eval(host, cx)?` runs it"),
         },
         (Some(t), _, _) if t.case_insensitive => Kind::Borrowed {

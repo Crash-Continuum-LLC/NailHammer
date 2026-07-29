@@ -267,6 +267,25 @@ fn add(&mut self, a: Reg, b: Reg) -> Result<Reg>
 An `#[ignore]`d end-to-end test builds all sixteen style × feature × shape
 combinations and asserts the two shapes print the same thing.
 
+## Threads
+
+Nothing generated starts a thread, picks a runtime, or assumes how many of either
+you have. The one place it could have decided for you is the AST's shared
+pointer, and that is a feature:
+
+```toml
+nh-runtime = { path = "vendor/nh-runtime", features = ["threadsafe"] }
+```
+
+Default is `Rc` — cheap, single-threaded. With the feature it is `Arc`, and a
+program tree is `Send + Sync`, so you can parse on one thread and run on another,
+or share a stored function body between workers. **No signatures change**:
+generated code and your handlers both say `Shared<T>`.
+
+Off by default because a single-threaded interpreter should not pay for atomics
+it never needs — and on-by-default would have been a dictate in the other
+direction. `USAGE.md` covers what it does not do, and what `--async` assumes.
+
 ## Status
 
 Every planned milestone is complete: parsing, lowering, code generation, the

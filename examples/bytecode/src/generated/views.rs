@@ -175,7 +175,7 @@ impl<'i> StmtIffView<'i> {
     /// `body` — the `stmt` rule.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `body: &Rc<Stmt>`:
+    /// `body: &Shared<Stmt>`:
     /// the `stmt` rule, **unevaluated** — `.eval(host, cx)?` runs it
     pub fn body(&self) -> Node<'i, Rule> {
         self.node.tagged("body").expect(

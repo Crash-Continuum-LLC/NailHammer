@@ -5,7 +5,7 @@
 
 #![allow(dead_code)]
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::{Name, Span};
 
@@ -15,10 +15,10 @@ use nh_runtime::{Name, Span};
 /// what the driver folded it into, once, when the AST was built.
 #[derive(Clone, Debug)]
 pub enum Expr {
-    Atom(Rc<Primary>),
-    Prefix { op: OpKind, operand: Rc<Expr>, span: Span },
-    Postfix { operand: Rc<Expr>, op: OpKind, span: Span },
-    Infix { lhs: Rc<Expr>, op: OpKind, rhs: Rc<Expr>, span: Span },
+    Atom(Shared<Primary>),
+    Prefix { op: OpKind, operand: Shared<Expr>, span: Span },
+    Postfix { operand: Shared<Expr>, op: OpKind, span: Span },
+    Infix { lhs: Shared<Expr>, op: OpKind, rhs: Shared<Expr>, span: Span },
 }
 
 /// Which operator an [`Expr`] node applies, as a generated rule id.
@@ -27,7 +27,7 @@ pub type OpKind = crate::Rule;
 /// From `rule program = SOI EOL* lazy lines:line* EOI -> doc`.
 #[derive(Clone, Debug)]
 pub struct Program {
-    pub lines: Vec<Rc<Line>>,
+    pub lines: Vec<Shared<Line>>,
     pub span: Span,
 }
 
@@ -35,39 +35,39 @@ pub struct Program {
 #[derive(Clone, Debug)]
 pub struct Line {
     pub label: Option<String>,
-    pub body: Rc<Stmt>,
+    pub body: Shared<Stmt>,
     pub span: Span,
 }
 
 /// `rule stmt`.
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Loop(Rc<StmtLoop>),
-    While(Rc<StmtWhile>),
-    Define(Rc<StmtDefine>),
-    Call(Rc<StmtCall>),
-    Function(Rc<StmtFunction>),
-    Ret(Rc<StmtRet>),
-    Goto(Rc<StmtGoto>),
-    ExitFor(Rc<StmtExitFor>),
-    ExitWhile(Rc<StmtExitWhile>),
-    ExitSub(Rc<StmtExitSub>),
-    ContinueFor(Rc<StmtContinueFor>),
-    ContinueWhile(Rc<StmtContinueWhile>),
-    Iff(Rc<StmtIff>),
-    Print(Rc<StmtPrint>),
-    Blank(Rc<StmtBlank>),
-    Let(Rc<StmtLet>),
+    Loop(Shared<StmtLoop>),
+    While(Shared<StmtWhile>),
+    Define(Shared<StmtDefine>),
+    Call(Shared<StmtCall>),
+    Function(Shared<StmtFunction>),
+    Ret(Shared<StmtRet>),
+    Goto(Shared<StmtGoto>),
+    ExitFor(Shared<StmtExitFor>),
+    ExitWhile(Shared<StmtExitWhile>),
+    ExitSub(Shared<StmtExitSub>),
+    ContinueFor(Shared<StmtContinueFor>),
+    ContinueWhile(Shared<StmtContinueWhile>),
+    Iff(Shared<StmtIff>),
+    Print(Shared<StmtPrint>),
+    Blank(Shared<StmtBlank>),
+    Let(Shared<StmtLet>),
 }
 
 /// From `rule stmt = "FOR" var:IDENT "=" from:expr "TO" to:expr step:step_clause? EOL* lazy body:line* "NEXT" closing:IDENT? -> loop`.
 #[derive(Clone, Debug)]
 pub struct StmtLoop {
     pub var: Name,
-    pub from: Rc<Expr>,
-    pub to: Rc<Expr>,
-    pub step: Option<Rc<StepClause>>,
-    pub body: Vec<Rc<Line>>,
+    pub from: Shared<Expr>,
+    pub to: Shared<Expr>,
+    pub step: Option<Shared<StepClause>>,
+    pub body: Vec<Shared<Line>>,
     pub closing: Option<Name>,
     pub span: Span,
 }
@@ -75,8 +75,8 @@ pub struct StmtLoop {
 /// From `rule stmt = "WHILE" lazy cond:expr EOL* lazy body:line* "WEND" -> while`.
 #[derive(Clone, Debug)]
 pub struct StmtWhile {
-    pub cond: Rc<Expr>,
-    pub body: Vec<Rc<Line>>,
+    pub cond: Shared<Expr>,
+    pub body: Vec<Shared<Line>>,
     pub span: Span,
 }
 
@@ -84,7 +84,7 @@ pub struct StmtWhile {
 #[derive(Clone, Debug)]
 pub struct StmtDefine {
     pub name: Name,
-    pub body: Vec<Rc<Line>>,
+    pub body: Vec<Shared<Line>>,
     pub span: Span,
 }
 
@@ -99,15 +99,15 @@ pub struct StmtCall {
 #[derive(Clone, Debug)]
 pub struct StmtFunction {
     pub name: Name,
-    pub params: Option<Rc<ParamList>>,
-    pub body: Vec<Rc<Line>>,
+    pub params: Option<Shared<ParamList>>,
+    pub body: Vec<Shared<Line>>,
     pub span: Span,
 }
 
 /// From `rule stmt = "RETURN" value:expr -> ret`.
 #[derive(Clone, Debug)]
 pub struct StmtRet {
-    pub value: Rc<Expr>,
+    pub value: Shared<Expr>,
     pub span: Span,
 }
 
@@ -151,16 +151,16 @@ pub struct StmtContinueWhile {
 /// From `rule stmt = "IF" cond:expr "THEN" lazy body:stmt -> iff`.
 #[derive(Clone, Debug)]
 pub struct StmtIff {
-    pub cond: Rc<Expr>,
-    pub body: Rc<Stmt>,
+    pub cond: Shared<Expr>,
+    pub body: Shared<Stmt>,
     pub span: Span,
 }
 
 /// From `rule stmt = "PRINT" head:expr tail:more_print* -> print`.
 #[derive(Clone, Debug)]
 pub struct StmtPrint {
-    pub head: Rc<Expr>,
-    pub tail: Vec<Rc<MorePrint>>,
+    pub head: Shared<Expr>,
+    pub tail: Vec<Shared<MorePrint>>,
     pub span: Span,
 }
 
@@ -174,14 +174,14 @@ pub struct StmtBlank {
 #[derive(Clone, Debug)]
 pub struct StmtLet {
     pub target: Name,
-    pub value: Rc<Expr>,
+    pub value: Shared<Expr>,
     pub span: Span,
 }
 
 /// From `rule step_clause = "STEP" value:expr -> step`.
 #[derive(Clone, Debug)]
 pub struct StepClause {
-    pub value: Rc<Expr>,
+    pub value: Shared<Expr>,
     pub span: Span,
 }
 
@@ -189,7 +189,7 @@ pub struct StepClause {
 #[derive(Clone, Debug)]
 pub struct ParamList {
     pub head: Name,
-    pub tail: Vec<Rc<MoreParam>>,
+    pub tail: Vec<Shared<MoreParam>>,
     pub span: Span,
 }
 
@@ -203,22 +203,22 @@ pub struct MoreParam {
 /// From `rule arg_list = head:expr tail:more_arg* -> args`.
 #[derive(Clone, Debug)]
 pub struct ArgList {
-    pub head: Rc<Expr>,
-    pub tail: Vec<Rc<MoreArg>>,
+    pub head: Shared<Expr>,
+    pub tail: Vec<Shared<MoreArg>>,
     pub span: Span,
 }
 
 /// From `rule more_arg = "," value:expr -> next`.
 #[derive(Clone, Debug)]
 pub struct MoreArg {
-    pub value: Rc<Expr>,
+    pub value: Shared<Expr>,
     pub span: Span,
 }
 
 /// From `rule more_print = "," value:expr -> next`.
 #[derive(Clone, Debug)]
 pub struct MorePrint {
-    pub value: Rc<Expr>,
+    pub value: Shared<Expr>,
     pub span: Span,
 }
 
@@ -228,19 +228,19 @@ pub type Atom = Primary;
 /// `rule primary`.
 #[derive(Clone, Debug)]
 pub enum Primary {
-    CallFn(Rc<PrimaryCallFn>),
-    Num(Rc<PrimaryNum>),
-    Str(Rc<PrimaryStr>),
-    Var(Rc<PrimaryVar>),
+    CallFn(Shared<PrimaryCallFn>),
+    Num(Shared<PrimaryNum>),
+    Str(Shared<PrimaryStr>),
+    Var(Shared<PrimaryVar>),
     /// A transparent alternative yielding `expr`.
-    Expr(Rc<Expr>),
+    Expr(Shared<Expr>),
 }
 
 /// From `rule primary = name:IDENT "(" args:arg_list? ")" -> call_fn`.
 #[derive(Clone, Debug)]
 pub struct PrimaryCallFn {
     pub name: Name,
-    pub args: Option<Rc<ArgList>>,
+    pub args: Option<Shared<ArgList>>,
     pub span: Span,
 }
 
@@ -300,7 +300,7 @@ fn only_child(pair: Pair<'_, Rule>) -> Result<Pair<'_, Rule>> {
 }
 
 /// Folds the flat operand/operator stream into a tree, once.
-pub fn build_expr(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Expr>> {
+pub fn build_expr(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Expr>> {
     let span = span_of(&pair, file);
     let tree = nh_runtime::ops::build(
         pair.into_inner().collect(),
@@ -314,9 +314,9 @@ pub fn build_expr(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Expr>> {
 fn from_op_tree(
     tree: &nh_runtime::OpTree<'_, Rule>,
     file: FileId,
-) -> Result<Rc<Expr>> {
+) -> Result<Shared<Expr>> {
     use nh_runtime::OpTree;
-    Ok(Rc::new(match tree {
+    Ok(Shared::new(match tree {
         OpTree::Atom(p) => Expr::Atom(build_primary(p.clone(), file)?),
         OpTree::Prefix { op, operand } => Expr::Prefix {
             op: op.as_rule(),
@@ -338,18 +338,18 @@ fn from_op_tree(
 }
 
 /// Builds `Program` from `SOI EOL* lazy lines:line* EOI -> doc`.
-pub fn build_program(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Program>> {
+pub fn build_program(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Program>> {
     let view = ProgramView::from_pair(pair, file);
-    Ok(Rc::new(Program {
+    Ok(Shared::new(Program {
         lines: { let mut v = Vec::new(); for n in view.lines() { v.push(build_line(n.into_pair(), file)?); } v },
         span: view.span(),
     }))
 }
 
 /// Builds `Line` from `label:NUMBER? body:stmt EOL* -> line`.
-pub fn build_line(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Line>> {
+pub fn build_line(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Line>> {
     let view = LineView::from_pair(pair, file);
-    Ok(Rc::new(Line {
+    Ok(Shared::new(Line {
         label: view.label().map(|n| n.text().to_string()),
         body: build_stmt(view.body().into_pair(), file)?,
         span: view.span(),
@@ -357,58 +357,58 @@ pub fn build_line(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Line>> {
 }
 
 /// Builds a `stmt` node.
-pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Stmt>> {
+pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Stmt>> {
     let mut pair = pair;
     loop {
         let span = span_of(&pair, file);
         match pair.as_rule() {
             Rule::stmt_loop => {
-                return Ok(Rc::new(Stmt::Loop(build_stmt_loop(pair, file)?)))
+                return Ok(Shared::new(Stmt::Loop(build_stmt_loop(pair, file)?)))
             }
             Rule::stmt_while => {
-                return Ok(Rc::new(Stmt::While(build_stmt_while(pair, file)?)))
+                return Ok(Shared::new(Stmt::While(build_stmt_while(pair, file)?)))
             }
             Rule::stmt_define => {
-                return Ok(Rc::new(Stmt::Define(build_stmt_define(pair, file)?)))
+                return Ok(Shared::new(Stmt::Define(build_stmt_define(pair, file)?)))
             }
             Rule::stmt_call => {
-                return Ok(Rc::new(Stmt::Call(build_stmt_call(pair, file)?)))
+                return Ok(Shared::new(Stmt::Call(build_stmt_call(pair, file)?)))
             }
             Rule::stmt_function => {
-                return Ok(Rc::new(Stmt::Function(build_stmt_function(pair, file)?)))
+                return Ok(Shared::new(Stmt::Function(build_stmt_function(pair, file)?)))
             }
             Rule::stmt_ret => {
-                return Ok(Rc::new(Stmt::Ret(build_stmt_ret(pair, file)?)))
+                return Ok(Shared::new(Stmt::Ret(build_stmt_ret(pair, file)?)))
             }
             Rule::stmt_goto => {
-                return Ok(Rc::new(Stmt::Goto(build_stmt_goto(pair, file)?)))
+                return Ok(Shared::new(Stmt::Goto(build_stmt_goto(pair, file)?)))
             }
             Rule::stmt_exit_for => {
-                return Ok(Rc::new(Stmt::ExitFor(build_stmt_exit_for(pair, file)?)))
+                return Ok(Shared::new(Stmt::ExitFor(build_stmt_exit_for(pair, file)?)))
             }
             Rule::stmt_exit_while => {
-                return Ok(Rc::new(Stmt::ExitWhile(build_stmt_exit_while(pair, file)?)))
+                return Ok(Shared::new(Stmt::ExitWhile(build_stmt_exit_while(pair, file)?)))
             }
             Rule::stmt_exit_sub => {
-                return Ok(Rc::new(Stmt::ExitSub(build_stmt_exit_sub(pair, file)?)))
+                return Ok(Shared::new(Stmt::ExitSub(build_stmt_exit_sub(pair, file)?)))
             }
             Rule::stmt_continue_for => {
-                return Ok(Rc::new(Stmt::ContinueFor(build_stmt_continue_for(pair, file)?)))
+                return Ok(Shared::new(Stmt::ContinueFor(build_stmt_continue_for(pair, file)?)))
             }
             Rule::stmt_continue_while => {
-                return Ok(Rc::new(Stmt::ContinueWhile(build_stmt_continue_while(pair, file)?)))
+                return Ok(Shared::new(Stmt::ContinueWhile(build_stmt_continue_while(pair, file)?)))
             }
             Rule::stmt_iff => {
-                return Ok(Rc::new(Stmt::Iff(build_stmt_iff(pair, file)?)))
+                return Ok(Shared::new(Stmt::Iff(build_stmt_iff(pair, file)?)))
             }
             Rule::stmt_print => {
-                return Ok(Rc::new(Stmt::Print(build_stmt_print(pair, file)?)))
+                return Ok(Shared::new(Stmt::Print(build_stmt_print(pair, file)?)))
             }
             Rule::stmt_blank => {
-                return Ok(Rc::new(Stmt::Blank(build_stmt_blank(pair, file)?)))
+                return Ok(Shared::new(Stmt::Blank(build_stmt_blank(pair, file)?)))
             }
             Rule::stmt_let => {
-                return Ok(Rc::new(Stmt::Let(build_stmt_let(pair, file)?)))
+                return Ok(Shared::new(Stmt::Let(build_stmt_let(pair, file)?)))
             }
             // A wrapper rule: the node is one level down.
             _ => pair = only_child(pair).map_err(|e| e.at(span))?,
@@ -417,9 +417,9 @@ pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Stmt>> {
 }
 
 /// Builds `StmtLoop` from `"FOR" var:IDENT "=" from:expr "TO" to:expr step:step_clause? EOL* lazy body:line* "NEXT" closing:IDENT? -> loop`.
-pub fn build_stmt_loop(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtLoop>> {
+pub fn build_stmt_loop(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtLoop>> {
     let view = StmtLoopView::from_pair(pair, file);
-    Ok(Rc::new(StmtLoop {
+    Ok(Shared::new(StmtLoop {
         var: Name::new(view.var().text(), view.var().span()),
         from: build_expr(view.from().into_pair(), file)?,
         to: build_expr(view.to().into_pair(), file)?,
@@ -431,9 +431,9 @@ pub fn build_stmt_loop(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtLoop
 }
 
 /// Builds `StmtWhile` from `"WHILE" lazy cond:expr EOL* lazy body:line* "WEND" -> while`.
-pub fn build_stmt_while(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtWhile>> {
+pub fn build_stmt_while(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtWhile>> {
     let view = StmtWhileView::from_pair(pair, file);
-    Ok(Rc::new(StmtWhile {
+    Ok(Shared::new(StmtWhile {
         cond: build_expr(view.cond().into_pair(), file)?,
         body: { let mut v = Vec::new(); for n in view.body() { v.push(build_line(n.into_pair(), file)?); } v },
         span: view.span(),
@@ -441,9 +441,9 @@ pub fn build_stmt_while(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtWhi
 }
 
 /// Builds `StmtDefine` from `"SUB" name:IDENT EOL* lazy body:line* "END" "SUB" -> define`.
-pub fn build_stmt_define(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtDefine>> {
+pub fn build_stmt_define(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtDefine>> {
     let view = StmtDefineView::from_pair(pair, file);
-    Ok(Rc::new(StmtDefine {
+    Ok(Shared::new(StmtDefine {
         name: Name::new(view.name().text(), view.name().span()),
         body: { let mut v = Vec::new(); for n in view.body() { v.push(build_line(n.into_pair(), file)?); } v },
         span: view.span(),
@@ -451,18 +451,18 @@ pub fn build_stmt_define(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtDe
 }
 
 /// Builds `StmtCall` from `"CALL" target:IDENT -> call`.
-pub fn build_stmt_call(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtCall>> {
+pub fn build_stmt_call(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtCall>> {
     let view = StmtCallView::from_pair(pair, file);
-    Ok(Rc::new(StmtCall {
+    Ok(Shared::new(StmtCall {
         target: Name::new(view.target().text(), view.target().span()),
         span: view.span(),
     }))
 }
 
 /// Builds `StmtFunction` from `"FUNCTION" name:IDENT "(" lazy params:param_list? ")" EOL* lazy body:line* "END" "FUNCTION" -> function`.
-pub fn build_stmt_function(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtFunction>> {
+pub fn build_stmt_function(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtFunction>> {
     let view = StmtFunctionView::from_pair(pair, file);
-    Ok(Rc::new(StmtFunction {
+    Ok(Shared::new(StmtFunction {
         name: Name::new(view.name().text(), view.name().span()),
         params: match view.params() { Some(n) => Some(build_param_list(n.into_pair(), file)?), None => None },
         body: { let mut v = Vec::new(); for n in view.body() { v.push(build_line(n.into_pair(), file)?); } v },
@@ -471,67 +471,67 @@ pub fn build_stmt_function(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Stmt
 }
 
 /// Builds `StmtRet` from `"RETURN" value:expr -> ret`.
-pub fn build_stmt_ret(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtRet>> {
+pub fn build_stmt_ret(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtRet>> {
     let view = StmtRetView::from_pair(pair, file);
-    Ok(Rc::new(StmtRet {
+    Ok(Shared::new(StmtRet {
         value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
     }))
 }
 
 /// Builds `StmtGoto` from `"GOTO" target:NUMBER -> goto`.
-pub fn build_stmt_goto(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtGoto>> {
+pub fn build_stmt_goto(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtGoto>> {
     let view = StmtGotoView::from_pair(pair, file);
-    Ok(Rc::new(StmtGoto {
+    Ok(Shared::new(StmtGoto {
         target: view.target().text().to_string(),
         span: view.span(),
     }))
 }
 
 /// Builds `StmtExitFor` from `"EXIT" "FOR" -> exit_for`.
-pub fn build_stmt_exit_for(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtExitFor>> {
+pub fn build_stmt_exit_for(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtExitFor>> {
     let view = StmtExitForView::from_pair(pair, file);
-    Ok(Rc::new(StmtExitFor {
+    Ok(Shared::new(StmtExitFor {
         span: view.span(),
     }))
 }
 
 /// Builds `StmtExitWhile` from `"EXIT" "WHILE" -> exit_while`.
-pub fn build_stmt_exit_while(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtExitWhile>> {
+pub fn build_stmt_exit_while(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtExitWhile>> {
     let view = StmtExitWhileView::from_pair(pair, file);
-    Ok(Rc::new(StmtExitWhile {
+    Ok(Shared::new(StmtExitWhile {
         span: view.span(),
     }))
 }
 
 /// Builds `StmtExitSub` from `"EXIT" "SUB" -> exit_sub`.
-pub fn build_stmt_exit_sub(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtExitSub>> {
+pub fn build_stmt_exit_sub(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtExitSub>> {
     let view = StmtExitSubView::from_pair(pair, file);
-    Ok(Rc::new(StmtExitSub {
+    Ok(Shared::new(StmtExitSub {
         span: view.span(),
     }))
 }
 
 /// Builds `StmtContinueFor` from `"CONTINUE" "FOR" -> continue_for`.
-pub fn build_stmt_continue_for(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtContinueFor>> {
+pub fn build_stmt_continue_for(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtContinueFor>> {
     let view = StmtContinueForView::from_pair(pair, file);
-    Ok(Rc::new(StmtContinueFor {
+    Ok(Shared::new(StmtContinueFor {
         span: view.span(),
     }))
 }
 
 /// Builds `StmtContinueWhile` from `"CONTINUE" "WHILE" -> continue_while`.
-pub fn build_stmt_continue_while(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtContinueWhile>> {
+pub fn build_stmt_continue_while(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtContinueWhile>> {
     let view = StmtContinueWhileView::from_pair(pair, file);
-    Ok(Rc::new(StmtContinueWhile {
+    Ok(Shared::new(StmtContinueWhile {
         span: view.span(),
     }))
 }
 
 /// Builds `StmtIff` from `"IF" cond:expr "THEN" lazy body:stmt -> iff`.
-pub fn build_stmt_iff(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtIff>> {
+pub fn build_stmt_iff(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtIff>> {
     let view = StmtIffView::from_pair(pair, file);
-    Ok(Rc::new(StmtIff {
+    Ok(Shared::new(StmtIff {
         cond: build_expr(view.cond().into_pair(), file)?,
         body: build_stmt(view.body().into_pair(), file)?,
         span: view.span(),
@@ -539,9 +539,9 @@ pub fn build_stmt_iff(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtIff>>
 }
 
 /// Builds `StmtPrint` from `"PRINT" head:expr tail:more_print* -> print`.
-pub fn build_stmt_print(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtPrint>> {
+pub fn build_stmt_print(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtPrint>> {
     let view = StmtPrintView::from_pair(pair, file);
-    Ok(Rc::new(StmtPrint {
+    Ok(Shared::new(StmtPrint {
         head: build_expr(view.head().into_pair(), file)?,
         tail: { let mut v = Vec::new(); for n in view.tail() { v.push(build_more_print(n.into_pair(), file)?); } v },
         span: view.span(),
@@ -549,17 +549,17 @@ pub fn build_stmt_print(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtPri
 }
 
 /// Builds `StmtBlank` from `"PRINT" -> blank`.
-pub fn build_stmt_blank(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtBlank>> {
+pub fn build_stmt_blank(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtBlank>> {
     let view = StmtBlankView::from_pair(pair, file);
-    Ok(Rc::new(StmtBlank {
+    Ok(Shared::new(StmtBlank {
         span: view.span(),
     }))
 }
 
 /// Builds `StmtLet` from `"LET"? target:IDENT "=" value:expr -> let`.
-pub fn build_stmt_let(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtLet>> {
+pub fn build_stmt_let(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtLet>> {
     let view = StmtLetView::from_pair(pair, file);
-    Ok(Rc::new(StmtLet {
+    Ok(Shared::new(StmtLet {
         target: Name::new(view.target().text(), view.target().span()),
         value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
@@ -567,18 +567,18 @@ pub fn build_stmt_let(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StmtLet>>
 }
 
 /// Builds `StepClause` from `"STEP" value:expr -> step`.
-pub fn build_step_clause(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<StepClause>> {
+pub fn build_step_clause(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StepClause>> {
     let view = StepClauseView::from_pair(pair, file);
-    Ok(Rc::new(StepClause {
+    Ok(Shared::new(StepClause {
         value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
     }))
 }
 
 /// Builds `ParamList` from `head:IDENT tail:more_param* -> params`.
-pub fn build_param_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ParamList>> {
+pub fn build_param_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ParamList>> {
     let view = ParamListView::from_pair(pair, file);
-    Ok(Rc::new(ParamList {
+    Ok(Shared::new(ParamList {
         head: Name::new(view.head().text(), view.head().span()),
         tail: { let mut v = Vec::new(); for n in view.tail() { v.push(build_more_param(n.into_pair(), file)?); } v },
         span: view.span(),
@@ -586,18 +586,18 @@ pub fn build_param_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ParamLi
 }
 
 /// Builds `MoreParam` from `"," name:IDENT -> next`.
-pub fn build_more_param(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<MoreParam>> {
+pub fn build_more_param(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<MoreParam>> {
     let view = MoreParamView::from_pair(pair, file);
-    Ok(Rc::new(MoreParam {
+    Ok(Shared::new(MoreParam {
         name: Name::new(view.name().text(), view.name().span()),
         span: view.span(),
     }))
 }
 
 /// Builds `ArgList` from `head:expr tail:more_arg* -> args`.
-pub fn build_arg_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ArgList>> {
+pub fn build_arg_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<ArgList>> {
     let view = ArgListView::from_pair(pair, file);
-    Ok(Rc::new(ArgList {
+    Ok(Shared::new(ArgList {
         head: build_expr(view.head().into_pair(), file)?,
         tail: { let mut v = Vec::new(); for n in view.tail() { v.push(build_more_arg(n.into_pair(), file)?); } v },
         span: view.span(),
@@ -605,43 +605,43 @@ pub fn build_arg_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<ArgList>>
 }
 
 /// Builds `MoreArg` from `"," value:expr -> next`.
-pub fn build_more_arg(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<MoreArg>> {
+pub fn build_more_arg(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<MoreArg>> {
     let view = MoreArgView::from_pair(pair, file);
-    Ok(Rc::new(MoreArg {
+    Ok(Shared::new(MoreArg {
         value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
     }))
 }
 
 /// Builds `MorePrint` from `"," value:expr -> next`.
-pub fn build_more_print(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<MorePrint>> {
+pub fn build_more_print(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<MorePrint>> {
     let view = MorePrintView::from_pair(pair, file);
-    Ok(Rc::new(MorePrint {
+    Ok(Shared::new(MorePrint {
         value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
     }))
 }
 
 /// Builds a `primary` node.
-pub fn build_primary(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Primary>> {
+pub fn build_primary(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Primary>> {
     let mut pair = pair;
     loop {
         let span = span_of(&pair, file);
         match pair.as_rule() {
             Rule::primary_call_fn => {
-                return Ok(Rc::new(Primary::CallFn(build_primary_call_fn(pair, file)?)))
+                return Ok(Shared::new(Primary::CallFn(build_primary_call_fn(pair, file)?)))
             }
             Rule::primary_num => {
-                return Ok(Rc::new(Primary::Num(build_primary_num(pair, file)?)))
+                return Ok(Shared::new(Primary::Num(build_primary_num(pair, file)?)))
             }
             Rule::primary_str => {
-                return Ok(Rc::new(Primary::Str(build_primary_str(pair, file)?)))
+                return Ok(Shared::new(Primary::Str(build_primary_str(pair, file)?)))
             }
             Rule::primary_var => {
-                return Ok(Rc::new(Primary::Var(build_primary_var(pair, file)?)))
+                return Ok(Shared::new(Primary::Var(build_primary_var(pair, file)?)))
             }
             Rule::expr => {
-                return Ok(Rc::new(Primary::Expr(build_expr(pair, file)?)))
+                return Ok(Shared::new(Primary::Expr(build_expr(pair, file)?)))
             }
             // A wrapper rule: the node is one level down.
             _ => pair = only_child(pair).map_err(|e| e.at(span))?,
@@ -650,9 +650,9 @@ pub fn build_primary(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Primary>> 
 }
 
 /// Builds `PrimaryCallFn` from `name:IDENT "(" args:arg_list? ")" -> call_fn`.
-pub fn build_primary_call_fn(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryCallFn>> {
+pub fn build_primary_call_fn(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryCallFn>> {
     let view = PrimaryCallFnView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryCallFn {
+    Ok(Shared::new(PrimaryCallFn {
         name: Name::new(view.name().text(), view.name().span()),
         args: match view.args() { Some(n) => Some(build_arg_list(n.into_pair(), file)?), None => None },
         span: view.span(),
@@ -660,27 +660,27 @@ pub fn build_primary_call_fn(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<Pr
 }
 
 /// Builds `PrimaryNum` from `value:NUMBER -> num`.
-pub fn build_primary_num(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryNum>> {
+pub fn build_primary_num(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryNum>> {
     let view = PrimaryNumView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryNum {
+    Ok(Shared::new(PrimaryNum {
         value: view.value().text().to_string(),
         span: view.span(),
     }))
 }
 
 /// Builds `PrimaryStr` from `text:STRING -> str`.
-pub fn build_primary_str(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryStr>> {
+pub fn build_primary_str(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryStr>> {
     let view = PrimaryStrView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryStr {
+    Ok(Shared::new(PrimaryStr {
         text: view.text().text().to_string(),
         span: view.span(),
     }))
 }
 
 /// Builds `PrimaryVar` from `name:IDENT -> var`.
-pub fn build_primary_var(pair: Pair<'_, Rule>, file: FileId) -> Result<Rc<PrimaryVar>> {
+pub fn build_primary_var(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryVar>> {
     let view = PrimaryVarView::from_pair(pair, file);
-    Ok(Rc::new(PrimaryVar {
+    Ok(Shared::new(PrimaryVar {
         name: Name::new(view.name().text(), view.name().span()),
         span: view.span(),
     }))

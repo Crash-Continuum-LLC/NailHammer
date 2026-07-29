@@ -5,7 +5,7 @@
 //! and `cond` does too — it is evaluated exactly once, which is correct here
 //! and would be wrong in a loop.
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::{Ctx, Result};
 
@@ -16,8 +16,8 @@ use crate::{Interp, Value};
 pub fn run(
     host: &mut Interp,
     cond: Value,
-    then: &Rc<Block>,
-    otherwise: Option<&Rc<ElseTail>>,
+    then: &Shared<Block>,
+    otherwise: Option<&Shared<ElseTail>>,
     cx: &mut Ctx,
 ) -> Result<Value> {
     // The same `truthy` that `&&` and `||` use. Asking here rather than

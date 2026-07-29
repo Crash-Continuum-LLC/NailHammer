@@ -35,6 +35,10 @@ const SOURCES: &[(&str, &str)] = &[
     ("src/node.rs", include_str!("../../nh-runtime/src/node.rs")),
     ("src/ops.rs", include_str!("../../nh-runtime/src/ops.rs")),
     (
+        "src/shared.rs",
+        include_str!("../../nh-runtime/src/shared.rs"),
+    ),
+    (
         "src/source.rs",
         include_str!("../../nh-runtime/src/source.rs"),
     ),
@@ -68,6 +72,16 @@ publish = false
 
 [dependencies]
 pest = "2.8"
+
+# `Arc` instead of `Rc` for the generated AST, so a program tree is `Send +
+# Sync`. Turn it on where this crate is depended on:
+#
+#     nh-runtime = {{ path = "vendor/nh-runtime", features = ["threadsafe"] }}
+#
+# Nothing else changes — the generated code and your handlers both say
+# `Shared<T>`, so no signature moves. See `src/shared.rs`.
+[features]
+threadsafe = []
 "#
     )
 }

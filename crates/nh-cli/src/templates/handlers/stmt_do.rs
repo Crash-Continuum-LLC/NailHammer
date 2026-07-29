@@ -3,7 +3,7 @@
 //! The only difference from `while` is the order of the two lines, which is
 //! the whole point of having both.
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::{Ctx, Error, Result};
 
@@ -11,7 +11,7 @@ use crate::generated::ast::{Block, Expr};
 use crate::generated::dispatch::{Eval, Values};
 use crate::{Interp, Value};
 
-pub fn run(host: &mut Interp, body: &Rc<Block>, cond: &Rc<Expr>, cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, body: &Shared<Block>, cond: &Shared<Expr>, cx: &mut Ctx) -> Result<Value> {
     loop {
         match body.eval(host, cx) {
             Ok(_) => {}

@@ -275,7 +275,7 @@ impl generated::dispatch::ShortCircuit for Interp {
     fn and_then(
         &mut self,
         lhs: Reg,
-        rhs: std::rc::Rc<generated::ast::Expr>,
+        rhs: nh_runtime::Shared<generated::ast::Expr>,
         cx: &mut nh_runtime::Ctx,
     ) -> nh_runtime::Result<Reg> {
         use generated::dispatch::Eval;
@@ -290,7 +290,7 @@ impl generated::dispatch::ShortCircuit for Interp {
     fn or_else(
         &mut self,
         lhs: Reg,
-        rhs: std::rc::Rc<generated::ast::Expr>,
+        rhs: nh_runtime::Shared<generated::ast::Expr>,
         cx: &mut nh_runtime::Ctx,
     ) -> nh_runtime::Result<Reg> {
         use generated::dispatch::Eval;

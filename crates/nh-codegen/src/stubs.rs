@@ -38,11 +38,11 @@ pub fn generate(alt: &LoweredAlternative, opts: &Options) -> String {
     );
 
     // Import only what the signature actually mentions, in the usual order:
-    // std, then the runtime, then this crate. A `lazy` parameter is an `Rc` of
+    // std, then the runtime, then this crate. A `lazy` parameter is an `Shared` of
     // a generated AST type, so both have to come along.
     let mut lazy: Vec<&str> = ps
         .iter()
-        .filter_map(|p| p.ty.split("Rc<").nth(1))
+        .filter_map(|p| p.ty.split("Shared<").nth(1))
         .filter_map(|rest| rest.split('>').next())
         .collect();
     lazy.sort_unstable();
@@ -51,7 +51,7 @@ pub fn generate(alt: &LoweredAlternative, opts: &Options) -> String {
     let std_import = if lazy.is_empty() {
         String::new()
     } else {
-        "use std::rc::Rc;\n\n".to_string()
+        "use nh_runtime::Shared;\n\n".to_string()
     };
     let ast_import = match lazy.len() {
         0 => String::new(),

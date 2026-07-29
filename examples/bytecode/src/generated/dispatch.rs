@@ -9,7 +9,7 @@
 // this file could act on.
 #![allow(clippy::too_many_arguments)]
 
-use std::rc::Rc;
+use nh_runtime::Shared;
 
 use nh_runtime::{Ctx, Diagnostic, Error, Name, Result, Span};
 use nh_runtime::ops::{Assoc, Fixity, OpInfo};
@@ -119,7 +119,7 @@ pub trait ShortCircuit: Semantics {
     fn or_else(
         &mut self,
         lhs: Self::Out,
-        rhs: Rc<Expr>,
+        rhs: Shared<Expr>,
         cx: &mut Ctx,
     ) -> Result<Self::Out>
     where
@@ -136,7 +136,7 @@ pub trait ShortCircuit: Semantics {
     fn and_then(
         &mut self,
         lhs: Self::Out,
-        rhs: Rc<Expr>,
+        rhs: Shared<Expr>,
         cx: &mut Ctx,
     ) -> Result<Self::Out>
     where
@@ -242,7 +242,7 @@ pub trait Handlers: Operators + Sized {
     /// `stmt_iff` — from `rule stmt = "if" cond:expr "then" lazy body:stmt -> iff`.
     /// * `cond` — the value of the `expr` rule, already evaluated
     /// * `body` — the `stmt` rule, **unevaluated** — `.eval(host, cx)?` runs it
-    fn stmt_iff(&mut self, cond: Self::Out, body: &Rc<Stmt>, cx: &mut Ctx) -> Result<Self::Out>;
+    fn stmt_iff(&mut self, cond: Self::Out, body: &Shared<Stmt>, cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `stmt_eval` — from `rule stmt = value:expr ";" -> eval`.
     /// * `value` — the value of the `expr` rule, already evaluated
@@ -702,7 +702,7 @@ macro_rules! nh_handlers {
             fn stmt_iff(
                 &mut self,
                 cond: <Self as $crate::generated::dispatch::Semantics>::Out,
-                body: &::std::rc::Rc<$crate::generated::ast::Stmt>,
+                body: &::nh_runtime::Shared<$crate::generated::ast::Stmt>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_iff::run(self, cond, body, cx)
@@ -733,7 +733,7 @@ macro_rules! nh_handlers {
             fn or_else(
                 &mut self,
                 lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
-                rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,
+                rhs: ::nh_runtime::Shared<$crate::generated::ast::Expr>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<
                 <Self as $crate::generated::dispatch::Semantics>::Out,
@@ -747,7 +747,7 @@ macro_rules! nh_handlers {
             fn and_then(
                 &mut self,
                 lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
-                rhs: ::std::rc::Rc<$crate::generated::ast::Expr>,
+                rhs: ::nh_runtime::Shared<$crate::generated::ast::Expr>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<
                 <Self as $crate::generated::dispatch::Semantics>::Out,
@@ -787,7 +787,7 @@ macro_rules! nh_handlers {
             fn stmt_iff(
                 &mut self,
                 cond: <Self as $crate::generated::dispatch::Semantics>::Out,
-                body: &::std::rc::Rc<$crate::generated::ast::Stmt>,
+                body: &::nh_runtime::Shared<$crate::generated::ast::Stmt>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_iff::run(self, cond, body, cx)
