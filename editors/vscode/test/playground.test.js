@@ -171,10 +171,21 @@ check("the provider hands back what it was last given", () => {
   assert.ok(p.provideTextDocumentContent().includes("stmt_bind"));
 });
 
-check("updating tells the editor to re-read", () => {
+// The event has to name the document that is actually open. Firing a rebuilt
+// URI matched nothing, so the pane never re-read and stayed blank.
+check("updating fires the change event on the document's own uri", () => {
+  const p = new playground.TraceProvider();
+
+  // No URI yet: nothing is open, so nothing should be announced.
   const before = fired.length;
-  new playground.TraceProvider().update("x");
+  p.update("x");
+  assert.strictEqual(fired.length, before, "fired before a document existed");
+
+  const uri = { toString: () => "nailhammer-trace:playground.basic → handlers" };
+  p.uri = uri;
+  p.update("y");
   assert.strictEqual(fired.length, before + 1, "no change event fired");
+  assert.strictEqual(fired[fired.length - 1], uri, "fired a different uri than was opened");
 });
 
 Module._load = load;

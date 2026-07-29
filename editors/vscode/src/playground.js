@@ -45,6 +45,15 @@ class TraceProvider {
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
     this.body = "";
+    /**
+     * The document's own URI, kept so the change event fires on **it**.
+     *
+     * This was a rebuilt one — `nailhammer-trace:trace` — which never matched
+     * the document actually opened, so VS Code never re-read the content and
+     * the pane stayed blank forever. Holding the object removes the chance of
+     * two spellings drifting apart.
+     */
+    this.uri = null;
   }
 
   provideTextDocumentContent() {
@@ -53,7 +62,7 @@ class TraceProvider {
 
   update(body) {
     this.body = body;
-    this.emitter.fire(vscode.Uri.parse(`${SCHEME}:trace`));
+    if (this.uri) this.emitter.fire(this.uri);
   }
 }
 
@@ -147,7 +156,12 @@ async function refresh(run) {
   }
 
   try {
-    const out = await run(["trace", grammar, "--source", source], path.dirname(grammar));
+    // A line-oriented grammar ends its last statement with a newline, and an
+    // editor buffer usually has none. Without this, the final line of every
+    // BASIC-style program fails to parse for a reason nothing on screen
+    // explains.
+    const text = source.endsWith("\n") ? source : `${source}\n`;
+    const out = await run(["trace", grammar, "--source", text], path.dirname(grammar));
     provider.update(header(grammar) + (out || asNote("Nothing matched.")));
     status(grammar, "ok");
   } catch (e) {
@@ -237,9 +251,9 @@ async function open(activeGrammar, run) {
 
   session = { grammar, doc: scratch };
 
-  const traceDoc = await vscode.workspace.openTextDocument(
-    vscode.Uri.parse(`${SCHEME}:${sampleName(grammar)} → handlers`),
-  );
+  const traceUri = vscode.Uri.parse(`${SCHEME}:${sampleName(grammar)} → handlers`);
+  provider.uri = traceUri;
+  const traceDoc = await vscode.workspace.openTextDocument(traceUri);
 
   // The layout first, so both panes land in groups that already exist and
   // neither has to be split out from under the other.
