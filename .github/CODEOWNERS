@@ -1,0 +1,5 @@
+# Every path, one owner. This is a single-maintainer project, so the value here
+# is not routing -- it is that a branch rule requiring code owner review has
+# something to resolve against, and that the answer stays correct as the file
+# tree grows.
+*       @bramedg

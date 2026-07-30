@@ -1,0 +1,65 @@
+name: Bug report
+description: Something the tool does that it should not
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A grammar that reproduces it is worth more than a description of it.
+        If you can get it down to a few rules, paste those — most bugs here
+        turn out to be about a specific shape, and the shape is the report.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected instead, and what you got.
+    validations:
+      required: true
+
+  - type: textarea
+    id: grammar
+    attributes:
+      label: The grammar
+      description: >
+        The smallest `.nh` that shows it. If it only reproduces in a larger
+        project, say so rather than trimming until it stops happening.
+      render: text
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The exact commands, including which subcommand and flags.
+      placeholder: |
+        $ nh build mylang.nh --rust src
+        thread 'main' panicked at ...
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: nh --version
+      description: >
+        Paste the output. If you built from source, the commit is more useful
+        than the version.
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: macOS 15 arm64 / Ubuntu 24.04 x86_64 / Windows 11
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >
+        `nh check --deny-warnings` output, or `nh trace` if the problem is what
+        the parser matched.

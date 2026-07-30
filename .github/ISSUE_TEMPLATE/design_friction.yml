@@ -1,0 +1,51 @@
+name: Design friction
+description: The tool worked, but made you write something you should not have had to
+labels: [design]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most useful report the project takes.
+
+        The standing principle in DESIGN.md is *do not bill the tool writer for
+        a decision that always goes the same way*. Most of what has changed
+        recently changed because somebody built something real and found a
+        place where the tool billed them anyway. If you wrote boilerplate, or
+        fought an API to say something obvious, that is a finding — not a
+        complaint, and not something you need a proposed fix for.
+
+  - type: textarea
+    id: building
+    attributes:
+      label: What you were building
+      description: The language or feature, briefly. Context makes the rest legible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: wrote
+    attributes:
+      label: What you had to write
+      description: The code that felt like it should not have been yours to write.
+      render: rust
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to write instead
+      description: >
+        A sketch is fine, and so is "I do not know, but not this." Naming the
+        friction is the contribution; the fix can be argued out afterwards.
+    validations:
+      required: true
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Is it a decision or a consequence?
+      description: >
+        Optional, and the crux if you have a view. Something only you could
+        have decided belongs in your code. Something that follows from what you
+        already told the grammar should have been generated.

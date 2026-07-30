@@ -1,0 +1,13 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Crash-Continuum-LLC/NailHammer/security/advisories/new
+    about: >
+      Report privately, not as an issue. A public issue is a disclosure you
+      cannot take back.
+  - name: How do I do X?
+    url: https://github.com/Crash-Continuum-LLC/NailHammer/blob/main/USAGE.md
+    about: >
+      USAGE.md is the long-form guide and covers most of it. Open an issue
+      anyway if the answer is not there — a missing answer is a documentation
+      bug worth knowing about.
