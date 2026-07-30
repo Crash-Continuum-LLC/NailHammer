@@ -1,0 +1,35 @@
+version: 2
+
+# Three ecosystems, because the repository has three. Missing one is how a
+# dependency file goes unwatched for a year without anybody noticing it was
+# never covered in the first place.
+updates:
+  # The workspace and every crate under it. Cargo.lock is committed, so an
+  # advisory against a transitive dependency is actionable here rather than
+  # theoretical.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # pest and pest_derive have to move together -- the generated parser is
+      # compiled by the derive macro, and a version skew between them fails in
+      # generated code, which is the worst place to read an error.
+      pest:
+        patterns: ["pest", "pest_*"]
+
+  - package-ecosystem: npm
+    directory: /editors/vscode
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # The actions in .github/workflows are pinned to commit SHAs, which is what
+  # makes this entry necessary rather than redundant: a pinned action never
+  # updates on its own, so without Dependabot it would simply rot. This turns
+  # each upgrade into a reviewable pull request, which is the point of pinning.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

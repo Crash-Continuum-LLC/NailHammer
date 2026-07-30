@@ -5,16 +5,20 @@ name: Release
 #     git tag v0.1.0 && git push origin v0.1.0
 #
 # Produces a prebuilt `nh` for each platform, so installing the tool does not
-# mean compiling the toolkit. On a private repository the assets need auth to
-# download, which `gh release download` supplies from an existing login.
+# mean compiling the toolkit.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
+# Read by default. The build and extension jobs compile and package; only the
+# publish job creates anything, and it raises its own permission. A workflow
+# that writes has to say where it writes.
 permissions:
-  contents: write
+  contents: read
 
+# Third-party actions are pinned to a commit rather than a tag, for the reason
+# given at the top of ci.yml.
 jobs:
   build:
     name: nh — ${{ matrix.label }}
@@ -32,13 +36,13 @@ jobs:
           - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu,  label: linux-x86_64 }
           - { os: windows-latest, target: x86_64-pc-windows-msvc,   label: windows-x86_64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ${{ matrix.target }}
 
@@ -75,7 +79,7 @@ jobs:
             tar czf "$name.tar.gz" "$name"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nh-${{ matrix.label }}
           path: |
@@ -86,8 +90,8 @@ jobs:
     name: VS Code extension
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -96,9 +100,9 @@ jobs:
         working-directory: editors/vscode
       - run: npm test
         working-directory: editors/vscode
-      - run: npx --yes @vscode/vsce@latest package --no-dependencies --allow-missing-repository
+      - run: npx --yes @vscode/vsce@3.9.2 package --no-dependencies --allow-missing-repository
         working-directory: editors/vscode
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nh-vsix
           path: editors/vscode/*.vsix
@@ -107,8 +111,10 @@ jobs:
     name: Attach to the release
     needs: [build, extension]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
           merge-multiple: true

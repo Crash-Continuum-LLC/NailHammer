@@ -9,18 +9,29 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# CI reads the repository and writes nothing. Stated here rather than left to
+# the repository default, because the default is a setting somebody can change
+# without ever opening this file.
+permissions:
+  contents: read
+
+# Third-party actions are pinned to a commit rather than a tag. A tag is a
+# moving pointer the author can repoint at any time, which on a public
+# repository means a supply chain that updates itself without review. The
+# comment records which release the commit was, and Dependabot proposes the
+# bumps as ordinary pull requests.
 jobs:
   rust:
     name: cargo test + clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Build
         run: cargo build --workspace --all-targets
@@ -42,9 +53,9 @@ jobs:
     name: every shipped grammar checks clean
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Build the CLI
         run: cargo build -p nh-cli
@@ -86,9 +97,9 @@ jobs:
       run:
         working-directory: editors/vscode
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -102,9 +113,9 @@ jobs:
       - run: npm test
 
       - name: Package
-        run: npx --yes @vscode/vsce@latest package --no-dependencies --allow-missing-repository
+        run: npx --yes @vscode/vsce@3.9.2 package --no-dependencies --allow-missing-repository
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nailhammer-vsix
           path: editors/vscode/*.vsix
