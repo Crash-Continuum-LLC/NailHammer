@@ -169,12 +169,24 @@ for CI, `allow <lint> in <rule>;` for the deliberate cases.
 Install the tool once:
 
 ```console
-$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
+$ ./install.sh
 ```
 
-That puts `nh` in `~/.cargo/bin`. The repository is private, so it needs an
-account with access and one cargo setting — cargo's built-in git client cannot
-use `gh`'s credential helper:
+That takes a prebuilt `nh` from the latest release and puts it in
+`~/.local/bin`, so it needs no Rust toolchain. It falls back to building from
+source when there is no prebuilt binary for the platform, and tells you what to
+add to your PATH if that directory is not on it. `--prefix DIR` to install
+somewhere else, `--version TAG` to pin a release, `--from-source` to always
+build, `--help` for the rest.
+
+The two manual routes it wraps, if you would rather run them yourself. Building
+from source needs an account with access, since the repository is private, and
+one cargo setting — cargo's built-in git client cannot use `gh`'s credential
+helper:
+
+```console
+$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
+```
 
 ```toml
 # ~/.cargo/config.toml
@@ -182,8 +194,8 @@ use `gh`'s credential helper:
 git-fetch-with-cli = true
 ```
 
-**Or skip the build entirely** and take a prebuilt binary. Releases carry `nh`
-for macOS (arm64 and x86_64), Linux, and Windows:
+Or take a prebuilt binary directly. Releases carry `nh` for macOS (arm64 and
+x86_64), Linux, and Windows — the last of which `install.sh` does not cover:
 
 ```console
 $ gh release download v0.2.0 --repo Crash-Continuum-LLC/NailHammer \
@@ -322,8 +334,7 @@ and it is why the warning at the top is there.
 **Not published, and it does not need to be.** `nh init` vendors the runtime
 into the project it creates, so a generated project depends on pest and nothing
 else — no credentials, no cargo configuration, no registry. Install the tool
-with `cargo install --git`, or take a prebuilt binary from a release. See
-[PUBLISHING.md](PUBLISHING.md).
+itself with `./install.sh`. See [PUBLISHING.md](PUBLISHING.md).
 
 Known gaps are tracked in [DESIGN.md §11](DESIGN.md), openly — including the
 ones found by using the tool on itself.

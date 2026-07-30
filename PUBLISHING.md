@@ -7,6 +7,14 @@ step. It now describes an optional one.
 ## How people get it today
 
 ```console
+$ ./install.sh
+```
+
+`install.sh` picks a route rather than asking anyone to: a prebuilt binary from
+the latest release when one exists for the platform, a source build when it does
+not. Both of the routes below are what it runs, and either still works by hand.
+
+```console
 $ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
 ```
 
