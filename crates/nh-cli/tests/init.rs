@@ -905,10 +905,21 @@ fn a_compiled_language_can_await_in_an_expression() {
         .output()
         .expect("running cargo");
 
+    let shown = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         out.status.success(),
-        "a compiled `AWAIT` should need no runtime in the VM:\n{}",
-        String::from_utf8_lossy(&out.stderr)
+        "a compiled `AWAIT` should need no runtime in the VM:\n{shown}"
+    );
+
+    // A case that fails to compile, or a name typo, would otherwise just not
+    // run — and an assertion that never executes proves nothing.
+    assert!(
+        shown.contains("5 passed"),
+        "expected all five suspension cases to run:\n{shown}"
     );
 }
 
@@ -945,6 +956,79 @@ fn a_blocking_driver_needs_no_runtime() {
     }
     assert_eq!(suspensions, 1);
     assert_eq!(m.output, vec!["43"]);
+}
+
+/// Suspending **inside a function**. The frame stack has to survive the return
+/// to the driver and still be there on the way back in.
+#[test]
+fn it_suspends_inside_a_call() {
+    let prog = compile(
+        "FUNCTION twice(n)\n  RETURN (AWAIT n) * 2\nEND FUNCTION\nPRINT twice(20)\n",
+    );
+    let mut m = prog.machine();
+    let mut suspensions = 0;
+    loop {
+        match m.resume() {
+            Step::Done => break,
+            Step::Failed(e) => panic!("{e}"),
+            Step::Awaiting(h) => {
+                suspensions += 1;
+                m.resume_with(h + 1.0);
+            }
+        }
+    }
+    assert_eq!(suspensions, 1);
+    assert_eq!(m.output, vec!["42"], "(20+1)*2 — the frame came back intact");
+}
+
+/// Suspending **inside a loop**, once per iteration. `pc` and the loop's
+/// registers have to survive each round trip.
+#[test]
+fn it_suspends_every_time_round_a_loop() {
+    let prog = compile(
+        "LET i = 0\nLET total = 0\nWHILE i < 3\n  LET total = total + AWAIT i\n  LET i = i + 1\nWEND\nPRINT total\n",
+    );
+    let mut m = prog.machine();
+    let mut suspensions = 0;
+    loop {
+        match m.resume() {
+            Step::Done => break,
+            Step::Failed(e) => panic!("{e}"),
+            Step::Awaiting(h) => {
+                suspensions += 1;
+                m.resume_with(h * 10.0);
+            }
+        }
+    }
+    assert_eq!(suspensions, 3, "once per iteration");
+    assert_eq!(m.output, vec!["30"], "0*10 + 1*10 + 2*10");
+}
+
+/// **Two programs interleaved.** This is the claim suspension exists to make:
+/// one program waiting does not stop another. Blocking cannot do this at all.
+#[test]
+fn two_machines_interleave() {
+    let a = compile("LET x = AWAIT 1\nPRINT x\n");
+    let b = compile("LET y = AWAIT 2\nPRINT y\n");
+    let (mut ma, mut mb) = (a.machine(), b.machine());
+    let (mut da, mut db) = (false, false);
+
+    // Strict alternation, so neither runs to completion before the other starts.
+    while !(da && db) {
+        for (m, done, mult) in [(&mut ma, &mut da, 100.0), (&mut mb, &mut db, 1000.0)] {
+            if *done {
+                continue;
+            }
+            match m.resume() {
+                Step::Done => *done = true,
+                Step::Failed(e) => panic!("{e}"),
+                Step::Awaiting(h) => m.resume_with(h * mult),
+            }
+        }
+    }
+
+    assert_eq!(ma.output, vec!["100"], "each machine kept its own state");
+    assert_eq!(mb.output, vec!["2000"]);
 }
 
 /// The same bytecode, on the runtime flavour where blocking would panic — and
