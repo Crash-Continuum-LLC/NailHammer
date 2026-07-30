@@ -18,24 +18,21 @@ not. Both of the routes below are what it runs, and either still works by hand.
 $ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
 ```
 
-The repository is private, so this needs an account with access and one cargo
-setting, because cargo's built-in git client cannot use `gh`'s credential
-helper:
-
-```toml
-# ~/.cargo/config.toml
-[net]
-git-fetch-with-cli = true
-```
-
 Or, with no Rust toolchain at all, take a prebuilt binary from a release:
 
 ```console
-$ gh release download v0.2.0 --repo Crash-Continuum-LLC/NailHammer --pattern '*macos-arm64*'
+$ curl -fsSL -O https://github.com/Crash-Continuum-LLC/NailHammer/releases/latest/download/nh-macos-arm64.tar.gz
 ```
 
 Tagging `v*` builds those for macOS (arm64 and x86_64), Linux, and Windows, and
 attaches the VS Code extension alongside them.
+
+Both of those were harder while the repository was private: an anonymous
+download answered 404, so the prebuilt route needed `gh` to supply a login, and
+the source route needed `net.git-fetch-with-cli` set because cargo's built-in
+git client cannot use `gh`'s credential helper. Neither applies to a public
+repository. `install.sh` still falls back to `gh` if a download 404s, which is
+what makes it work against a private release without being built around one.
 
 ## What a generated project needs
 
@@ -97,7 +94,9 @@ trying to work out which binary they have. The eight `version = "…"` pins in t
 root `Cargo.toml` move together: the workspace's own, and the seven path
 dependencies that must match it.
 
-The install instructions in README.md and USAGE.md name a tag explicitly, so
-they are only as current as the newest one. `v0.1.0` shipped before completion,
-the evaluation playground, `nh trace`, the register-machine compiler scaffold and
-the recovery fix — long enough to be actively misleading.
+The install instructions used to name a tag explicitly, which made them only as
+current as the newest release — `v0.1.0` stayed in them through completion, the
+evaluation playground, `nh trace`, the register-machine compiler scaffold and the
+recovery fix, long enough to be actively misleading. They now use
+`/releases/latest/download/`, which GitHub resolves to the newest release, so
+there is nothing left in them for a tag to make stale.

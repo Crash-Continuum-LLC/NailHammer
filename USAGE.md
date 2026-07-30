@@ -29,30 +29,28 @@ to write and why. For the reasoning behind the design, see
 ### Getting `nh`
 
 ```console
-$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
+$ curl -fsSL https://raw.githubusercontent.com/Crash-Continuum-LLC/NailHammer/main/install.sh | bash
 $ nh --version
-nh 0.1.0
 ```
 
-This puts `nh` in `~/.cargo/bin`, which `rustup` already adds to your `PATH`.
-Because the repository is private you also need one cargo setting, since
-cargo's built-in git client cannot use `gh`'s credential helper:
+`install.sh` takes a prebuilt `nh` for your platform and puts it in
+`~/.local/bin`, so it needs no Rust toolchain. It builds from source only when
+there is no prebuilt binary, and tells you what to add to your `PATH` if that
+directory is not on it. `--prefix DIR`, `--version TAG` and `--from-source`
+override each of those in turn; `--help` lists them.
 
-```toml
-# ~/.cargo/config.toml
-[net]
-git-fetch-with-cli = true
-```
-
-Without it you get `failed to acquire username/password`, which does not say
-what to do about it.
-
-To skip the Rust toolchain entirely, take a prebuilt binary from a release.
-Builds exist for macOS (arm64 and x86_64), Linux, and Windows:
+To build it yourself instead — this puts `nh` in `~/.cargo/bin`, which `rustup`
+already adds to your `PATH`:
 
 ```console
-$ gh release download v0.2.0 --repo Crash-Continuum-LLC/NailHammer \
-    --pattern '*macos-arm64*'
+$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
+```
+
+Or take a prebuilt binary by hand. Builds exist for macOS (arm64 and x86_64),
+Linux, and Windows:
+
+```console
+$ curl -fsSL -O https://github.com/Crash-Continuum-LLC/NailHammer/releases/latest/download/nh-macos-arm64.tar.gz
 $ tar xzf nh-macos-arm64.tar.gz
 $ sudo mv nh-macos-arm64/nh /usr/local/bin/
 ```

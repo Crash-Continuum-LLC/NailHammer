@@ -7,14 +7,14 @@
 #     ./install.sh --version v0.2.0
 #     ./install.sh --prefix /usr/local/bin
 #
-# The default path needs no Rust toolchain: it takes a prebuilt `nh` from a
-# GitHub release. The repository is private, so that download has to be
-# authenticated, which is why this uses `gh` rather than curl -- `gh` already
-# holds a login, and asking someone to mint a token by hand is the fiddling this
-# script exists to remove.
+# The default path needs no Rust toolchain and no GitHub account: it takes a
+# prebuilt `nh` from a release over plain HTTP. `gh` is used only as a fallback,
+# which matters while a release is still private -- an authenticated download is
+# the one thing curl cannot do on its own.
 #
 # Falls back to building from source when there is no prebuilt binary for the
-# platform, no `gh`, or no login. Either way the result is one binary on PATH.
+# platform, or no way to reach the release. Either way the result is one binary
+# on PATH.
 
 set -euo pipefail
 
@@ -39,6 +39,7 @@ fi
 info() { printf '%s==>%s %s\n' "$BOLD" "$OFF" "$*"; }
 warn() { printf '%swarning:%s %s\n' "$YELLOW" "$OFF" "$*" >&2; }
 die()  { printf '%serror:%s %s\n' "$RED" "$OFF" "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
 
 usage() {
   cat <<EOF
@@ -90,6 +91,27 @@ case "$os $arch" in
   *)                       ASSET="" ;;
 esac
 
+# --- fetching ----------------------------------------------------------------
+
+# curl on macOS, wget on the minimal Linux images that ship without curl.
+fetch() {
+  if   have curl; then curl -fsSL "$1"
+  elif have wget; then wget -qO- "$1"
+  else return 127
+  fi
+}
+
+# The release API rather than a hardcoded version, so this does not go stale the
+# way a documented tag does. Parsed with sed because requiring jq to install a
+# tool would be its own small dependency problem.
+latest_tag() {
+  fetch "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1
+}
+
+gh_ready() { have gh && gh auth status >/dev/null 2>&1; }
+
 # --- install routes ----------------------------------------------------------
 
 # One temporary directory, removed however we leave.
@@ -97,46 +119,66 @@ WORK=""
 cleanup() { [ -n "$WORK" ] && rm -rf "$WORK"; }
 trap cleanup EXIT
 
+# Returns non-zero rather than exiting, so the caller can fall back to source.
 install_prebuilt() {
   WORK="$(mktemp -d)"
 
   local tag="$TAG"
   if [ -z "$tag" ]; then
-    tag="$(gh release view --repo "$REPO" --json tagName --jq .tagName 2>/dev/null)" \
-      || die "could not read the latest release of $REPO"
+    tag="$(latest_tag)" || true
+    if [ -z "$tag" ] && gh_ready; then
+      tag="$(gh release view --repo "$REPO" --json tagName --jq .tagName 2>/dev/null)" || true
+    fi
+    [ -n "$tag" ] || { warn "could not find the latest release of $REPO"; return 1; }
   fi
 
+  local archive="$WORK/$ASSET.tar.gz"
   info "Downloading $ASSET from $tag"
-  gh release download "$tag" --repo "$REPO" --pattern "$ASSET.tar.gz" --dir "$WORK" \
-    || die "no asset $ASSET.tar.gz on $tag -- try --from-source"
 
-  tar xzf "$WORK/$ASSET.tar.gz" -C "$WORK"
+  # Plain HTTP first. It needs no account and no tooling beyond curl, which is
+  # the whole reason this is the default route.
+  if ! fetch "https://github.com/$REPO/releases/download/$tag/$ASSET.tar.gz" > "$archive" 2>/dev/null \
+     || [ ! -s "$archive" ]; then
+    # A private release answers 404 to an anonymous request, which is
+    # indistinguishable from a missing asset. `gh` carries a login, so if one
+    # is present it is worth a second attempt before giving up.
+    if gh_ready; then
+      rm -f "$archive"
+      gh release download "$tag" --repo "$REPO" --pattern "$ASSET.tar.gz" --dir "$WORK" 2>/dev/null \
+        || { warn "no asset $ASSET.tar.gz on $tag"; return 1; }
+    else
+      warn "could not download $ASSET.tar.gz from $tag"
+      return 1
+    fi
+  fi
+
+  tar xzf "$archive" -C "$WORK" || { warn "the archive did not unpack"; return 1; }
 
   # The tarball holds a directory of the same name containing the binary
   # alongside the docs. Only the binary is installed; the docs are already in
   # the repository and a second stale copy in ~/.local/bin helps nobody.
   local built="$WORK/$ASSET/nh"
-  [ -f "$built" ] || die "the archive did not contain nh -- expected $ASSET/nh"
+  [ -f "$built" ] || { warn "the archive did not contain $ASSET/nh"; return 1; }
 
   place "$built"
 }
 
 install_from_source() {
-  command -v cargo >/dev/null 2>&1 || die \
+  have cargo || die \
     "cargo not found. Install Rust from https://rustup.rs, or use a prebuilt binary."
 
   # A version older than the workspace MSRV fails deep in a dependency build
   # with an error that does not mention the toolchain. Saying it up front costs
   # one command and several minutes of confusion.
-  local have
-  have="$(cargo --version | awk '{print $2}')"
-  if [ "$(printf '%s\n%s\n' "$MSRV" "$have" | sort -V | head -1)" != "$MSRV" ]; then
-    die "Rust $have is too old -- NailHammer needs $MSRV or newer. Run: rustup update"
+  local have_ver
+  have_ver="$(cargo --version | awk '{print $2}')"
+  if [ "$(printf '%s\n%s\n' "$MSRV" "$have_ver" | sort -V | head -1)" != "$MSRV" ]; then
+    die "Rust $have_ver is too old -- NailHammer needs $MSRV or newer. Run: rustup update"
   fi
 
   # Prefer the checkout this script lives in. Building from the local path needs
-  # no network and no credentials, and installs exactly the tree being read
-  # rather than whatever is on the default branch.
+  # no network, and installs exactly the tree being read rather than whatever is
+  # on the default branch.
   local here
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -146,13 +188,8 @@ install_from_source() {
       || die "the build failed"
   else
     info "Building from $REPO (this takes a few minutes)"
-    # cargo's built-in git client cannot use gh's credential helper, and this
-    # repository is private. The env var does for one invocation what
-    # net.git-fetch-with-cli does permanently, without editing anyone's
-    # ~/.cargo/config.toml behind their back.
-    CARGO_NET_GIT_FETCH_WITH_CLI=true \
-      cargo install --git "https://github.com/$REPO" nh-cli --locked --force --root "${PREFIX%/bin}" \
-      || die "the build failed -- if it could not reach the repository, check: gh auth status"
+    cargo install --git "https://github.com/$REPO" nh-cli --locked --force --root "${PREFIX%/bin}" \
+      || die "the build failed"
   fi
 
   # --root puts the binary in <root>/bin, which is already PREFIX when PREFIX
@@ -181,7 +218,7 @@ place() {
 
   # Downloads can carry the quarantine flag, and on macOS a quarantined binary
   # is refused by Gatekeeper with a dialog rather than an error on stdout.
-  if [ "$os" = "Darwin" ] && command -v xattr >/dev/null 2>&1; then
+  if [ "$os" = "Darwin" ] && have xattr; then
     xattr -d com.apple.quarantine "$from" 2>/dev/null || true
   fi
 
@@ -199,16 +236,9 @@ if [ "$FROM_SOURCE" -eq 1 ]; then
 elif [ -z "$ASSET" ]; then
   warn "no prebuilt binary for $os $arch -- building from source"
   install_from_source
-elif ! command -v gh >/dev/null 2>&1; then
-  warn "gh not found, so the prebuilt binary cannot be downloaded -- building from source"
-  warn "  (installing GitHub CLI from https://cli.github.com is the faster route)"
+elif ! install_prebuilt; then
+  warn "falling back to building from source"
   install_from_source
-elif ! gh auth status >/dev/null 2>&1; then
-  warn "gh is installed but not logged in -- building from source"
-  warn "  (run 'gh auth login' for the prebuilt binary instead)"
-  install_from_source
-else
-  install_prebuilt
 fi
 
 # --- did it work? ------------------------------------------------------------

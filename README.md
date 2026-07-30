@@ -179,30 +179,29 @@ add to your PATH if that directory is not on it. `--prefix DIR` to install
 somewhere else, `--version TAG` to pin a release, `--from-source` to always
 build, `--help` for the rest.
 
-The two manual routes it wraps, if you would rather run them yourself. Building
-from source needs an account with access, since the repository is private, and
-one cargo setting — cargo's built-in git client cannot use `gh`'s credential
-helper:
+Without a clone, the same thing in one line:
+
+```console
+$ curl -fsSL https://raw.githubusercontent.com/Crash-Continuum-LLC/NailHammer/main/install.sh | bash
+```
+
+The two manual routes it wraps, if you would rather run them yourself:
 
 ```console
 $ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
-```
-
-```toml
-# ~/.cargo/config.toml
-[net]
-git-fetch-with-cli = true
 ```
 
 Or take a prebuilt binary directly. Releases carry `nh` for macOS (arm64 and
 x86_64), Linux, and Windows — the last of which `install.sh` does not cover:
 
 ```console
-$ gh release download v0.2.0 --repo Crash-Continuum-LLC/NailHammer \
-    --pattern '*macos-arm64*'
+$ curl -fsSL -O https://github.com/Crash-Continuum-LLC/NailHammer/releases/latest/download/nh-macos-arm64.tar.gz
 $ tar xzf nh-macos-arm64.tar.gz
 $ sudo mv nh-macos-arm64/nh /usr/local/bin/
 ```
+
+`/releases/latest/download/` rather than a version, so this does not quietly
+become instructions for an old release the way a named tag does.
 
 Then:
 
@@ -242,8 +241,7 @@ playground**: a pane beside your grammar where you type a program and watch
 where it routes, updated as you type. It shells out to `nh check --json` and
 `nh trace --json`, so what the editor shows is what the CLI and CI compute.
 
-> The `.vsix` attached to the `v0.1.0` release predates all of that. Build from
-> source until the next tag.
+The `.vsix` is attached to each release alongside the binaries.
 
 See [editors/vscode](editors/vscode).
 
