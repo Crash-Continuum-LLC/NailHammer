@@ -40,8 +40,8 @@ pest = "2.8"
 pest_derive = { version = "2.8", features = ["grammar-extras"] }
 ```
 
-`nh init` writes the runtime into `vendor/nh-runtime/` — 1,130 lines, one
-dependency — and `build.rs` shells out to the `nh` binary rather than linking
+`nh init` writes the runtime into `vendor/nh-runtime/` — a small module tree with
+one dependency — and `build.rs` shells out to the `nh` binary rather than linking
 the generator. So a scaffolded project builds with no credentials, no cargo
 configuration, and no access to this repository.
 

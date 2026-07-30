@@ -312,7 +312,7 @@ direction. `USAGE.md` covers what it does not do, and what `--async` assumes.
 Every planned milestone is complete: parsing, lowering, code generation, the
 operator driver, determinism analysis, error recovery, self-hosting, an owned AST
 that makes subroutines, stored code and non-local jumps expressible, both host
-shapes, and `nh trace`. 367 tests.
+shapes, and `nh trace`.
 
 **Complete is not the same as settled.** The milestones are done; the interfaces
 are not frozen. Most of what has moved recently moved *because* the tool was used

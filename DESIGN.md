@@ -6,7 +6,14 @@ compilers can be written across many small files instead of one giant one — wi
 operator handling supplied as a batteries-included default rather than hand-rolled
 per project.
 
-Status: **planning**. Nothing is implemented.
+Status: **implemented.** Every milestone described here is built — parsing,
+lowering, code generation, the operator driver, determinism analysis, error
+recovery, self-hosting, an owned AST, both host shapes, and `nh trace`.
+
+Complete is not the same as settled. The milestones are done; the interfaces are
+not frozen, and this document is still where the design gets argued out — so
+read it as the current argument, not as a record of something finished. The
+risks that only implementation could retire are tracked in §11.
 
 Changes from v0: precedence lowering reversed from stratified ladder to a
 generated Pratt driver (§5.2); a standard operator prelude and `Operators` trait
