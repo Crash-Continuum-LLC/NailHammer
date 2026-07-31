@@ -1,0 +1,28 @@
+[package]
+name = "vm-c"
+description = "A C-flavoured language compiled to nh-vm bytecode — operators generated, not written"
+version = "0.1.0"
+publish = false
+edition = "2021"
+
+build = "build.rs"
+
+[lib]
+name = "vm_c"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vm-c"
+path = "src/main.rs"
+
+[dependencies]
+nh-runtime = { path = "../../crates/nh-runtime" }
+nh-vm = { path = "../../crates/nh-vm" }
+pest = "2.8"
+pest_derive = { version = "2.8", features = ["grammar-extras"] }
+
+[dev-dependencies]
+vm-basic = { path = "../vm-basic" }
+
+[build-dependencies]
+nh-build = { path = "../../crates/nh-build" }

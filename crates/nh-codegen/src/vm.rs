@@ -70,6 +70,9 @@ impl Target {
         ops.insert("div", Shape::Binary("Div"));
         ops.insert("neg", Shape::Unary("Neg"));
         ops.insert("not", Shape::Unary("Not"));
+        ops.insert("bit_and", Shape::Binary("And"));
+        ops.insert("bit_or", Shape::Binary("Or"));
+        ops.insert("bit_xor", Shape::Binary("Xor"));
         ops.insert("compare", Shape::Compare);
         Target { name: "nh-vm", ops }
     }
@@ -128,14 +131,14 @@ pub fn operators_impl(
         if !done.insert((e.role.clone(), e.tier.fixity)) {
             continue;
         }
-        emit_role(&mut out, e, target);
+        emit_role(&mut out, e, &ops, target);
     }
 
     let _ = writeln!(out, "}}");
     Ok(out)
 }
 
-fn emit_role(out: &mut String, e: &Emitted<'_>, target: &Target) {
+fn emit_role(out: &mut String, e: &Emitted<'_>, all: &[Emitted<'_>], target: &Target) {
     let m = ident(&e.role);
     let shape = target.ops[e.role.as_str()];
 
@@ -165,21 +168,36 @@ fn emit_role(out: &mut String, e: &Emitted<'_>, target: &Target) {
             );
         }
         (Shape::Compare, Fixity::Left | Fixity::Right) => {
-            // The tier shares one role, so the generated trait method takes a
-            // discriminant. It maps straight onto the VM's `Cmp`, which is the
-            // same idea one layer down.
+            // The discriminant's variants are named after the *spellings* the
+            // grammar used -- `==` becomes `EqEq`, `<>` becomes `LtGt` -- so
+            // this cannot be a fixed list. It is built from the tier, which is
+            // what lets the C twin's `==` and the BASIC twin's `=` both reach
+            // `Cmp::Eq` from differently-named variants.
+            let mut arms = String::new();
+            for o in all.iter().filter(|o| o.role == e.role) {
+                let Some(variant) = &o.variant else { continue };
+                let cmp = match o.op.literal.as_str() {
+                    "==" | "=" => "Eq",
+                    "!=" | "<>" | "><" => "Ne",
+                    "<" => "Lt",
+                    "<=" | "=<" => "Le",
+                    ">" => "Gt",
+                    ">=" | "=>" => "Ge",
+                    // Unreachable in practice: `operators_impl` rejects a
+                    // comparison spelling the machine has no ordering for
+                    // before any of this runs.
+                    _ => continue,
+                };
+                let _ = writeln!(arms, "            CompareOp::{variant} => Cmp::{cmp},");
+            }
             let _ = writeln!(
                 out,
                 "\n    /// A whole comparison tier — one instruction, discriminant as an operand.\n\
-                \x20   fn {m}(&mut self, op: CompareOp, lhs: Reg, rhs: Reg) -> Result<Reg> {{\n\
-                \x20       let cmp = match op {{\n\
-                \x20           CompareOp::Eq => Cmp::Eq,\n\
-                \x20           CompareOp::Ne => Cmp::Ne,\n\
-                \x20           CompareOp::Lt => Cmp::Lt,\n\
-                \x20           CompareOp::Le => Cmp::Le,\n\
-                \x20           CompareOp::Gt => Cmp::Gt,\n\
-                \x20           CompareOp::Ge => Cmp::Ge,\n\
-                \x20       }};\n\
+                \x20   ///\n\
+                \x20   /// The discriminant sits **between** the operands, because that is where\n\
+                \x20   /// the generated trait puts it.\n\
+                \x20   fn {m}(&mut self, lhs: Reg, op: CompareOp, rhs: Reg) -> Result<Reg> {{\n\
+                \x20       let cmp = match op {{\n{arms}\x20       }};\n\
                 \x20       let dst = self.reuse(&[lhs, rhs]);\n\
                 \x20       self.emit(Op::Compare {{ dst, cmp, a: lhs, b: rhs }});\n\
                 \x20       Ok(dst)\n\

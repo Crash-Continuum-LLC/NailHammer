@@ -83,6 +83,13 @@ jobs:
             ./target/debug/nh build "$g" \
               -o "examples/$e/src/$(basename "$g" .nh).pest" --rust "examples/$e/src"
           done
+          # The VM twins additionally generate their operator implementation,
+          # so they must be regenerated with the same --target their build.rs
+          # uses or the check would compare against a file nobody wrote.
+          for e in vm-c vm-basic; do
+            ./target/debug/nh build "examples/$e/lang.nh" \
+              -o "examples/$e/src/lang.pest" --rust "examples/$e/src" --target nh-vm
+          done
           ./target/debug/nh build examples/selfhost/nh.nh -o examples/selfhost/nh.pest
           if ! git diff --quiet; then
             echo "::error::generated output is stale — re-run nh build and commit"

@@ -1,0 +1,54 @@
+// A small C-flavoured language that compiles to `nh-vm` bytecode.
+//
+// Its twin is `examples/vm-basic`, which is the same language wearing BASIC's
+// syntax. Neither implements a single operator: `nh build --target nh-vm`
+// generates all of that, and the two grammars bind the *same roles*, so `&`
+// here and `AND` there reach one instruction.
+grammar CLang;
+
+use operators::none;
+
+skip WHITESPACE = " " | "\t" | "\r" | "\n";
+
+token DIGIT = @ "0".."9";
+token ALPHA = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token IDENT = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
+
+reserved from IDENT { "print" "if" "while" }
+
+// The operator table is the language's own; the instructions it lowers to are
+// the machine's. That split is the whole point of the target.
+precedence {
+    left   "|" -> bit_or;
+    left   "^" -> bit_xor;
+    left   "&" -> bit_and;
+    left   "==" | "!=" | "<" | "<=" | ">" | ">=" -> compare;
+    left   "+" | "-";
+    left   "*" | "/";
+    prefix "-";
+    prefix "!" -> not;
+    atom   atom;
+}
+
+rule program = SOI body:stmt+ EOI -> program;
+
+rule stmt
+  = "print" value:expr ";"                             -> print
+  | "if" "(" cond:expr ")" lazy body:block             -> iff
+  | "while" "(" lazy cond:expr ")" lazy body:block     -> whilst
+  | name:IDENT "=" value:expr ";"                      -> assign
+  ;
+
+// `lazy` above hands these over *unemitted*, so a handler can put a jump in
+// front of the body and — for `while` — emit the condition at the loop top
+// rather than before the loop exists.
+rule block = "{" body:stmt+ "}" -> block;
+
+rule atom = primary;
+
+rule primary
+  = value:NUMBER      -> num
+  | name:IDENT        -> var place
+  | "(" inner:expr ")" -> pass
+  ;

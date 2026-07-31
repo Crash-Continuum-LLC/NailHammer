@@ -53,8 +53,9 @@ fn a_comparison_tier_becomes_one_instruction() {
 
     let src = operators_impl(&t, &Target::nh_vm(), "Compiler").expect("compare is executable");
 
-    assert!(src.contains("fn compare(&mut self, op: CompareOp, lhs: Reg, rhs: Reg)"), "{src}");
+    assert!(src.contains("fn compare(&mut self, lhs: Reg, op: CompareOp, rhs: Reg)"), "{src}");
     assert!(src.contains("CompareOp::Lt => Cmp::Lt,"), "{src}");
+    assert!(src.contains("CompareOp::EqEq => Cmp::Eq,"), "variant named from the spelling: {src}");
     assert!(src.contains("self.emit(Op::Compare { dst, cmp, a: lhs, b: rhs });"), "{src}");
 
     // Six spellings, one method — not six.
@@ -90,12 +91,12 @@ fn a_role_the_vm_cannot_execute_is_reported_not_emitted() {
 fn one_report_per_role_not_per_spelling() {
     let t = table(
         "grammar T;\nprecedence {\n  \
-         left \"&\" | \"|\" -> bit_and;\n  atom a;\n}\n",
+         right \"**\" | \"^^\" -> pow;\n  atom a;\n}\n",
     );
 
-    let missing = operators_impl(&t, &Target::nh_vm(), "Compiler").expect_err("no bitwise ops");
+    let missing = operators_impl(&t, &Target::nh_vm(), "Compiler").expect_err("nh-vm has no Pow");
     assert_eq!(missing.len(), 1, "{missing:?}");
-    assert_eq!(missing[0].role, "bit_and");
+    assert_eq!(missing[0].role, "pow");
 }
 
 /// A grammar with no operators at all generates an empty impl rather than

@@ -29,6 +29,7 @@ pub struct Builder {
     pest_out: Option<PathBuf>,
     rust_out: Option<PathBuf>,
     deny_warnings: bool,
+    target: Option<String>,
 }
 
 impl Builder {
@@ -40,6 +41,7 @@ impl Builder {
             pest_out: None,
             rust_out: Some(PathBuf::from("src")),
             deny_warnings: false,
+            target: None,
         }
     }
 
@@ -62,6 +64,18 @@ impl Builder {
     /// Writes generated Rust here instead of `src/`.
     pub fn rust_output(mut self, path: impl Into<PathBuf>) -> Self {
         self.rust_out = Some(path.into());
+        self
+    }
+
+    /// Also generate operator emission for a VM (VM-DESIGN.md §7.2).
+    ///
+    /// With this, the project's `Operators` implementation is generated rather
+    /// than written: `add` means `Op::Add`, in every language, so there is
+    /// nothing for an author to fill in. A role the machine cannot execute
+    /// fails the build naming the role and a spelling that binds it, which is a
+    /// build script's whole job — say it now, not at link time.
+    pub fn target(mut self, name: impl Into<String>) -> Self {
+        self.target = Some(name.into());
         self
     }
 
@@ -156,7 +170,39 @@ impl Builder {
         if let Some(rust_out) = &self.rust_out {
             let root = self.root.join(rust_out);
             let opts = nh_codegen::Options::default();
-            let generated = nh_codegen::generate(&ast, &table, &lowered, &opts);
+            let mut generated = nh_codegen::generate(&ast, &table, &lowered, &opts);
+
+            // A target makes operator handling generated rather than written
+            // (VM-DESIGN.md §7.2). Failing here is the right place: a build
+            // script that reports "this VM has no `Pow`" costs a rebuild, where
+            // the same mismatch found at link time costs an afternoon.
+            if let Some(name) = &self.target {
+                let vm = match name.as_str() {
+                    "nh-vm" => nh_codegen::vm::Target::nh_vm(),
+                    other => return Err(format!("unknown target `{other}`; the only target today is `nh-vm`")),
+                };
+                match nh_codegen::vm::operators_impl(&table, &vm, "crate::Interp") {
+                    Ok(contents) => generated.files.push(nh_codegen::GeneratedFile {
+                        path: "generated/vm_operators.rs".into(),
+                        contents,
+                        policy: nh_codegen::Policy::Generated,
+                    }),
+                    Err(missing) => {
+                        let mut m = String::new();
+                        for u in &missing {
+                            m.push_str(&format!(
+                                "`{}` binds the `{}` role, which {} cannot execute\n",
+                                u.spelling, u.role, vm.name
+                            ));
+                        }
+                        return Err(format!(
+                            "{m}\n{} role(s) have no instruction on `{}`.",
+                            missing.len(),
+                            vm.name
+                        ));
+                    }
+                }
+            }
 
             for file in &generated.files {
                 let path = root.join(&file.path);

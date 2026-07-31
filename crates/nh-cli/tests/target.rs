@@ -71,7 +71,7 @@ fn a_supported_grammar_generates_its_operator_implementation() {
 
     assert!(generated.contains("fn add(&mut self, lhs: Reg, rhs: Reg)"), "{generated}");
     assert!(generated.contains("self.emit(Op::Add { dst, a: lhs, b: rhs });"), "{generated}");
-    assert!(generated.contains("fn compare(&mut self, op: CompareOp"), "{generated}");
+    assert!(generated.contains("fn compare(&mut self, lhs: Reg, op: CompareOp"), "{generated}");
     assert!(generated.contains("fn neg(&mut self, operand: Reg)"), "{generated}");
 
     // Nothing is left for a person to fill in — that is the claim.

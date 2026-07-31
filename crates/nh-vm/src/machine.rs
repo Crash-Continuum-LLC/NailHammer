@@ -117,6 +117,13 @@ impl<'a, X: Extension, S: SharedStore> Machine<'a, X, S> {
                 }
                 num2!(dst, a, b, |x, y| x / y)
             }
+            // Truncating to i64 is the language-visible decision here, and it
+            // belongs to the VM: every language on it gets the same answer for
+            // `5.7 AND 3`, which is the point of sharing a machine.
+            Op::And { dst, a, b } => num2!(dst, a, b, |x: f64, y: f64| ((x as i64) & (y as i64)) as f64),
+            Op::Or { dst, a, b } => num2!(dst, a, b, |x: f64, y: f64| ((x as i64) | (y as i64)) as f64),
+            Op::Xor { dst, a, b } => num2!(dst, a, b, |x: f64, y: f64| ((x as i64) ^ (y as i64)) as f64),
+
             Op::Neg { dst, a } => {
                 let v = self.regs[*a as usize].as_num()?;
                 self.regs[*dst as usize] = Value::Num(-v);

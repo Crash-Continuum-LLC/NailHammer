@@ -35,6 +35,12 @@ pub enum Op<X> {
     Compare { dst: Reg, cmp: Cmp, a: Reg, b: Reg },
     Not { dst: Reg, a: Reg },
 
+    // Bitwise, on the integer part of a number — which is what a BASIC does,
+    // and what makes `AND` and `&` the same instruction rather than two.
+    And { dst: Reg, a: Reg, b: Reg },
+    Or { dst: Reg, a: Reg, b: Reg },
+    Xor { dst: Reg, a: Reg, b: Reg },
+
     // ---- mutable shared, and the only thing that synchronises -------------
     //
     // By slot rather than by name, because an index beats a hash — and that is
