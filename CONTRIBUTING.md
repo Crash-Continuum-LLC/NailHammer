@@ -55,6 +55,11 @@ to the syntax that does not also teach `nh.nh` about it will stop the grammar
 parsing itself, and CI will catch that — which is the feature working, not an
 obstacle.
 
+## Conduct
+
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — the Contributor Covenant. Reports go
+to support@crashbasic.com, not to an issue.
+
 ## License
 
 Contributions are under the MIT license, matching the rest of the repository.
