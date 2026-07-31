@@ -37,9 +37,17 @@ pub enum Op<X> {
 
     // ---- mutable shared, and the only thing that synchronises -------------
     //
-    // By slot rather than by name: a name would mean a map lookup under a lock
-    // held across the hash, which is the bank-wide contention this design is
-    // built to avoid.
+    // By slot rather than by name, because an index beats a hash — and that is
+    // the whole argument, narrower than it first appeared. An earlier version
+    // of this comment claimed a name would mean "a lock held across the hash",
+    // i.e. bank-wide contention. That conflates *a map* with *one lock over a
+    // map*: a sharded map holds no such lock, and `bench_store` shows one
+    // beating both per-slot locks at eight threads.
+    //
+    // So slots are the default, not the only option. A host whose globals are
+    // dynamic, sparse, or shared by name across independently loaded languages
+    // has a real reason to key differently, and `SharedStore` is where it does
+    // so — the instruction stays a slot and the store decides what that means.
     LoadGlobal { dst: Reg, slot: Slot },
     StoreGlobal { slot: Slot, src: Reg },
 

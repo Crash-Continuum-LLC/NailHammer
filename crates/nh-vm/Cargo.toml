@@ -16,5 +16,11 @@ categories.workspace = true
 # here is a dependency every language inherits. See VM-DESIGN.md §8.4.
 [dependencies]
 
+# Benchmark only. A dev-dependency does not propagate, so a language built on
+# nh-vm still inherits nothing -- which is the point being tested: DashMap is
+# measured through the public SharedStore trait, from outside the crate.
+[dev-dependencies]
+dashmap = "6"
+
 [features]
 default = []

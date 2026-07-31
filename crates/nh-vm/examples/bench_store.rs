@@ -21,10 +21,66 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-use nh_vm::{AtomicNumStore, BankLockStore, MutexStore, RwLockStore, SharedStore, Value};
+use nh_vm::{AtomicNumStore, BankLockStore, MutexStore, RwLockStore, SharedStore, Slot, Value};
 
 const SLOTS: usize = 64;
-const OPS_PER_THREAD: usize = 200_000;
+
+/// Big enough that a run takes tens of milliseconds.
+///
+/// The first version of this used 200k, which finished in 0.3–1.4 ms — and at
+/// that scale thread spawn, cache warmup and CPU frequency scaling dominated
+/// the measurement. Two runs disagreed about which of `RwLock` and `Mutex` was
+/// faster, by a factor of two, in opposite directions. A decision was made on
+/// that data and had to be withdrawn.
+const OPS_PER_THREAD: usize = 5_000_000;
+
+/// Each configuration runs this many times and the **median** is reported.
+///
+/// Median rather than mean: one descheduled run should not move the number, and
+/// one lucky run should not either.
+const REPEATS: usize = 5;
+
+/// A sharded concurrent map, implementing [`SharedStore`] **from outside the
+/// crate**.
+///
+/// Two things are being demonstrated at once. The obvious one is whether
+/// sharded hashing beats a per-slot lock. The less obvious one matters more:
+/// this lives in an example, backed by a dev-dependency, so `nh-vm` itself
+/// still depends on nothing. A host that wants DashMap brings it — the trait is
+/// the seam, and it works from the outside.
+///
+/// It also corrects a claim in `op.rs`. That comment rejected name-keyed
+/// globals because "a map lookup under a lock held across the hash" would be
+/// bank-wide contention. That conflates *a map* with *one lock over a map*: a
+/// sharded map holds no such lock. The real argument for slots is that an index
+/// beats a hash, which is a narrower claim — and one this measures.
+struct DashStore {
+    map: dashmap::DashMap<Slot, Value>,
+}
+
+impl DashStore {
+    fn new(n: usize) -> Self {
+        let map = dashmap::DashMap::new();
+        for i in 0..n {
+            map.insert(i as Slot, Value::Nil);
+        }
+        DashStore { map }
+    }
+}
+
+impl SharedStore for DashStore {
+    fn load(&self, slot: Slot) -> Value {
+        self.map.get(&slot).map(|v| v.clone()).unwrap_or(Value::Nil)
+    }
+
+    fn store(&self, slot: Slot, value: Value) {
+        self.map.insert(slot, value);
+    }
+
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+}
 
 fn main() {
     println!(
@@ -40,6 +96,7 @@ fn main() {
             run::<RwLockStore>("per-slot RwLock (default) ", threads, read_pct, Spread::Wide);
             run::<MutexStore>("per-slot Mutex            ", threads, read_pct, Spread::Wide);
             run::<AtomicNumStore>("per-slot AtomicU64        ", threads, read_pct, Spread::Wide);
+            run::<DashStore>("DashMap (sharded)         ", threads, read_pct, Spread::Wide);
             println!();
         }
         if threads > 1 {
@@ -48,6 +105,7 @@ fn main() {
             run::<RwLockStore>("per-slot RwLock (default) ", threads, 95, Spread::OneSlot);
             run::<MutexStore>("per-slot Mutex            ", threads, 95, Spread::OneSlot);
             run::<AtomicNumStore>("per-slot AtomicU64        ", threads, 95, Spread::OneSlot);
+            run::<DashStore>("DashMap (sharded)         ", threads, 95, Spread::OneSlot);
             println!();
         }
     }
@@ -88,8 +146,32 @@ impl Build for AtomicNumStore {
         AtomicNumStore::new(n)
     }
 }
+impl Build for DashStore {
+    fn build(n: usize) -> Self {
+        DashStore::new(n)
+    }
+}
 
 fn run<S: Build>(label: &str, threads: usize, read_pct: usize, spread: Spread) {
+    // One warmup pass, discarded: it pays for page faults, first-touch on the
+    // slot array, and getting the cores off their idle clock.
+    let _ = once::<S>(threads, read_pct, spread, OPS_PER_THREAD / 10);
+
+    let mut rates: Vec<f64> = (0..REPEATS)
+        .map(|_| once::<S>(threads, read_pct, spread, OPS_PER_THREAD))
+        .collect();
+    rates.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let median = rates[REPEATS / 2];
+    let spread_pct = (rates[REPEATS - 1] - rates[0]) / median * 100.0;
+
+    // The spread is printed rather than hidden. A row with ±40% variance has
+    // not measured anything, and the reader should be able to see that rather
+    // than trusting a tidy median.
+    println!("    {label}  {median:>8.1} M ops/s   (±{spread_pct:>4.0}%)");
+}
+
+fn once<S: Build>(threads: usize, read_pct: usize, spread: Spread, ops: usize) -> f64 {
     let store = Arc::new(S::build(SLOTS));
     for i in 0..SLOTS {
         store.store(i as u32, Value::Num(i as f64));
@@ -109,7 +191,7 @@ fn run<S: Build>(label: &str, threads: usize, read_pct: usize, spread: Spread) {
             // sequence for every store so the comparison is like for like.
             let mut x = (t as u64).wrapping_mul(0x9E3779B9) | 1;
             let mut sink = 0.0f64;
-            for i in 0..OPS_PER_THREAD {
+            for i in 0..ops {
                 x ^= x << 13;
                 x ^= x >> 7;
                 x ^= x << 17;
@@ -138,12 +220,9 @@ fn run<S: Build>(label: &str, threads: usize, read_pct: usize, spread: Spread) {
     }
     let elapsed = t0.elapsed();
 
-    let total = (threads * OPS_PER_THREAD) as f64;
-    let m_ops = total / elapsed.as_secs_f64() / 1_000_000.0;
     // `sink` is consumed so the reads cannot be optimised away.
-    println!(
-        "    {label}  {m_ops:>7.2} M ops/s   ({:>6.1} ms){}",
-        elapsed.as_secs_f64() * 1000.0,
-        if sink == f64::INFINITY { " " } else { "" }
-    );
+    if sink == f64::INFINITY {
+        println!("unreachable");
+    }
+    (threads * ops) as f64 / elapsed.as_secs_f64() / 1_000_000.0
 }

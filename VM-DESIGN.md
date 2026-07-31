@@ -794,58 +794,72 @@ call, and a program that never shares anything never touches it.
 
 #### Measured, not predicted
 
-This section previously asserted three things and called them predictions.
-`crates/nh-vm/examples/bench_store.rs` now measures them. Apple M4 (4P + 6E),
-200k ops/thread over 64 slots, throughput in M ops/s — **ratios matter, absolute
-rates do not**:
+`crates/nh-vm/examples/bench_store.rs` measures what this section used to
+assert. Apple M4 (4P + 6E), median of 5 runs × 5M ops/thread over 64 slots,
+throughput in M ops/s — **ratios matter, absolute rates do not**:
 
-| threads / mix | bank RwLock | per-slot RwLock | per-slot Mutex | per-slot AtomicU64 |
-|---|---|---|---|---|
-| 1 · 95% read | 96 | 145 | 181 | **227** |
-| 4 · 95% read | 50 | 109 | 136 | **600** |
-| 8 · 95% read | 32 | 61 | 68 | **558** |
-| 8 · 50% read | 36 | 55 | 52 | **99** |
-| 4 · one slot, 95% read | 48 | 44 | 65 | **1812** |
+| threads · 95% read | bank RwLock | per-slot RwLock | per-slot Mutex | DashMap | AtomicU64 |
+|---|---|---|---|---|---|
+| 1 | 176 | **374** | 189 | 131 | *538* |
+| 2 | 116 | 99 | **114** | 108 | *772* |
+| 4 | 49 | 100 | **158** | 138 | *1051* |
+| 8 | 32 | 57 | 79 | **84** | *517* |
+| 4 · one hot slot | 53 | 46 | **62** | 26 | *1744* |
 
-**Claim 1 — a bank-wide lock serialises everything: half right.** It is
-consistently worst and the gap widens with threads (2.2× behind per-slot at 4
-threads, 1.9× at 8), but it is not catastrophic, and at 2 threads on read-heavy
-work it actually *beats* per-slot `RwLock` — one `RwLock` still admits
-concurrent readers, so the bank is only a bottleneck once writes are frequent
-enough to exclude them. The claim was directionally right and rhetorically
-overstated.
+*(AtomicU64 italicised: it holds numbers only, so it is a ceiling rather than a
+competitor.)*
 
-**Claim 2 — per-slot `RwLock` is a poor default: confirmed, and it is the
-counter-intuitive one.** A per-slot `Mutex` matches or beats it *on read-heavy
-work*, which is the workload `RwLock` exists for — 136 vs 109 at 4 threads, 181
-vs 145 single-threaded. The reason is the one predicted: an `RwLock` read is a
-write, because it bumps a reader counter, so two readers of one slot contend on
-a cache line while a `Mutex` at least does not pretend otherwise. Reaching for
-`RwLock` because a workload is read-heavy is exactly wrong here.
+**A first attempt at this benchmark was wrong, and the way it was wrong is
+worth recording.** It ran 200k ops per thread, finishing in 0.3–1.4 ms, so
+thread spawn, cache warmup and frequency scaling dominated. Two runs disagreed
+about whether `RwLock` or `Mutex` was faster — by 2×, in opposite directions —
+and a default was changed on the strength of one of them before the variance
+was noticed. The harness now runs 25× more work, discards a warmup pass, takes
+a median of five, and **prints the spread**, so a row that measured nothing
+looks like it measured nothing. A benchmark that hides its variance is worse
+than no benchmark, because it is believed.
 
-**Claim 3 — inline small values are worth it: confirmed, emphatically.** An
-`AtomicU64` per slot is 4–6× faster in the ordinary cases and **41× faster**
-when several threads read one hot slot, where a lock serialises and an atomic
-load does not. That single row is the case a shared-globals VM will meet
-constantly — a counter, a flag, a shared accumulator — and it is where locking
-costs the most.
+**Claim 1 — a bank-wide lock serialises everything: directionally right,
+overstated.** Worst at four threads and beyond (2× behind per-slot), but at two
+threads it *beats* per-slot `RwLock`: one `RwLock` still admits concurrent
+readers, so a bank only becomes a bottleneck once writes are frequent enough to
+exclude them.
+
+**Claim 2 — per-slot `RwLock` is a poor default: wrong as stated, and the truth
+is more useful.** The ranking **inverts with thread count.** `RwLock` wins by
+2× at one thread, loses by 1.6× at four, and by eight a sharded `DashMap` —
+worst of all at one thread — is the best of the three. There is no single right
+answer among the safe general stores, which is the strongest possible argument
+for `SharedStore` being a trait: this is the knob that earned its keep, and the
+crossover is why.
+
+**Claim 3 — inline small values are worth it: confirmed, emphatically, and it
+is the only unambiguous result.** An `AtomicU64` per slot is 3–10× faster in
+ordinary cases and **28× faster** when several threads read one hot slot —
+precisely the shape a shared-globals VM meets constantly: a counter, a flag, an
+accumulator.
 
 #### What this changes
 
-**`DefaultStore` becomes `MutexStore`, not `RwLockStore`**, on the measurement
-rather than the intuition. It is the best *safe, general* store here: it holds
-any `Value`, needs no unsafe, and beats the obvious choice.
+**`DefaultStore` stays `RwLockStore`**, because a language starting out runs one
+program on one thread, where it is decisively fastest, and a host that knows
+better can say so in one line.
 
-**The real target is a hybrid**, and the numbers now justify building one: small
-values inline in an atomic word, heap values behind a pointer. `AtomicNumStore`
-is not a proposal — it cannot hold a string — but it establishes that the
-inline path is worth 4–40× and therefore worth the complexity of a tagged
-representation. That is the next piece of VM work, and it is now a decision
-backed by data rather than a preference.
+**A sharded map is a real option, not a curiosity.** It is worst uncontended and
+best at eight threads, and it is also the answer for globals that are dynamic,
+sparse, or shared *by name* across independently loaded languages — where slots
+would need coordination between plugins that have never met. `bench_store`
+implements `SharedStore` over `DashMap` **from outside the crate**, through a
+dev-dependency, which demonstrates the seam works and keeps `nh-vm` itself
+dependency-free.
 
-**What the benchmark does not settle:** whether a hybrid keeps the atomic
-path's advantage once a tag check is in the loop, and what a lock-free store
-costs for values that need reclamation. Both need the hybrid to exist first.
+**The hybrid is the next piece of VM work**, and now a data-backed decision
+rather than a preference: small values inline in an atomic word, heap values
+behind a pointer.
+
+**What the benchmark does not settle:** whether a hybrid keeps the atomic path's
+advantage once a tag check is in the loop, and what a lock-free store costs for
+values needing reclamation. Both need the hybrid to exist first.
 
 #### What does not change
 

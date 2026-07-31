@@ -242,17 +242,27 @@ impl SharedStore for AtomicNumStore {
     }
 }
 
-/// The default, chosen by measurement rather than intuition.
+/// The default — and there is no universally right answer, which is the point.
 ///
-/// `examples/bench_store` says a per-slot `Mutex` matches or beats a per-slot
-/// `RwLock` **even on read-heavy work** — 136 vs 109 M ops/s at four threads,
-/// 181 vs 145 single-threaded on an M4. An `RwLock` read is a write: it bumps a
-/// reader counter, so two readers of one slot contend on a cache line, and the
-/// guard is fatter than the `f64` it protects. Reaching for `RwLock` because a
-/// workload reads a lot is exactly wrong here.
+/// `examples/bench_store` (M4, median of 5 × 5M ops, read-heavy) shows the
+/// ranking among the safe general stores **inverts with thread count**:
 ///
-/// This is the best *safe, general* store in this module: it holds any `Value`,
-/// needs no unsafe, and is per slot. [`AtomicNumStore`] is 4–40× faster and
-/// cannot hold a string, which is why the next step is a hybrid rather than a
-/// swap. See VM-DESIGN.md §7.4.
-pub type DefaultStore = MutexStore;
+/// | threads | RwLock | Mutex | DashMap |
+/// |---|---|---|---|
+/// | 1 | **374** | 189 | 131 |
+/// | 4 | 100 | **158** | 138 |
+/// | 8 | 57 | 79 | **84** |
+///
+/// `RwLock` wins by 2× uncontended, loses by 1.6× at four threads, and a
+/// sharded map that is worst of all at one thread is best of the three at
+/// eight. No single choice is right for every host, which is exactly why
+/// [`SharedStore`] is a trait — this is the knob that earned its keep.
+///
+/// `RwLockStore` is the *default* because a language starting out is usually
+/// running one program on one thread, where it is decisively fastest, and
+/// because a host that knows better can say so in one line.
+///
+/// A previous revision set this to [`MutexStore`] on a benchmark whose runs
+/// were a millisecond long; two runs disagreed by 2× in opposite directions.
+/// See the note on `OPS_PER_THREAD` in the benchmark.
+pub type DefaultStore = RwLockStore;
