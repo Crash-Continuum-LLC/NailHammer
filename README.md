@@ -308,7 +308,8 @@ generated code and your handlers both say `Shared<T>`.
 
 Off by default because a single-threaded interpreter should not pay for atomics
 it never needs — and on-by-default would have been a dictate in the other
-direction. `USAGE.md` covers what it does not do, and what `--async` assumes.
+direction. `USAGE.md` covers what it does not do, and what a compiled language
+does instead when it needs to await.
 
 ## Status
 

@@ -100,17 +100,25 @@ alternatives get a stub; your existing files are left alone.
 ### Commands
 
 ```
-nh init    [dir] [--name <name>] [--ext <ext>] [--force]
+nh init    [dir] [--name <name>] [--ext <ext>] [--style c|basic]
+           [--with loops,functions] [--interpreter] [--force]
 nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
 nh check   --lints
 nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
+nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
 nh explain <file.nh> [--source]
 ```
 
 **`nh init`** writes into `dir`, defaulting to the current directory. It refuses
 a non-empty directory unless you pass `--force`. The project name comes from the
-directory name; `--ext` sets the file extension for your language's source files. `--async` adds tokio and a helper for awaiting from inside a handler — see
-[Async work in a handler](#async-work-in-a-handler).
+directory name; `--ext` sets the file extension for your language's source files.
+
+`--style` picks the syntax flavour — `c` (braces, the default) or `basic`
+(line-oriented). Both drive the same handlers. `--with` chooses what to include
+from `loops`, `functions`, or `none`; a terminal asks, a script takes all of
+them. `--interpreter` scaffolds a tree-walker instead of the default bytecode
+compiler — see [Two shapes](#two-shapes-interpreter-and-compiler) for which you
+want.
 
 **`nh check`** parses and reports without writing anything. It runs lowering
 internally and throws the result away, so it will not accept a grammar that
@@ -120,6 +128,11 @@ and nothing else, for editors and other tools.
 **`nh build`** writes the `.pest` next to your `.nh` unless `-o` says otherwise.
 Add `--rust <src-dir>` to also generate the AST, the evaluator, and handler
 stubs.
+
+**`nh trace`** shows what a program in *your* language routes to, and with what.
+It takes the program as `--source "text"` or `--input file`, starts at the first
+declared rule unless `--rule` names another, and `--json` makes it machine
+readable. See [Seeing where a program goes](#seeing-where-a-program-goes).
 
 **`nh explain`** prints the resolved operator table:
 
@@ -440,6 +453,31 @@ import "common_lex.nh";
 - A file reached by two different import paths loads once. Diamonds are fine,
   cycles are an error.
 
+### Naming a literal for error messages
+
+When a parse fails on a missing literal, the default message names the
+character. `expect` replaces it with a sentence a user of *your* language can act
+on:
+
+```nh
+expect ")" in primary        as "closing parenthesis";
+expect "(" in suffix.call    as "opening parenthesis of call arguments";
+expect "}" in block          as "closing brace of block";
+```
+
+The form is `expect "<literal>" in <target> as "<message>";`, where the target is
+a rule name, or `rule.alternative` when only one alternative should carry it.
+
+**It is keyed by literal *and* target**, so the same character means different
+things in different places — a `)` missing from a call is not a `)` missing from
+a parenthesised expression, and each gets its own sentence. Keying on the literal
+alone would silently keep only the last one.
+
+What it does mechanically is give that literal its own rule in the generated
+`.pest`, which is what puts the label in pest's expected-set where error
+rendering can reach it. You will see those rules as `nh_expect_<target>_<lit>`
+if you read the generated grammar.
+
 ---
 
 ## Operators
@@ -496,6 +534,101 @@ precedence {                    // loosest first
 A preset has no special powers. Anything a preset does you can write by hand, and
 you can put your own table in a file and `import` it.
 
+### How precedence is declared
+
+**Order in the block is the precedence.** There are no numbers to assign and no
+levels to renumber when you add one. Each entry is a *tier*, and each tier binds
+tighter than the one written above it:
+
+```nh
+precedence {
+    left  "+" | "-";     // loosest
+    left  "*" | "/";
+    right "^" -> pow;    // tightest
+    atom  atom;
+}
+```
+
+So `a + b * c` parses as `a + (b * c)` because `*` is written below `+`, and
+`2 ^ 3 ^ 2` parses as `2 ^ (3 ^ 2)` because `^` is `right`.
+
+**Operators on one line share a tier.** `left "+" | "-";` is one tier holding two
+operators, which is what makes `a - b + c` group left-to-right as `(a - b) + c`
+rather than treating one as tighter than the other. Splitting them across two
+lines would be a different language.
+
+**Fixity is per tier**, not per operator: `left`, `right`, `prefix`, or
+`postfix`. A tier is one of those, so an operator that is both prefix and infix —
+`-` in most languages — is written twice, in two tiers:
+
+```nh
+    left   "+" | "-";    // binary
+    prefix "-";          // unary, tighter
+```
+
+**`atom NAME;` names the rule the driver folds over.** It is the thing operators
+combine — usually a rule that matches a literal, a variable, or a parenthesised
+expression. Without it there is nothing for the driver to build from. The name is
+yours: `atom atom;` in the examples is a rule that happens to be called `atom`,
+not a keyword repeated.
+
+#### Placing a tier relative to an existing one
+
+`above` and `below` name an operator already in the table and place the new tier
+next to *its* tier:
+
+```nh
+precedence override {
+    right "**" above "*" -> pow;      // tighter than *
+    left   "|>" below "||" -> pipe;   // looser than ||
+}
+```
+
+- **`above X`** binds *tighter* than the tier holding `X`.
+- **`below X`** binds *looser* than the tier holding `X`.
+- The anchor must already be in the table, or you get
+  `unknown anchor operator`. Order matters: you cannot anchor to something added
+  further down the same block.
+
+These work in any `precedence` block, not only an `override` one — they are how
+you say "next to this" instead of counting lines.
+
+#### Reading `nh explain`
+
+```console
+$ nh explain mylang.nh
+  3  + -   left     -> add, sub
+  2  * /   left     -> mul, div
+  1  ^     right    -> pow
+```
+
+**The numbers count down as binding gets tighter** — tier 1 is the tightest, not
+the loosest, which is the opposite of the usual convention. Read the output as a
+picture of the block: what prints at the top is what you wrote at the top.
+
+> `nh trace` numbers the same tiers the *other* way, from `precedence 0` for the
+> loosest. The two commands disagree, so compare a tier against others in the
+> same output rather than across the two.
+
+#### A bare block replaces the preset
+
+> **This is the sharp edge in this section.** `precedence { .. }` after a
+> `use operators::` line **discards the preset entirely** and keeps only what you
+> wrote. `precedence override { .. }` is the one that adjusts. The difference is
+> one word and it is the difference between 35 operators and 5, so if a grammar
+> suddenly cannot parse `&&`, this is why.
+
+Adjusting a preset means `override`, plus `remove` for what you do not want:
+
+```nh
+use operators::c_style;
+
+precedence override {
+    remove "," "->";
+    right  "**" above "*" -> pow;
+}
+```
+
 > **When `expr` exists.** It is generated if your table declares any operators,
 > or if your grammar mentions `expr` anywhere. So `use operators::none;` with an
 > empty table and no reference to `expr` produces no `expr` rule and no driver at
@@ -523,6 +656,40 @@ impl generated::dispatch::Operators for Interp {
 Every method defaults to an `unsupported` error, so declining an operator costs
 nothing. `%` stays unimplemented until you want it, and reports itself honestly
 if a program uses it.
+
+### The roles you get without asking
+
+`-> role` is only needed when the default is wrong or absent. These spellings map
+themselves, which is why most tables have almost no `->` in them:
+
+| | |
+|---|---|
+| **arithmetic** | `+` add · `-` sub · `*` mul · `/` div · `%` rem · `**` `^^` pow |
+| **bitwise** | `&` bit_and · `\|` bit_or · `^` bit_xor · `<<` shl · `>>` shr |
+| **comparison** | `==` eq · `!=` `<>` ne · `<` lt · `<=` le · `>` gt · `>=` ge |
+| **logical** | `&&` and_then · `\|\|` or_else · `??` coalesce |
+| **assignment** | `=` assign · `+=` `-=` `*=` `/=` `%=` `<<=` `>>=` `&=` `^=` `\|=` compound_assign |
+| **other** | `..` `..=` range · `,` comma · `->` arrow |
+| **prefix** | `-` neg · `+` pos · `!` not · `~` bit_not · `++` inc · `--` dec |
+| **words** | `AND` bit_and · `OR` bit_or · `XOR` bit_xor · `MOD` rem · `DIV` div · `ANDALSO` and_then · `ORELSE` or_else · prefix `NOT` not |
+
+Word operators are matched case-insensitively, so `and` and `AND` reach the same
+role. Anything not in this table needs an explicit `-> role`, and a spelling with
+no role and no `->` is an error rather than a guess.
+
+**Some roles are lazy by default**, because laziness is a property of what an
+operator *means*, not of how it is written. A lazy operand arrives at your
+handler as a `Thunk` instead of a value:
+
+| Role | Unevaluated |
+|---|---|
+| `and_then`, `or_else`, `coalesce` | `rhs` |
+| `ternary` | `then`, `else` |
+| `assign`, `compound_assign` | `lhs` — it needs a place, not a value |
+
+`lazy(..)` on an entry overrides this in either direction. That is how a
+BASIC-style `AND` that is strict and bitwise differs from C's `&&`: same shape,
+different role, no laziness.
 
 ### Short-circuiting is written for you
 
@@ -1041,9 +1208,10 @@ Handlers are synchronous, because the evaluator is. Making it async would mean
 every `eval_*` returned a boxed future — a heap allocation per node — whether or
 not a language ever awaits anything.
 
-So async work is **blocked on** rather than awaited. `nh init --async` sets that
-up: tokio with the right features, a multi-thread `#[tokio::main]`, and a helper
-on your interpreter.
+So async work is **blocked on** rather than awaited, and **nothing scaffolds it
+for you** — no shape of `nh init` produces a project that mentions a runtime, and
+a test asserts that. Adding it is four lines you write yourself, which is the
+point: being able to is different from being handed it.
 
 ```rust
 pub fn run(host: &mut Interp, value: Value, cx: &mut Ctx) -> Result<Value> {
@@ -1052,14 +1220,14 @@ pub fn run(host: &mut Interp, value: Value, cx: &mut Ctx) -> Result<Value> {
 }
 ```
 
-The obvious spelling of that does not work:
+The obvious spelling of the helper does not work:
 
 ```rust
 Handle::current().block_on(fut)
 // panics: Cannot start a runtime from within a runtime
 ```
 
-The thread is already driving the executor. The generated helper uses
+The thread is already driving the executor. Write the helper with
 `block_in_place`, which hands that thread's other work to a sibling worker
 first:
 
@@ -1069,17 +1237,17 @@ pub fn block_on<F: std::future::Future>(&self, fut: F) -> F::Output {
 }
 ```
 
-That is why `--async` pins `rt-multi-thread` and the multi-thread flavour:
-`block_in_place` panics on the current-thread runtime.
+That requires tokio's `rt-multi-thread` feature and the multi-thread flavour of
+`#[tokio::main]`: `block_in_place` panics on a current-thread runtime.
 
 **What this costs.** A tokio worker thread is held for the duration of the call.
 That is the right trade for a handler that occasionally reaches the network. It
 is the wrong one if your *language* has async semantics of its own — an `await`
-keyword whose interpreter must yield to a scheduler and interleave with other
-tasks. That needs an async evaluator, which does not exist today.
-
-Without `--async` nothing changes: a plain scaffold has no tokio dependency at
-all.
+keyword that must yield to a scheduler and interleave with other programs. A
+tree-walker cannot do that at all; a compiled one can, by suspending rather than
+awaiting. See [`AWAIT` in an expression, for a compiled
+language](#await-in-an-expression-for-a-compiled-language), which is the real
+answer if your language has futures.
 
 ### Errors locate themselves
 
