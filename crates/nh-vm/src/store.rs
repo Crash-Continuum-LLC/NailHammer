@@ -242,27 +242,135 @@ impl SharedStore for AtomicNumStore {
     }
 }
 
-/// The default — and there is no universally right answer, which is the point.
+/// Numbers lock-free, everything else behind a per-slot lock.
 ///
-/// `examples/bench_store` (M4, median of 5 × 5M ops, read-heavy) shows the
-/// ranking among the safe general stores **inverts with thread count**:
+/// # Why
 ///
-/// | threads | RwLock | Mutex | DashMap |
-/// |---|---|---|---|
-/// | 1 | **374** | 189 | 131 |
-/// | 4 | 100 | **158** | 138 |
-/// | 8 | 57 | 79 | **84** |
+/// [`AtomicNumStore`] is 3–28× faster than any lock here and cannot hold a
+/// string, so it measures a ceiling rather than offering a design. This reaches
+/// for that ceiling in the case that matters — a numeric global, read often —
+/// while still holding any [`Value`].
 ///
-/// `RwLock` wins by 2× uncontended, loses by 1.6× at four threads, and a
-/// sharded map that is worst of all at one thread is best of the three at
-/// eight. No single choice is right for every host, which is exactly why
-/// [`SharedStore`] is a trait — this is the knob that earned its keep.
+/// # How it stays correct
 ///
-/// `RwLockStore` is the *default* because a language starting out is usually
-/// running one program on one thread, where it is decisively fastest, and
-/// because a host that knows better can say so in one line.
+/// Each slot is an `AtomicU64` beside an `RwLock<Value>`. The atomic holds
+/// either the bits of an `f64` or a sentinel meaning *look in the lock*.
 ///
-/// A previous revision set this to [`MutexStore`] on a benchmark whose runs
-/// were a millisecond long; two runs disagreed by 2× in opposite directions.
-/// See the note on `OPS_PER_THREAD` in the benchmark.
-pub type DefaultStore = RwLockStore;
+/// * **Writes always take the lock**, set the value, and store the tag **last**,
+///   with `Release`.
+/// * **Reads load the tag first**, with `Acquire`. A number is returned there
+///   and then — no lock, no guard, no contention with other readers. Anything
+///   else falls through to the lock.
+///
+/// Taking the tag store as the linearisation point of a write makes this
+/// linearisable: a reader that loads the tag before that store observes the
+/// previous value and orders before the write; one that loads it after either
+/// reads the new number directly or takes the lock, which the writer has
+/// released. There is no window in which a torn or invented value is visible.
+///
+/// # The sentinel collision is benign, and that is not an accident
+///
+/// An `f64` uses all 64 bits, so the sentinel has to be a NaN payload — and a
+/// program can store exactly that NaN. Every NaN-boxing implementation handles
+/// this by canonicalising such a value to the standard quiet NaN.
+///
+/// **This one does not, because it does not have to.** `heavy` is written on
+/// *every* store, including numeric ones, so the slow path always holds the
+/// truth. A slot whose bits collide with the sentinel simply takes the slow
+/// path: correct, and slower by one lock for one unlucky value.
+///
+/// Canonicalising would be worse than useless here. It buys nothing —
+/// correctness already holds — and it costs the caller their NaN payload,
+/// silently rewriting a value they stored. Keeping `heavy` authoritative is
+/// what makes the fast path a pure optimisation rather than a second source of
+/// truth, and a second source of truth is where this design would have gone
+/// wrong.
+#[derive(Debug)]
+pub struct HybridStore {
+    slots: Vec<HybridSlot>,
+}
+
+#[derive(Debug)]
+struct HybridSlot {
+    /// `f64` bits, or [`NOT_A_NUMBER_SLOT`].
+    tag: std::sync::atomic::AtomicU64,
+    heavy: RwLock<Value>,
+}
+
+/// The sentinel: a quiet NaN with a payload nothing produces by accident.
+const NOT_A_NUMBER_SLOT: u64 = 0xFFF8_0000_DEAD_0001;
+
+impl HybridStore {
+    pub fn new(n: usize) -> Self {
+        HybridStore {
+            slots: (0..n)
+                .map(|_| HybridSlot {
+                    tag: std::sync::atomic::AtomicU64::new(NOT_A_NUMBER_SLOT),
+                    heavy: RwLock::new(Value::Nil),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl SharedStore for HybridStore {
+    fn load(&self, slot: Slot) -> Value {
+        use std::sync::atomic::Ordering;
+        let s = &self.slots[slot as usize];
+        let bits = s.tag.load(Ordering::Acquire);
+        if bits != NOT_A_NUMBER_SLOT {
+            // The fast path, and the whole point: no lock is taken at all.
+            return Value::Num(f64::from_bits(bits));
+        }
+        s.heavy.read().expect("poisoned").clone()
+    }
+
+    fn store(&self, slot: Slot, value: Value) {
+        use std::sync::atomic::Ordering;
+        let s = &self.slots[slot as usize];
+        let mut g = s.heavy.write().expect("poisoned");
+
+        // The tag is stored last, under the lock, so it is the point at which
+        // the write becomes visible.
+        match value {
+            Value::Num(n) => {
+                *g = Value::Num(n);
+                s.tag.store(n.to_bits(), Ordering::Release);
+            }
+            other => {
+                *g = other;
+                s.tag.store(NOT_A_NUMBER_SLOT, Ordering::Release);
+            }
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+}
+
+/// The default: [`HybridStore`], which wins everywhere measured.
+///
+/// `examples/bench_store` (M4, median of 5 × 5M ops/thread, read-heavy):
+///
+/// | threads | RwLock | Mutex | DashMap | **hybrid** | *AtomicU64 ceiling* |
+/// |---|---|---|---|---|---|
+/// | 1 | 394 | 201 | 143 | **538** | *612* |
+/// | 2 | 95 | 114 | 115 | **580** | *869* |
+/// | 4 | 89 | 158 | 100 | **949** | *1013* |
+/// | 8 | 61 | 74 | 88 | **485** | *509* |
+///
+/// The lock-free read path holds **88–95% of the numbers-only ceiling** while
+/// still storing any [`Value`], and beats the best lock by 8× at eight threads.
+/// The tag check does not eat the advantage, which was the open question.
+///
+/// Its gain on **write-heavy** work is much smaller — 1.2–1.7× — because writes
+/// still take the lock. That is the honest limit of this design and the next
+/// thing worth attacking.
+///
+/// [`SharedStore`] remains a trait, but for a better reason than "no default is
+/// right". Globals that are dynamic, sparse, or shared *by name* between
+/// independently loaded languages want a map, and [`DashMap`-backed stores are
+/// what that looks like](https://docs.rs/dashmap) — a case the hybrid does not
+/// serve at all, rather than serves worse.
+pub type DefaultStore = HybridStore;

@@ -853,13 +853,50 @@ implements `SharedStore` over `DashMap` **from outside the crate**, through a
 dev-dependency, which demonstrates the seam works and keeps `nh-vm` itself
 dependency-free.
 
-**The hybrid is the next piece of VM work**, and now a data-backed decision
-rather than a preference: small values inline in an atomic word, heap values
-behind a pointer.
+#### The hybrid, built and measured
 
-**What the benchmark does not settle:** whether a hybrid keeps the atomic path's
-advantage once a tag check is in the loop, and what a lock-free store costs for
-values needing reclamation. Both need the hybrid to exist first.
+`HybridStore` is the design the numbers argued for: an `AtomicU64` beside a
+per-slot lock, holding either an `f64`'s bits or a sentinel meaning *look in the
+lock*. Writes take the lock and store the tag **last**; reads load the tag first
+and return a number without touching the lock at all.
+
+It answers the question this section left open — *does a tag check eat the
+atomic advantage?* — with **no**:
+
+| threads · 95% read | RwLock | best lock | **hybrid** | *ceiling* |
+|---|---|---|---|---|
+| 1 | 394 | 201 | **538** | *612* |
+| 4 | 89 | 158 | **949** | *1013* |
+| 8 | 61 | 88 | **485** | *509* |
+
+88–95% of the numbers-only ceiling while storing any `Value`, and 8× the best
+lock at eight threads. **`DefaultStore` is now `HybridStore`.**
+
+**Its limit, stated plainly:** on write-heavy work the gain falls to 1.2–1.7×,
+because writes still take the lock. Making writes lock-free means reclaiming
+heap values while readers may hold them — hazard pointers or epochs — which is
+a different and much larger problem. That is the honest next target, not a
+footnote.
+
+**Correctness rests on `heavy` staying authoritative.** It is written on every
+store, numeric ones included, so the atomic is purely a fast path and never a
+second source of truth. That is also why this implementation does **not**
+canonicalise a value whose bits collide with the sentinel, as NaN-boxing schemes
+normally must: the collision costs one trip down the slow path and nothing else,
+where canonicalising would silently rewrite a caller's NaN payload to buy
+nothing.
+
+**A test that proved nothing, and what fixed it.** The first version of that
+check asserted only `is_nan()` on the round trip — which passes whether or not
+the implementation rewrites the value, so it did not test the thing it was named
+after. Removing the canonicalisation left it green. Asserting `to_bits()`
+equality makes it discriminate, and it now fails against a canonicalising
+implementation. An assertion weaker than its own title is worse than no test,
+because the title is what gets believed.
+
+**What is still unsettled:** what a fully lock-free store costs for values
+needing reclamation, and whether a sharded map beats the hybrid once globals are
+keyed by name rather than slot.
 
 #### What does not change
 

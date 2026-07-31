@@ -21,7 +21,9 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-use nh_vm::{AtomicNumStore, BankLockStore, MutexStore, RwLockStore, SharedStore, Slot, Value};
+use nh_vm::{
+    AtomicNumStore, BankLockStore, HybridStore, MutexStore, RwLockStore, SharedStore, Slot, Value,
+};
 
 const SLOTS: usize = 64;
 
@@ -97,6 +99,7 @@ fn main() {
             run::<MutexStore>("per-slot Mutex            ", threads, read_pct, Spread::Wide);
             run::<AtomicNumStore>("per-slot AtomicU64        ", threads, read_pct, Spread::Wide);
             run::<DashStore>("DashMap (sharded)         ", threads, read_pct, Spread::Wide);
+            run::<HybridStore>("hybrid (num lock-free)    ", threads, read_pct, Spread::Wide);
             println!();
         }
         if threads > 1 {
@@ -106,6 +109,7 @@ fn main() {
             run::<MutexStore>("per-slot Mutex            ", threads, 95, Spread::OneSlot);
             run::<AtomicNumStore>("per-slot AtomicU64        ", threads, 95, Spread::OneSlot);
             run::<DashStore>("DashMap (sharded)         ", threads, 95, Spread::OneSlot);
+            run::<HybridStore>("hybrid (num lock-free)    ", threads, 95, Spread::OneSlot);
             println!();
         }
     }
@@ -149,6 +153,11 @@ impl Build for AtomicNumStore {
 impl Build for DashStore {
     fn build(n: usize) -> Self {
         DashStore::new(n)
+    }
+}
+impl Build for HybridStore {
+    fn build(n: usize) -> Self {
+        HybridStore::new(n)
     }
 }
 

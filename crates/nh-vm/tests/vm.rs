@@ -246,3 +246,117 @@ fn a_failure_stops_the_machine_with_a_reason() {
         other => panic!("expected a failure, got {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// HybridStore — a lock-free read path is where correctness bugs hide
+// ---------------------------------------------------------------------------
+
+/// Values must survive a round trip through both paths, and switching a slot
+/// between them must not leave the other path's stale value visible.
+#[test]
+fn the_hybrid_store_round_trips_both_paths() {
+    let s = nh_vm::HybridStore::new(2);
+
+    s.store(0, Value::Num(1.5));
+    assert_eq!(s.load(0), Value::Num(1.5), "fast path");
+
+    s.store(0, Value::str("now a string"));
+    assert_eq!(s.load(0), Value::str("now a string"), "switched to the slow path");
+
+    s.store(0, Value::Num(2.5));
+    assert_eq!(s.load(0), Value::Num(2.5), "and back — the string must not linger");
+
+    s.store(1, Value::Bool(true));
+    assert_eq!(s.load(1), Value::Bool(true));
+    s.store(1, Value::Nil);
+    assert_eq!(s.load(1), Value::Nil);
+}
+
+/// A value whose bits collide with the fast path's sentinel round-trips
+/// **exactly** — same payload, not merely "still a NaN".
+///
+/// This is the assertion worth making, and it is stronger than the obvious one.
+/// A first version checked only `is_nan()`, which passed whether or not the
+/// implementation rewrote the caller's value — so it proved nothing about the
+/// thing it was named after. Every NaN-boxing scheme canonicalises this case;
+/// this one must not, because `heavy` is authoritative and the collision costs
+/// only a trip down the slow path.
+#[test]
+fn a_value_colliding_with_the_sentinel_is_returned_unchanged() {
+    let s = nh_vm::HybridStore::new(1);
+    let sentinel = f64::from_bits(0xFFF8_0000_DEAD_0001);
+    assert!(sentinel.is_nan(), "the sentinel is a NaN payload");
+
+    s.store(0, Value::Num(sentinel));
+
+    match s.load(0) {
+        Value::Num(n) => assert_eq!(
+            n.to_bits(),
+            sentinel.to_bits(),
+            "the caller's NaN payload was rewritten"
+        ),
+        other => panic!("a stored number came back as {other:?}"),
+    }
+}
+
+#[test]
+fn an_ordinary_nan_round_trips_bit_for_bit() {
+    let s = nh_vm::HybridStore::new(1);
+    s.store(0, Value::Num(f64::NAN));
+    match s.load(0) {
+        Value::Num(n) => assert_eq!(n.to_bits(), f64::NAN.to_bits()),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Concurrent readers on the lock-free path, while a writer flips the slot
+/// between representations. Every read must yield *some* value that was stored
+/// — never a torn one, and never a panic.
+#[test]
+fn the_hybrid_store_is_safe_under_concurrent_flips() {
+    let s = Arc::new(nh_vm::HybridStore::new(1));
+    s.store(0, Value::Num(0.0));
+
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let writer = {
+        let s = Arc::clone(&s);
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            for i in 0..20_000 {
+                if i % 2 == 0 {
+                    s.store(0, Value::Num(i as f64));
+                } else {
+                    s.store(0, Value::str("flip"));
+                }
+            }
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        })
+    };
+
+    let mut readers = Vec::new();
+    for _ in 0..3 {
+        let s = Arc::clone(&s);
+        let stop = Arc::clone(&stop);
+        readers.push(thread::spawn(move || {
+            let mut seen_num = false;
+            let mut seen_str = false;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                match s.load(0) {
+                    Value::Num(_) => seen_num = true,
+                    Value::Str(t) => {
+                        assert_eq!(&*t, "flip", "an invented string appeared");
+                        seen_str = true;
+                    }
+                    other => panic!("a value nobody stored: {other:?}"),
+                }
+            }
+            (seen_num, seen_str)
+        }));
+    }
+
+    writer.join().unwrap();
+    for r in readers {
+        r.join().expect("a reader panicked — the fast path is not safe");
+    }
+}
