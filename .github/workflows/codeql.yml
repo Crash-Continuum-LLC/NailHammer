@@ -1,0 +1,52 @@
+name: CodeQL
+
+# Static analysis on the code CodeQL can actually read.
+#
+# The repository is 207 Rust files and 8 JavaScript ones, and CodeQL analyses
+# the JavaScript. Rust support exists but is still in public preview, so it is
+# deliberately not enabled here: a scanner that is not GA produces findings
+# nobody can act on, which is the same defect this project refuses to ship in
+# generated code. `cargo clippy -- -D warnings` in ci.yml is what holds that
+# line for Rust, and `cargo audit` via Dependabot covers advisories.
+#
+# So this covers the VS Code extension -- the part that runs untrusted input
+# (a user's `.nh` file) inside the editor process.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, because a new query release can find something in code that has
+    # not changed. Monday morning UTC, away from the push-triggered runs.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze javascript
+    runs-on: ubuntu-latest
+    permissions:
+      # Writing results to the Security tab is the whole point; everything else
+      # stays read-only.
+      security-events: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Initialize
+        uses: github/codeql-action/init@a2983b8bed1923f44751c5c43237f479442827b3 # v3.37.4
+        with:
+          languages: javascript-typescript
+          # security-extended over the default: this is a small, slow-moving
+          # JavaScript surface, so the extra query time costs nothing and the
+          # default set is tuned for repositories where it would.
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@a2983b8bed1923f44751c5c43237f479442827b3 # v3.37.4
+        with:
+          category: "/language:javascript-typescript"
