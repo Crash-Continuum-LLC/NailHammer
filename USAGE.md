@@ -104,7 +104,8 @@ nh init    [dir] [--name <name>] [--ext <ext>] [--style c|basic]
            [--with loops,functions] [--interpreter] [--force]
 nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
 nh check   --lints
-nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
+nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>]
+           [--target <vm> [--host <ty>]] [--prune [--force]]
 nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
 nh explain <file.nh> [--source]
 ```
@@ -128,6 +129,12 @@ and nothing else, for editors and other tools.
 **`nh build`** writes the `.pest` next to your `.nh` unless `-o` says otherwise.
 Add `--rust <src-dir>` to also generate the AST, the evaluator, and handler
 stubs.
+
+**`--target`** generates the operator implementation instead of leaving it for
+you. Against a VM that owns execution, `add` means "emit the add instruction" in
+every language — a consequence rather than a decision — so it is generated, and a
+project targeting one writes **no operator code at all**. See
+[Compiling for a VM](#compiling-for-a-vm).
 
 **`nh trace`** shows what a program in *your* language routes to, and with what.
 It takes the program as `--source "text"` or `--input file`, starts at the first
@@ -1010,6 +1017,72 @@ slot. Two things follow, and both are in the scaffold:
 * **Policy belongs on the host, not in a handler.** `stmt_for` never asks whether
   its counter is a slot or a global; `read_var` and `emit_increment` answer that,
   and they live in your `lib.rs`.
+
+## Compiling for a VM
+
+Everything above assumes your language brings its own semantics: you implement
+`Operators`, and `add` means whatever you write. That is right for a standalone
+language and wrong for one compiling to a machine somebody else owns, where the
+answer is fixed and writing it out is busywork.
+
+```console
+$ nh build mylang.nh -o src/mylang.pest --rust src --target nh-vm
+```
+
+or, from a `build.rs`:
+
+```rust
+nh_build::Builder::new("mylang.nh").target("nh-vm").run();
+```
+
+That writes `src/generated/vm_operators.rs` — the whole `Operators`
+implementation — and wires it into `generated/mod.rs` itself. There is nothing
+to `include!` and nothing to import: search your crate for `fn add` afterwards
+and there will not be one.
+
+What stays yours is what only you could have said: which operators exist, how
+they are spelled, their precedence and associativity — all already in the `.nh`
+table — and the handlers that lower your statements.
+
+### When the machine cannot do something
+
+A grammar can bind a role the target has no instruction for. That is not an
+error in your grammar and not a failure of the VM, and it is reported *now*
+rather than as a link error later:
+
+```console
+error: `%` binds the `rem` role, which nh-vm cannot execute
+error: `<<` binds the `shift` role, which nh-vm cannot execute
+2 role(s) have no instruction on `nh-vm`. Remove them from the operator table,
+or extend the VM.
+```
+
+Each is named with a spelling you actually typed. Remove the operator, or add
+the instruction to the machine.
+
+### `--host`
+
+The generated implementation is written for `crate::Interp`, which is what the
+scaffold calls its host. If yours is called something else, say so:
+
+```console
+$ nh build mylang.nh --rust src --target nh-vm --host crate::Compiler
+```
+
+### Both flags need `--rust`
+
+They select what is generated *into* the Rust output, so passing either without
+`--rust` is an error rather than a flag that quietly does nothing.
+
+### A worked pair
+
+`examples/vm-c` and `examples/vm-basic` are the same language in two syntaxes —
+braces and `&` against `END IF` and `AND`. They compile to identical bytecode,
+because they bind the same roles, and neither contains a line of operator code.
+Reading the two grammars side by side is the shortest explanation of what a
+target buys.
+
+---
 
 ## Writing handlers
 

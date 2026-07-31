@@ -169,39 +169,35 @@ impl Builder {
 
         if let Some(rust_out) = &self.rust_out {
             let root = self.root.join(rust_out);
-            let opts = nh_codegen::Options::default();
-            let mut generated = nh_codegen::generate(&ast, &table, &lowered, &opts);
-
-            // A target makes operator handling generated rather than written
-            // (VM-DESIGN.md §7.2). Failing here is the right place: a build
-            // script that reports "this VM has no `Pow`" costs a rebuild, where
-            // the same mismatch found at link time costs an afternoon.
             if let Some(name) = &self.target {
-                let vm = match name.as_str() {
-                    "nh-vm" => nh_codegen::vm::Target::nh_vm(),
-                    other => return Err(format!("unknown target `{other}`; the only target today is `nh-vm`")),
-                };
-                match nh_codegen::vm::operators_impl(&table, &vm, "crate::Interp") {
-                    Ok(contents) => generated.files.push(nh_codegen::GeneratedFile {
-                        path: "generated/vm_operators.rs".into(),
-                        contents,
-                        policy: nh_codegen::Policy::Generated,
-                    }),
-                    Err(missing) => {
-                        let mut m = String::new();
-                        for u in &missing {
-                            m.push_str(&format!(
-                                "`{}` binds the `{}` role, which {} cannot execute\n",
-                                u.spelling, u.role, vm.name
-                            ));
-                        }
-                        return Err(format!(
-                            "{m}\n{} role(s) have no instruction on `{}`.",
-                            missing.len(),
-                            vm.name
-                        ));
-                    }
+                if nh_codegen::vm::target_by_name(name).is_none() {
+                    return Err(format!(
+                        "unknown target `{name}`; available: {}",
+                        nh_codegen::vm::TARGET_NAMES.join(", ")
+                    ));
                 }
+            }
+            let opts = nh_codegen::Options {
+                target: self.target.clone(),
+                ..nh_codegen::Options::default()
+            };
+            let generated = nh_codegen::generate(&ast, &table, &lowered, &opts);
+
+            // Failing here is the right place: a build script that reports
+            // "this VM has no `Pow`" costs a rebuild, where the same mismatch
+            // found at link time costs an afternoon.
+            if !generated.unsupported.is_empty() {
+                let mut m = String::new();
+                for u in &generated.unsupported {
+                    m.push_str(&format!(
+                        "`{}` binds the `{}` role, which the target cannot execute\n",
+                        u.spelling, u.role
+                    ));
+                }
+                return Err(format!(
+                    "{m}\n{} role(s) have no instruction on this target.",
+                    generated.unsupported.len()
+                ));
             }
 
             for file in &generated.files {

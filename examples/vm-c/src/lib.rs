@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 
-use nh_vm::{Cmp, NoExt, Op, Reg, Slot, Value};
+use nh_vm::{NoExt, Op, Reg, Slot, Value};
 
 pub mod generated {
     include!("generated/mod.rs");
@@ -141,10 +141,9 @@ impl generated::dispatch::Semantics for Interp {
     type Out = Reg;
 }
 
-// Everything to do with operators, generated. This is the only mention of it.
-use generated::dispatch::CompareOp;
-use nh_runtime::Result;
-include!("generated/vm_operators.rs");
+// Nothing here mentions operators. `generated/vm_operators.rs` is a module the
+// generator wired into `generated/mod.rs` itself, so there is no `include!` and
+// no imports to guess.
 
 // Wires every handler module to the trait. `without short_circuit` because this
 // grammar declares no lazy operators -- there is no `&&` to write.

@@ -22,8 +22,8 @@ USAGE:
     nh init    [dir] [--name <name>] [--ext <ext>] [--style c|basic]
                [--with loops,functions] [--interpreter] [--force]
     nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
-    nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--target <vm>]
-               [--prune [--force]]
+    nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>]
+               [--target <vm> [--host <ty>]] [--prune [--force]]
     nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
     nh explain <file.nh> [--source]
     nh --help | --version
@@ -54,9 +54,13 @@ OPTIONS:
     -o <path>  build: write the .pest here instead of alongside the .nh file
     --rust <d> build: also generate views, dispatch, and handler stubs into <d>
     --target <vm>
-               build: also generate operator emission for a VM. `nh-vm` is the
-               only target today; a role it cannot execute is reported
-               rather than emitted
+               build: also generate operator emission for a VM, so the
+               `Operators` impl is generated rather than written. `nh-vm` is
+               the only target today; a role it cannot execute is reported
+               rather than emitted. Needs --rust
+    --host <ty>
+               build: the type the generated `Operators` impl is written for
+               (default: `crate::Interp`). Needs --rust
     --prune    build: remove handler files with no matching grammar alternative
     --source   trace: the program to trace, as text
                explain: print the table as .nh source you could paste
@@ -227,7 +231,7 @@ fn init_cmd(args: &[String]) -> ExitCode {
     // `--rust` never overwrites an existing handler file, so this fills in the
     // generated half without touching them.
     let src_dir = created.pest_path.parent().unwrap_or(&opts.dir).to_path_buf();
-    if emit_rust(&src_dir, &ast, &table, &lowered, false, false, None) != ExitCode::SUCCESS {
+    if emit_rust(&src_dir, &ast, &table, &lowered, false, false, None, None) != ExitCode::SUCCESS {
         eprintln!("error: scaffolded codegen failed — this is a bug in nh init");
         return ExitCode::FAILURE;
     }
@@ -337,7 +341,7 @@ fn check(args: &[String]) -> ExitCode {
 }
 
 fn build(args: &[String]) -> ExitCode {
-    let parsed = match parse_args(args, &["--prune", "--force"], &["-o", "--output", "--rust", "--target"]) {
+    let parsed = match parse_args(args, &["--prune", "--force"], &["-o", "--output", "--rust", "--target", "--host"]) {
         Ok(p) => p,
         Err(e) => return usage_error(e),
     };
@@ -384,6 +388,18 @@ fn build(args: &[String]) -> ExitCode {
     }
     eprintln!("ok: wrote {}", out.display());
 
+    // `--target` only has an effect on the Rust side. Passing it without
+    // `--rust` asked for something and got nothing, silently.
+    if parsed.value("--rust").is_none() {
+        for flag in ["--target", "--host"] {
+            if parsed.value(flag).is_some() {
+                eprintln!("error: `{flag}` has no effect without `--rust <src-dir>`");
+                eprintln!("help: it selects what is generated *into* the Rust output");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
     if let Some(rust_dir) = parsed.value("--rust") {
         return emit_rust(
             Path::new(rust_dir),
@@ -393,6 +409,7 @@ fn build(args: &[String]) -> ExitCode {
             parsed.has("--prune"),
             parsed.has("--force"),
             parsed.value("--target"),
+            parsed.value("--host"),
         );
     }
 
@@ -411,6 +428,9 @@ fn build(args: &[String]) -> ExitCode {
 /// Writes the generated Rust, honouring DESIGN.md §5.4's regeneration policy:
 /// generated files are always overwritten, handler stubs are written once and
 /// never overwritten or deleted.
+// Eight parameters, and each is a distinct decision the caller made. Bundling
+// them into a struct would move the argument list rather than shorten it.
+#[allow(clippy::too_many_arguments)]
 fn emit_rust(
     dir: &Path,
     ast: &Ast,
@@ -419,45 +439,46 @@ fn emit_rust(
     prune: bool,
     force: bool,
     target: Option<&str>,
+    host_type: Option<&str>,
 ) -> ExitCode {
-    let opts = nh_codegen::Options::default();
-    let mut generated = nh_codegen::generate(ast, table, lowered, &opts);
-
-    // A target turns operator handling from something the author writes into
-    // something generated (VM-DESIGN.md §7.2). A role the machine cannot
-    // execute is reported here, in the tool they are already running, rather
-    // than as generated code that will not compile.
+    // A target makes operator handling generated rather than written
+    // (VM-DESIGN.md §7.2). A role the machine cannot execute is reported here,
+    // in the tool the author is already running.
+    let mut opts = nh_codegen::Options {
+        target: target.map(str::to_string),
+        ..nh_codegen::Options::default()
+    };
     if let Some(name) = target {
-        let vm = match name {
-            "nh-vm" => nh_codegen::vm::Target::nh_vm(),
-            other => {
-                eprintln!("error: unknown target `{other}`");
-                eprintln!("help: the only target today is `nh-vm`");
-                return ExitCode::FAILURE;
-            }
-        };
-        match nh_codegen::vm::operators_impl(table, &vm, "crate::Interp") {
-            Ok(contents) => generated.files.push(nh_codegen::GeneratedFile {
-                path: "generated/vm_operators.rs".into(),
-                contents,
-                policy: nh_codegen::Policy::Generated,
-            }),
-            Err(missing) => {
-                for u in &missing {
-                    eprintln!(
-                        "error: `{}` binds the `{}` role, which {} cannot execute",
-                        u.spelling, u.role, vm.name
-                    );
-                }
-                eprintln!(
-                    "{} role(s) have no instruction on `{}`. Remove them from the \
-                     operator table, or extend the VM.",
-                    missing.len(),
-                    vm.name
-                );
-                return ExitCode::FAILURE;
-            }
+        if nh_codegen::vm::target_by_name(name).is_none() {
+            eprintln!("error: unknown target `{name}`");
+            eprintln!(
+                "help: available targets: {}",
+                nh_codegen::vm::TARGET_NAMES.join(", ")
+            );
+            return ExitCode::FAILURE;
         }
+    }
+    if let Some(host) = host_type {
+        opts.host_type = host.to_string();
+    }
+    let generated = nh_codegen::generate(ast, table, lowered, &opts);
+
+    if !generated.unsupported.is_empty() {
+        for u in &generated.unsupported {
+            eprintln!(
+                "error: `{}` binds the `{}` role, which {} cannot execute",
+                u.spelling,
+                u.role,
+                target.unwrap_or("the target")
+            );
+        }
+        eprintln!(
+            "{} role(s) have no instruction on `{}`. Remove them from the \
+             operator table, or extend the VM.",
+            generated.unsupported.len(),
+            target.unwrap_or("the target")
+        );
+        return ExitCode::FAILURE;
     }
 
     let (mut written, mut kept, mut created) = (0usize, 0usize, 0usize);

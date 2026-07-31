@@ -69,6 +69,13 @@ fn a_supported_grammar_generates_its_operator_implementation() {
     let generated = std::fs::read_to_string(dir.join("src/generated/vm_operators.rs"))
         .expect("vm_operators.rs must exist");
 
+    // A module, not an orphan to `include!`: it brings its own imports and the
+    // generator wired it into mod.rs, so the author writes no glue at all.
+    assert!(generated.contains("use nh_vm::{Cmp, Op, Reg};"), "{generated}");
+    assert!(generated.contains("use super::dispatch::{CompareOp, Operators};"), "{generated}");
+    let modrs = std::fs::read_to_string(dir.join("src/generated/mod.rs")).unwrap();
+    assert!(modrs.contains("pub mod vm_operators;"), "{modrs}");
+
     assert!(generated.contains("fn add(&mut self, lhs: Reg, rhs: Reg)"), "{generated}");
     assert!(generated.contains("self.emit(Op::Add { dst, a: lhs, b: rhs });"), "{generated}");
     assert!(generated.contains("fn compare(&mut self, lhs: Reg, op: CompareOp"), "{generated}");
@@ -164,4 +171,49 @@ fn an_unknown_target_is_rejected_by_name() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("unknown target `jvm`"), "{err}");
     assert!(err.contains("nh-vm"), "says what is available: {err}");
+}
+
+/// `--target` only affects the Rust output, so passing it without `--rust`
+/// asked for something and got nothing. It used to do so **silently**.
+#[test]
+fn target_without_rust_is_an_error_rather_than_a_no_op() {
+    let dir = scratch("norust");
+    let g = write(&dir, SUPPORTED);
+
+    let out = nh()
+        .args(["build"])
+        .arg(&g)
+        .arg("-o")
+        .arg(dir.join("src/lang.pest"))
+        .args(["--target", "nh-vm"])
+        .output()
+        .expect("running nh build");
+
+    assert!(!out.status.success(), "a flag that does nothing must say so");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("no effect without") && err.contains("--rust"), "{err}");
+}
+
+/// The host type is a flag, not a hardcoded `crate::Interp`. A project that
+/// calls its compiler something else used to get an impl for a type it does
+/// not have.
+#[test]
+fn the_host_type_can_be_named() {
+    let dir = scratch("host");
+    let g = write(&dir, SUPPORTED);
+
+    let out = nh()
+        .args(["build"])
+        .arg(&g)
+        .arg("-o")
+        .arg(dir.join("src/lang.pest"))
+        .arg("--rust")
+        .arg(dir.join("src"))
+        .args(["--target", "nh-vm", "--host", "crate::Compiler"])
+        .output()
+        .expect("running nh build");
+
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let generated = std::fs::read_to_string(dir.join("src/generated/vm_operators.rs")).unwrap();
+    assert!(generated.contains("impl Operators for crate::Compiler {"), "{generated}");
 }

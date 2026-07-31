@@ -105,6 +105,6 @@ fn one_report_per_role_not_per_spelling() {
 fn no_operators_is_not_an_error() {
     let t = table("grammar T;\nuse operators::none;\n");
     let src = operators_impl(&t, &Target::nh_vm(), "Compiler").expect("nothing to support");
-    assert!(src.contains("impl generated::dispatch::Operators for Compiler {"), "{src}");
+    assert!(src.contains("impl Operators for Compiler {"), "{src}");
     assert!(!src.contains("fn add"), "{src}");
 }

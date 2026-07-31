@@ -9,6 +9,7 @@ pub mod dispatch;
 pub mod place;
 pub mod run;
 pub mod views;
+pub mod vm_operators;
 
 pub use diagnostics::{render_parse_error, syntax_errors};
 pub use dispatch::{Eval, Handlers};

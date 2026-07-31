@@ -34,6 +34,33 @@ pub fn generate(lowered: &Lowered, opts: &Options) -> String {
         return out;
     };
 
+    // The entry rule has to *build* something, or the calls below name a
+    // builder that was never generated.
+    //
+    // An unlabelled rule is an alias: it delegates to a single child and has no
+    // node of its own. That is fine anywhere except here, and until this check
+    // existed the failure was silent — `nh check --deny-warnings` passed,
+    // `nh build` reported success, and the user's project failed to compile
+    // with `cannot find function build_program`, pointing into generated code
+    // they did not write. Saying it here puts the message in the file that
+    // would otherwise be broken.
+    if lowered
+        .rules
+        .first()
+        .is_some_and(|r| matches!(r.shape, nh_lower::RuleShape::Alias { .. }))
+    {
+        let _ = write!(
+            out,
+            "\ncompile_error!(\n\
+            \x20   \"the entry rule `{entry}` produces no node, so a program has nothing to \\\n\
+            \x20    evaluate. Add a `-> label` to it -- `rule {entry} = SOI stmts:stmt* EOI -> doc;` \\\n\
+            \x20    -- because the first rule declared is where a program starts, and a rule \\\n\
+            \x20    with no label delegates to a single child rather than building anything.\"\n\
+            );\n"
+        );
+        return out;
+    }
+
     let e = ident(entry);
     let parser = &opts.parser_type;
     // `Rule` is emitted beside the parser type by `#[derive(Parser)]`.

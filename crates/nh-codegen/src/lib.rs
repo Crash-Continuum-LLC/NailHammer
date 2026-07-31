@@ -53,6 +53,12 @@ pub struct Generated {
     pub files: Vec<GeneratedFile>,
     /// Handler module names, so the caller can report orphaned stubs.
     pub handler_modules: Vec<String>,
+    /// Roles the requested target cannot execute.
+    ///
+    /// Carried rather than returned as an error, for the same reason
+    /// `Lowered` carries its diagnostics: the caller decides how to present
+    /// them, and there is exactly one place that formats a diagnostic.
+    pub unsupported: Vec<vm::Unsupported>,
 }
 
 /// Options that cannot be inferred from the grammar.
@@ -68,6 +74,17 @@ pub struct Options {
     pub module_path: String,
     /// Module path the hand-written handlers live under.
     pub handlers_path: String,
+    /// A VM to generate operator emission for (VM-DESIGN.md §7.2).
+    ///
+    /// `None` leaves the `Operators` trait for the author to implement, which
+    /// is the behaviour every existing project relies on.
+    pub target: Option<String>,
+    /// The type the generated `Operators` implementation is written for.
+    ///
+    /// `crate::Interp` matches what the scaffold names its host. A project that
+    /// calls its compiler something else says so here rather than discovering
+    /// that the generated impl targets a type it does not have.
+    pub host_type: String,
 }
 
 impl Default for Options {
@@ -76,6 +93,8 @@ impl Default for Options {
             parser_type: "crate::LangParser".to_string(),
             module_path: "crate::generated".to_string(),
             handlers_path: "crate::handlers".to_string(),
+            target: None,
+            host_type: "crate::Interp".to_string(),
         }
     }
 }
@@ -87,6 +106,10 @@ pub const HEADER: &str = "\
 // lost on the next build.
 ";
 
+// One push per generated file, rather than a single sixty-line `vec![]` -- each
+// entry carries a path, a body and a policy, and they are easier to read and to
+// diff one at a time.
+#[allow(clippy::vec_init_then_push)]
 pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Options) -> Generated {
     // `grammar Calc;` means `#[derive(Parser)] pub struct CalcParser`, which is
     // what the scaffold writes and what every example uses. Deriving it here
@@ -101,7 +124,6 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
     let opts = &derived;
 
     let mut files = Vec::new();
-
     files.push(GeneratedFile {
         path: "generated/ast.rs".into(),
         contents: ast::generate(lowered, opts),
@@ -132,12 +154,34 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
         contents: place::generate(lowered, opts),
         policy: Policy::Generated,
     });
+    // The operator implementation, when a target was named. It is a *module*
+    // rather than a file to `include!`, so it needs no wiring and no imports
+    // from the author -- an orphan file that silently does nothing until
+    // somebody guesses five `use` lines is not a feature.
+    let mut unsupported = Vec::new();
+    let mut vm_module = "";
+    if let Some(name) = &opts.target {
+        if let Some(vm) = vm::target_by_name(name) {
+            match vm::operators_impl(table, &vm, &opts.host_type) {
+                Ok(contents) => {
+                    vm_module = "pub mod vm_operators;\n";
+                    files.push(GeneratedFile {
+                        path: "generated/vm_operators.rs".into(),
+                        contents,
+                        policy: Policy::Generated,
+                    });
+                }
+                Err(missing) => unsupported = missing,
+            }
+        }
+    }
+
     files.push(GeneratedFile {
         path: "generated/mod.rs".into(),
         contents: format!(
             "{HEADER}\n\
              pub mod ast;\npub mod diagnostics;\npub mod dispatch;\n\
-             pub mod place;\npub mod run;\npub mod views;\n\n\
+             pub mod place;\npub mod run;\npub mod views;\n{vm_module}\n\
              pub use diagnostics::{{render_parse_error, syntax_errors}};\n\
              pub use dispatch::{{Eval, Handlers}};\n\
              pub use place::Place;\n\
@@ -165,6 +209,7 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
     Generated {
         files,
         handler_modules,
+        unsupported,
     }
 }
 
