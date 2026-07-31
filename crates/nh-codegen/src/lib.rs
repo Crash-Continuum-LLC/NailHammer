@@ -25,6 +25,7 @@ pub mod place;
 mod run;
 pub mod stubs;
 pub mod views;
+pub mod vm;
 
 use nh_lower::Lowered;
 use nh_operators::OperatorTable;
