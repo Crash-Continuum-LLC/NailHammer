@@ -46,6 +46,15 @@ pub struct OperatorTable {
     pub atom_rule: Option<String>,
     /// Preset this table started from, for `nh explain`.
     pub preset: Option<String>,
+    /// Non-fatal diagnostics produced while resolving.
+    ///
+    /// Resolving can notice things worth saying that do not stop it — a bare
+    /// `precedence` block silently discarding a preset, for one. Returning them
+    /// means a caller can surface them; before this they were computed and
+    /// dropped on the success path, so the single most destructive thing this
+    /// crate can do to a grammar happened without a word. `nh-lower` had the
+    /// same defect and fixed it the same way (DESIGN.md §11).
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl OperatorTable {
@@ -57,6 +66,21 @@ impl OperatorTable {
         self.tiers
             .iter()
             .flat_map(|t| t.operators.iter().map(move |o| (t, o)))
+    }
+
+    /// The precedence number to *show* a user for the tier at `index`.
+    ///
+    /// Tiers are stored loosest-first, so the index is the binding power the
+    /// driver folds with — but it reads backwards in a printed table, where the
+    /// familiar convention (a C precedence chart) numbers the tightest tier 1.
+    /// So display is the inverse of storage.
+    ///
+    /// This exists because `nh explain` and `nh trace` computed it separately
+    /// and disagreed: explain printed `1` for the tightest tier while trace
+    /// printed the raw index, so the same operator was "precedence 1" in one
+    /// command and "precedence 2" in the other. One definition, two callers.
+    pub fn display_precedence(&self, index: usize) -> usize {
+        self.tiers.len().saturating_sub(index)
     }
 
     pub fn has_fixity(&self, f: Fixity) -> bool {
@@ -152,6 +176,9 @@ pub fn resolve(ast: &Ast, sm: &mut SourceMap) -> Result<OperatorTable, Errors> {
     if diagnostics.iter().any(|d| d.severity == nh_syntax::Severity::Error) {
         Err(Errors(diagnostics))
     } else {
+        // Carried rather than discarded. Everything left here is a warning, and
+        // a warning nobody sees is the same as no warning at all.
+        table.diagnostics = diagnostics;
         Ok(table)
     }
 }
@@ -367,8 +394,8 @@ pub fn explain(table: &OperatorTable) -> String {
         .max(4);
 
     // Highest precedence number = loosest, matching how people read a
-    // precedence table top-down.
-    let n = table.tiers.len();
+    // precedence table top-down. `display_precedence` owns that inversion so
+    // `nh trace` prints the same number for the same tier.
     for (i, tier) in table.tiers.iter().enumerate() {
         if tier.operators.is_empty() {
             continue;
@@ -387,7 +414,12 @@ pub fn explain(table: &OperatorTable) -> String {
             Fixity::Postfix => "postfix",
         };
 
-        let mut line = format!("{:>3}  {:<width$}  {:<7}", n - i, ops, fixity);
+        let mut line = format!(
+            "{:>3}  {:<width$}  {:<7}",
+            table.display_precedence(i),
+            ops,
+            fixity
+        );
 
         let lazy: Vec<&str> = tier
             .operators
@@ -470,5 +502,96 @@ mod tests {
             let source = format!("grammar T;\nuse operators::{name};\n");
             table_from(&source).unwrap_or_else(|e| panic!("preset `{name}`:\n{e}"));
         }
+    }
+
+    /// A bare `precedence` block discards the preset, and **says so**.
+    ///
+    /// The warning was constructed correctly all along and then thrown away:
+    /// `resolve` returned `Ok(table)` and dropped every non-error diagnostic,
+    /// so the most destructive thing this crate does to a grammar happened in
+    /// silence. A user saw 35 operators become 5 with a clean `ok:`.
+    #[test]
+    fn a_bare_block_warns_that_it_discarded_the_preset() {
+        let table = table_from(
+            "grammar T;\nuse operators::c_style;\nprecedence {\n  \
+             left \"+\";\n  atom a;\n}\n",
+        )
+        .expect("replacing a preset is legal, just loud");
+
+        assert_eq!(table.operators().count(), 1, "the preset really is gone");
+        assert!(
+            table
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("replaces the preset")),
+            "the warning must survive the success path: {:?}",
+            table.diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// `override` is the spelling that adjusts, and it must stay quiet —
+    /// a warning that fires on the correct spelling is one people learn to
+    /// ignore, and then it stops protecting anyone.
+    #[test]
+    fn override_adjusts_the_preset_without_warning() {
+        let table = table_from(
+            "grammar T;\nuse operators::c_style;\nprecedence override {\n  \
+             right \"**\" above \"*\" -> pow;\n}\n",
+        )
+        .expect("override is the supported spelling");
+
+        assert!(
+            table.operators().count() > 30,
+            "the preset survives: {}",
+            table.operators().count()
+        );
+        assert!(
+            table.diagnostics.is_empty(),
+            "no warning for the right spelling: {:?}",
+            table.diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// Storage is loosest-first; display is tightest-first. The inversion is
+    /// the whole reason this function exists rather than being inlined.
+    #[test]
+    fn display_precedence_inverts_the_stored_index() {
+        let table = table_from(
+            "grammar T;\nprecedence {\n  left \"+\";\n  left \"*\";\n  \
+             right \"^\" -> pow;\n  atom a;\n}\n",
+        )
+        .expect("three tiers");
+
+        assert_eq!(table.tiers.len(), 3);
+        assert_eq!(table.display_precedence(0), 3, "loosest prints highest");
+        assert_eq!(table.display_precedence(2), 1, "tightest prints 1");
+    }
+
+    /// `nh explain` must print what `display_precedence` says, because
+    /// `nh trace` prints the same function's output and the two commands
+    /// previously disagreed about the same operator.
+    #[test]
+    fn explain_prints_the_display_number() {
+        let table = table_from(
+            "grammar T;\nprecedence {\n  left \"+\";\n  left \"*\";\n  \
+             right \"^\" -> pow;\n  atom a;\n}\n",
+        )
+        .expect("three tiers");
+
+        let out = explain(&table);
+        let line_for = |op: &str| {
+            out.lines()
+                .find(|l| l.contains(op))
+                .unwrap_or_else(|| panic!("no line for `{op}` in:\n{out}"))
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse::<usize>()
+                .unwrap()
+        };
+
+        assert_eq!(line_for("+"), table.display_precedence(0));
+        assert_eq!(line_for("^"), table.display_precedence(2));
+        assert!(line_for("+") > line_for("^"), "looser prints higher");
     }
 }

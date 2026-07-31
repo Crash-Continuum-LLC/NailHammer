@@ -24,7 +24,6 @@ USAGE:
     nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
     nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
     nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
-    nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
     nh explain <file.nh> [--source]
     nh --help | --version
 
@@ -277,7 +276,12 @@ fn check(args: &[String]) -> ExitCode {
 
     // Determinism analysis. Warnings are printed either way; `--deny-warnings`
     // makes them fatal so CI can hold the line.
-    let mut diagnostics = lowering.diagnostics.clone();
+    //
+    // The table's own warnings come first because they are about the grammar's
+    // shape rather than its contents — "your preset was discarded" explains
+    // every operator diagnostic that follows it.
+    let mut diagnostics = table.diagnostics.clone();
+    diagnostics.extend(lowering.diagnostics.clone());
     diagnostics.extend(nh_analysis::analyse(&ast, table.atom_rule.as_deref()));
     let errors = diagnostics
         .iter()
@@ -366,7 +370,10 @@ fn build(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    for d in &lowered.diagnostics {
+    // Table warnings alongside lowering's, for the same reason `check` prints
+    // both: a discarded preset is the kind of thing you want to hear about
+    // while building, not after wondering why an operator vanished.
+    for d in table.diagnostics.iter().chain(&lowered.diagnostics) {
         eprint!("{}", d.render(&sm));
         eprintln!();
     }

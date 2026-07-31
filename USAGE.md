@@ -602,13 +602,12 @@ $ nh explain mylang.nh
   1  ^     right    -> pow
 ```
 
-**The numbers count down as binding gets tighter** — tier 1 is the tightest, not
-the loosest, which is the opposite of the usual convention. Read the output as a
-picture of the block: what prints at the top is what you wrote at the top.
+**The numbers count down as binding gets tighter** — tier 1 is the tightest,
+matching a C precedence chart. Read the output as a picture of the block: what
+prints at the top is what you wrote at the top.
 
-> `nh trace` numbers the same tiers the *other* way, from `precedence 0` for the
-> loosest. The two commands disagree, so compare a tier against others in the
-> same output rather than across the two.
+`nh trace` prints the same number for the same tier, so
+`precedence 2` in a trace is the tier `nh explain` shows as `2`.
 
 #### A bare block replaces the preset
 

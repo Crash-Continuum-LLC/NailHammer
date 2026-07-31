@@ -94,8 +94,14 @@ pub struct Arg {
 #[derive(Clone)]
 struct OpInfo {
     role: String,
-    /// Tier index. Higher binds tighter.
+    /// Tier index. Higher binds tighter. This is the binding power the fold
+    /// below climbs with, so it must stay the raw index.
     prec: usize,
+    /// The number to *print*, which is the inverse of `prec` — see
+    /// `OperatorTable::display_precedence`. Kept separately rather than
+    /// recomputed, because trace has no table by the time it renders, and
+    /// recomputing is how the two commands disagreed in the first place.
+    shown_prec: usize,
     fixity: nh_syntax::ast::Fixity,
     /// Operand positions the driver leaves unevaluated.
     lazy: Vec<String>,
@@ -135,6 +141,7 @@ impl<'a> Index<'a> {
                 ops.entry(op.literal.clone()).or_insert_with(Vec::new).push(OpInfo {
                     role: tier.grouped_role.clone().unwrap_or_else(|| op.role.clone()),
                     prec,
+                    shown_prec: table.display_precedence(prec),
                     fixity: tier.fixity,
                     lazy: op.lazy.clone(),
                 });
@@ -447,7 +454,7 @@ fn how(info: &OpInfo) -> String {
         Fixity::Prefix => "prefix",
         Fixity::Postfix => "postfix",
     };
-    format!("{f}, precedence {}", info.prec)
+    format!("{f}, precedence {}", info.shown_prec)
 }
 
 /// `Node` is a tree of owned strings; the fold needs to move an atom out of a
