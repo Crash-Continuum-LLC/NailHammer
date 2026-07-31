@@ -22,7 +22,8 @@ USAGE:
     nh init    [dir] [--name <name>] [--ext <ext>] [--style c|basic]
                [--with loops,functions] [--interpreter] [--force]
     nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
-    nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
+    nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--target <vm>]
+               [--prune [--force]]
     nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
     nh explain <file.nh> [--source]
     nh --help | --version
@@ -52,6 +53,10 @@ OPTIONS:
     --json     check: print diagnostics as JSON on stdout, for editors
     -o <path>  build: write the .pest here instead of alongside the .nh file
     --rust <d> build: also generate views, dispatch, and handler stubs into <d>
+    --target <vm>
+               build: also generate operator emission for a VM. `nh-vm` is the
+               only target today; a role it cannot execute is reported
+               rather than emitted
     --prune    build: remove handler files with no matching grammar alternative
     --source   trace: the program to trace, as text
                explain: print the table as .nh source you could paste
@@ -222,7 +227,7 @@ fn init_cmd(args: &[String]) -> ExitCode {
     // `--rust` never overwrites an existing handler file, so this fills in the
     // generated half without touching them.
     let src_dir = created.pest_path.parent().unwrap_or(&opts.dir).to_path_buf();
-    if emit_rust(&src_dir, &ast, &table, &lowered, false, false) != ExitCode::SUCCESS {
+    if emit_rust(&src_dir, &ast, &table, &lowered, false, false, None) != ExitCode::SUCCESS {
         eprintln!("error: scaffolded codegen failed — this is a bug in nh init");
         return ExitCode::FAILURE;
     }
@@ -332,7 +337,7 @@ fn check(args: &[String]) -> ExitCode {
 }
 
 fn build(args: &[String]) -> ExitCode {
-    let parsed = match parse_args(args, &["--prune", "--force"], &["-o", "--output", "--rust"]) {
+    let parsed = match parse_args(args, &["--prune", "--force"], &["-o", "--output", "--rust", "--target"]) {
         Ok(p) => p,
         Err(e) => return usage_error(e),
     };
@@ -387,6 +392,7 @@ fn build(args: &[String]) -> ExitCode {
             &lowered,
             parsed.has("--prune"),
             parsed.has("--force"),
+            parsed.value("--target"),
         );
     }
 
@@ -412,9 +418,47 @@ fn emit_rust(
     lowered: &nh_lower::Lowered,
     prune: bool,
     force: bool,
+    target: Option<&str>,
 ) -> ExitCode {
     let opts = nh_codegen::Options::default();
-    let generated = nh_codegen::generate(ast, table, lowered, &opts);
+    let mut generated = nh_codegen::generate(ast, table, lowered, &opts);
+
+    // A target turns operator handling from something the author writes into
+    // something generated (VM-DESIGN.md §7.2). A role the machine cannot
+    // execute is reported here, in the tool they are already running, rather
+    // than as generated code that will not compile.
+    if let Some(name) = target {
+        let vm = match name {
+            "nh-vm" => nh_codegen::vm::Target::nh_vm(),
+            other => {
+                eprintln!("error: unknown target `{other}`");
+                eprintln!("help: the only target today is `nh-vm`");
+                return ExitCode::FAILURE;
+            }
+        };
+        match nh_codegen::vm::operators_impl(table, &vm, "crate::Interp") {
+            Ok(contents) => generated.files.push(nh_codegen::GeneratedFile {
+                path: "generated/vm_operators.rs".into(),
+                contents,
+                policy: nh_codegen::Policy::Generated,
+            }),
+            Err(missing) => {
+                for u in &missing {
+                    eprintln!(
+                        "error: `{}` binds the `{}` role, which {} cannot execute",
+                        u.spelling, u.role, vm.name
+                    );
+                }
+                eprintln!(
+                    "{} role(s) have no instruction on `{}`. Remove them from the \
+                     operator table, or extend the VM.",
+                    missing.len(),
+                    vm.name
+                );
+                return ExitCode::FAILURE;
+            }
+        }
+    }
 
     let (mut written, mut kept, mut created) = (0usize, 0usize, 0usize);
 
