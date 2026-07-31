@@ -7,14 +7,13 @@
 #     ./install.sh --version v0.2.0
 #     ./install.sh --prefix /usr/local/bin
 #
-# The default path needs no Rust toolchain and no GitHub account: it takes a
-# prebuilt `nh` from a release over plain HTTP. `gh` is used only as a fallback,
-# which matters while a release is still private -- an authenticated download is
-# the one thing curl cannot do on its own.
+# This exists for the one thing `cargo install nh-cli` cannot do: get you a
+# working `nh` without a Rust toolchain. It takes a prebuilt binary from a
+# release over plain HTTP -- no account, no cargo, no clone.
 #
-# Falls back to building from source when there is no prebuilt binary for the
-# platform, or no way to reach the release. Either way the result is one binary
-# on PATH.
+# If you already have Rust, `cargo install nh-cli` is simpler than this script
+# and does the same job in one line. This falls back to exactly that when there
+# is no prebuilt binary for the platform.
 
 set -euo pipefail
 
@@ -110,8 +109,6 @@ latest_tag() {
     | head -1
 }
 
-gh_ready() { have gh && gh auth status >/dev/null 2>&1; }
-
 # --- install routes ----------------------------------------------------------
 
 # One temporary directory, removed however we leave.
@@ -126,30 +123,16 @@ install_prebuilt() {
   local tag="$TAG"
   if [ -z "$tag" ]; then
     tag="$(latest_tag)" || true
-    if [ -z "$tag" ] && gh_ready; then
-      tag="$(gh release view --repo "$REPO" --json tagName --jq .tagName 2>/dev/null)" || true
-    fi
     [ -n "$tag" ] || { warn "could not find the latest release of $REPO"; return 1; }
   fi
 
   local archive="$WORK/$ASSET.tar.gz"
   info "Downloading $ASSET from $tag"
 
-  # Plain HTTP first. It needs no account and no tooling beyond curl, which is
-  # the whole reason this is the default route.
   if ! fetch "https://github.com/$REPO/releases/download/$tag/$ASSET.tar.gz" > "$archive" 2>/dev/null \
      || [ ! -s "$archive" ]; then
-    # A private release answers 404 to an anonymous request, which is
-    # indistinguishable from a missing asset. `gh` carries a login, so if one
-    # is present it is worth a second attempt before giving up.
-    if gh_ready; then
-      rm -f "$archive"
-      gh release download "$tag" --repo "$REPO" --pattern "$ASSET.tar.gz" --dir "$WORK" 2>/dev/null \
-        || { warn "no asset $ASSET.tar.gz on $tag"; return 1; }
-    else
-      warn "could not download $ASSET.tar.gz from $tag"
-      return 1
-    fi
+    warn "could not download $ASSET.tar.gz from $tag"
+    return 1
   fi
 
   tar xzf "$archive" -C "$WORK" || { warn "the archive did not unpack"; return 1; }
@@ -177,8 +160,7 @@ install_from_source() {
   fi
 
   # Prefer the checkout this script lives in. Building from the local path needs
-  # no network, and installs exactly the tree being read rather than whatever is
-  # on the default branch.
+  # no network, and installs exactly the tree being read rather than a release.
   local here
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -187,8 +169,11 @@ install_from_source() {
     cargo install --path "$here/crates/nh-cli" --locked --force --root "${PREFIX%/bin}" \
       || die "the build failed"
   else
-    info "Building from $REPO (this takes a few minutes)"
-    cargo install --git "https://github.com/$REPO" nh-cli --locked --force --root "${PREFIX%/bin}" \
+    # From the registry, not `--git`. Same crate, but cargo resolves a published
+    # version instead of whatever the default branch happens to be today, and it
+    # needs no git client and no GitHub access at all.
+    info "Building nh-cli from crates.io (this takes a few minutes)"
+    cargo install nh-cli --locked --force --root "${PREFIX%/bin}" \
       || die "the build failed"
   fi
 

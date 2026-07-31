@@ -29,22 +29,25 @@ to write and why. For the reasoning behind the design, see
 ### Getting `nh`
 
 ```console
-$ curl -fsSL https://raw.githubusercontent.com/Crash-Continuum-LLC/NailHammer/main/install.sh | bash
+$ cargo install nh-cli
 $ nh --version
 ```
 
-`install.sh` takes a prebuilt `nh` for your platform and puts it in
-`~/.local/bin`, so it needs no Rust toolchain. It builds from source only when
-there is no prebuilt binary, and tells you what to add to your `PATH` if that
-directory is not on it. `--prefix DIR`, `--version TAG` and `--from-source`
-override each of those in turn; `--help` lists them.
+That puts `nh` in `~/.cargo/bin`, which `rustup` already adds to your `PATH`.
+You need cargo anyway to *build* the project `nh init` creates, so if you are
+here at all this is usually the shortest route.
 
-To build it yourself instead — this puts `nh` in `~/.cargo/bin`, which `rustup`
-already adds to your `PATH`:
+Without a Rust toolchain, or to skip the compile:
 
 ```console
-$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
+$ curl -fsSL https://raw.githubusercontent.com/Crash-Continuum-LLC/NailHammer/main/install.sh | bash
 ```
+
+`install.sh` takes a prebuilt `nh` for your platform and puts it in
+`~/.local/bin`. It falls back to `cargo install` only when there is no prebuilt
+binary, and tells you what to add to your `PATH` if that directory is not on it.
+`--prefix DIR`, `--version TAG` and `--from-source` override each of those in
+turn; `--help` lists them.
 
 Or take a prebuilt binary by hand. Builds exist for macOS (arm64 and x86_64),
 Linux, and Windows:
@@ -862,6 +865,12 @@ pest_derive = { version = "2.8", features = ["grammar-extras"] }
 with no credentials, no cargo configuration, and no access to the NailHammer
 repository. The copy is pinned to the `nh` that generated it, which is the right
 coupling: generated code and its runtime have to agree.
+
+`nh-runtime` is also on crates.io, so `nh-runtime = "0.2"` works if you would
+rather depend on it than carry it. Vendoring stays the default because the
+pinning is the point — a version range can move underneath a project that has
+not changed, and generated code that disagrees with its runtime fails in
+generated code.
 
 That produces two kinds of file, and the difference matters:
 

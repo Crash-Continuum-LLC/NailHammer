@@ -1,38 +1,34 @@
 # Publishing
 
-**Nothing needs publishing for NailHammer to be usable.** That was not true
-before the runtime was vendored, so this document used to describe a required
-step. It now describes an optional one.
+The eight crates are on crates.io as of 0.2.0. Nothing about a *generated
+project* depends on that — it vendors its runtime and needs no registry — so
+publishing changed how people get `nh`, not what their projects carry.
 
 ## How people get it today
 
 ```console
-$ ./install.sh
+$ cargo install nh-cli
+```
+
+Or, with no Rust toolchain, a prebuilt binary:
+
+```console
+$ curl -fsSL https://raw.githubusercontent.com/Crash-Continuum-LLC/NailHammer/main/install.sh | bash
 ```
 
 `install.sh` picks a route rather than asking anyone to: a prebuilt binary from
-the latest release when one exists for the platform, a source build when it does
-not. Both of the routes below are what it runs, and either still works by hand.
+the latest release when one exists for the platform, `cargo install nh-cli` when
+it does not. It exists for the one case the registry cannot serve — getting a
+working `nh` onto a machine with no Rust at all.
 
-```console
-$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
-```
+Tagging `v*` builds those binaries for macOS (arm64 and x86_64), Linux, and
+Windows, and attaches the VS Code extension alongside them.
 
-Or, with no Rust toolchain at all, take a prebuilt binary from a release:
-
-```console
-$ curl -fsSL -O https://github.com/Crash-Continuum-LLC/NailHammer/releases/latest/download/nh-macos-arm64.tar.gz
-```
-
-Tagging `v*` builds those for macOS (arm64 and x86_64), Linux, and Windows, and
-attaches the VS Code extension alongside them.
-
-Both of those were harder while the repository was private: an anonymous
-download answered 404, so the prebuilt route needed `gh` to supply a login, and
-the source route needed `net.git-fetch-with-cli` set because cargo's built-in
-git client cannot use `gh`'s credential helper. Neither applies to a public
-repository. `install.sh` still falls back to `gh` if a download 404s, which is
-what makes it work against a private release without being built around one.
+Both routes were harder while the repository was private: an anonymous download
+answered 404, so the prebuilt route needed `gh` to supply a login, and the
+source route needed `net.git-fetch-with-cli` set because cargo's built-in git
+client cannot use `gh`'s credential helper. Neither applies now, and both
+workarounds are gone from `install.sh`.
 
 ## What a generated project needs
 
@@ -56,27 +52,43 @@ and a floating dependency on `main` can break a project that has not changed.
 To take a newer runtime, re-run `nh init` in a scratch directory and copy
 `vendor/` across.
 
-## If you ever go public
+## Publishing to crates.io
 
-crates.io is a **public** registry — there is no private publishing — so this
-only applies if the project stops being private.
+```console
+$ cargo publish --workspace
+```
 
-Publish in dependency order, since each crate must exist before the next can
-reference it:
+One command. Cargo computes the dependency order itself, so the hand-derived
+chain this document used to carry is no longer something anyone has to follow:
 
 ```
 nh-runtime → nh-syntax → nh-operators → nh-lower → nh-analysis
            → nh-codegen → nh-build → nh-cli
 ```
 
-Then `cargo install nh-cli` replaces the `--git` form, and the vendoring in
-`nh init` could become a `--vendor` flag rather than the default. Neither is
-required: vendoring keeps working, and a project that vendors needs nothing
-from a registry.
+Three things that are not obvious until they bite:
 
-A private registry (Cloudsmith, Artifactory) is the middle path if versioned
-dependencies are wanted without going public. Users would need registry
-credentials, which is the burden vendoring exists to remove.
+**The examples must stay `publish = false`.** They are workspace members, so
+`--workspace` would otherwise push `config-example` and friends to crates.io
+under names nobody wants, permanently.
+
+**Rate limits will stop you partway.** crates.io allows a burst of five *new*
+crates and then one per ten minutes. The first publish took three extra windows
+after the initial five, which looks like a failure and is not — the run stops
+with a `429` naming the exact time to retry, and picking up where it left off is
+just re-running the command.
+
+**Nothing may reach outside its own package.** `nh-cli` embedded the runtime
+with `include_str!("../../nh-runtime/src/lib.rs")`, which resolves in a checkout
+and nowhere else; packaged for a registry it is a tarball with no siblings.
+Seven crates verified and the eighth failed to compile. The table now lives in
+`nh-runtime` behind its `vendor` feature. `cargo publish --workspace --dry-run`
+is what surfaces this class of problem, and it is worth running before any
+release that moved files between crates.
+
+Vendoring in `nh init` could now become a `--vendor` flag rather than the
+default, since `nh-runtime` is fetchable. It has not, and the reason is in
+USAGE.md: the pin is the point.
 
 ## Cutting a release
 
@@ -93,6 +105,14 @@ in `.github/workflows/release.yml`.
 trying to work out which binary they have. The eight `version = "…"` pins in the
 root `Cargo.toml` move together: the workspace's own, and the seven path
 dependencies that must match it.
+
+Since 0.2.0 a release is two artefacts, and the bump is what makes both
+possible. The tag builds the binaries; `cargo publish --workspace` puts the same
+version on crates.io. **A published version can never be reused** — crates.io
+has no self-serve delete outside a narrow window, and yanking withdraws a
+version without freeing the number. So the bump is not bookkeeping before a
+release, it is the release: forgetting it fails the publish outright rather than
+producing something wrong quietly.
 
 The install instructions used to name a tag explicitly, which made them only as
 current as the newest release — `v0.1.0` stayed in them through completion, the

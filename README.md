@@ -166,32 +166,25 @@ for CI, `allow <lint> in <rule>;` for the deliberate cases.
 
 ## Getting started
 
-Install the tool once:
+With Rust already installed:
 
 ```console
-$ ./install.sh
+$ cargo install nh-cli
 ```
 
-That takes a prebuilt `nh` from the latest release and puts it in
-`~/.local/bin`, so it needs no Rust toolchain. It falls back to building from
-source when there is no prebuilt binary for the platform, and tells you what to
-add to your PATH if that directory is not on it. `--prefix DIR` to install
-somewhere else, `--version TAG` to pin a release, `--from-source` to always
-build, `--help` for the rest.
-
-Without a clone, the same thing in one line:
+Without it — `install.sh` takes a prebuilt `nh` from the latest release and puts
+it in `~/.local/bin`, so it needs no toolchain at all:
 
 ```console
 $ curl -fsSL https://raw.githubusercontent.com/Crash-Continuum-LLC/NailHammer/main/install.sh | bash
 ```
 
-The two manual routes it wraps, if you would rather run them yourself:
+It falls back to `cargo install` when there is no prebuilt binary for the
+platform, and tells you what to add to your PATH if `~/.local/bin` is not on it.
+`--prefix DIR` to install somewhere else, `--version TAG` to pin a release,
+`--from-source` to always build, `--help` for the rest.
 
-```console
-$ cargo install --git https://github.com/Crash-Continuum-LLC/NailHammer nh-cli
-```
-
-Or take a prebuilt binary directly. Releases carry `nh` for macOS (arm64 and
+Or take a prebuilt binary by hand. Releases carry `nh` for macOS (arm64 and
 x86_64), Linux, and Windows — the last of which `install.sh` does not cover:
 
 ```console
@@ -329,10 +322,11 @@ are not frozen. Most of what has moved recently moved *because* the tool was use
 to build something and the design turned out to be wrong — that is the intent,
 and it is why the warning at the top is there.
 
-**Not published, and it does not need to be.** `nh init` vendors the runtime
-into the project it creates, so a generated project depends on pest and nothing
-else — no credentials, no cargo configuration, no registry. Install the tool
-itself with `./install.sh`. See [PUBLISHING.md](PUBLISHING.md).
+**On crates.io, and a generated project still does not need it.** `nh init`
+vendors the runtime into the project it creates, so what you scaffold depends on
+pest and nothing else — no registry, no cargo configuration, no access to this
+repository. Publishing changed how you get `nh`, not what your project carries.
+See [PUBLISHING.md](PUBLISHING.md).
 
 Known gaps are tracked in [DESIGN.md §11](DESIGN.md), openly — including the
 ones found by using the tool on itself.
