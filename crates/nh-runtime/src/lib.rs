@@ -21,6 +21,11 @@ pub mod ops;
 pub mod shared;
 pub mod source;
 
+// This crate's own source as text, for `nh init` to write into a scaffolded
+// project. Gated because only `nh-cli` needs it, and not vendored itself.
+#[cfg(feature = "vendor")]
+pub mod vendor;
+
 pub use ctx::Ctx;
 pub use diagnostic::{Diagnostic, Severity};
 pub use error::{Error, Result};

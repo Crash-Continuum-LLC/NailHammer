@@ -72,6 +72,7 @@ dependencies = [
  "nh-codegen",
  "nh-lower",
  "nh-operators",
+ "nh-runtime",
  "nh-syntax",
  "pest",
  "pest_meta",

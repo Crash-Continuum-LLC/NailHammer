@@ -18,31 +18,15 @@
 use std::io;
 use std::path::Path;
 
-/// `(path under vendor/nh-runtime/, contents)`.
+/// `(path under vendor/nh-runtime/, contents)`, owned by the runtime.
 ///
-/// Listed one by one rather than walked at build time, so adding a module to
-/// `nh-runtime` without adding it here is a missing-file compile error rather
-/// than a project that scaffolds and then does not build.
-const SOURCES: &[(&str, &str)] = &[
-    ("src/lib.rs", include_str!("../../nh-runtime/src/lib.rs")),
-    ("src/ctx.rs", include_str!("../../nh-runtime/src/ctx.rs")),
-    (
-        "src/diagnostic.rs",
-        include_str!("../../nh-runtime/src/diagnostic.rs"),
-    ),
-    ("src/error.rs", include_str!("../../nh-runtime/src/error.rs")),
-    ("src/name.rs", include_str!("../../nh-runtime/src/name.rs")),
-    ("src/node.rs", include_str!("../../nh-runtime/src/node.rs")),
-    ("src/ops.rs", include_str!("../../nh-runtime/src/ops.rs")),
-    (
-        "src/shared.rs",
-        include_str!("../../nh-runtime/src/shared.rs"),
-    ),
-    (
-        "src/source.rs",
-        include_str!("../../nh-runtime/src/source.rs"),
-    ),
-];
+/// This used to be an `include_str!` table reaching across the workspace into
+/// `../../nh-runtime/src/`. That path exists in a checkout and nowhere else:
+/// packaged for a registry, this crate is a tarball with no sibling
+/// directories, and every include failed to compile. A crate can always read
+/// its own files, so the table lives in `nh-runtime` behind its `vendor`
+/// feature and this crate reads it from there.
+use nh_runtime::vendor::SOURCES;
 
 /// A standalone manifest for the vendored copy.
 ///
@@ -82,6 +66,17 @@ pest = "2.8"
 # `Shared<T>`, so no signature moves. See `src/shared.rs`.
 [features]
 threadsafe = []
+
+# Declared, never enabled. Upstream, `vendor` exposes the runtime's source text
+# so `nh init` can write this directory; the module that does it is the one
+# file deliberately not copied here, because a vendored runtime has no use for
+# a second copy of itself. The feature has to be *declared* anyway: `lib.rs`
+# still carries `#[cfg(feature = "vendor")]`, and cargo warns about a cfg on a
+# feature the manifest does not know about. A warning in generated code is a
+# defect in the generator, so the manifest knows about it.
+#
+# Do not turn it on: `src/vendor.rs` is not here.
+vendor = []
 "#
     )
 }
@@ -108,32 +103,33 @@ pub fn write(root: &Path, version: &str) -> io::Result<Vec<String>> {
 mod tests {
     use super::*;
 
-    /// Every module `lib.rs` declares must be vendored, or the copy does not
-    /// compile. Checked against the real `lib.rs` rather than a list, so adding
-    /// a module to the runtime and forgetting this file fails here.
+    /// Every `#[cfg(feature = "..")]` in the vendored source must name a
+    /// feature the vendored manifest declares.
+    ///
+    /// Cargo warns on a cfg referring to a feature the manifest does not know
+    /// about, and that warning surfaces in the user's project, about a file
+    /// the user did not write and cannot fix. Adding a gated module to
+    /// `nh-runtime` and not declaring it here is the way that happens — it is
+    /// how `vendor` itself got through the first time.
     #[test]
-    fn every_module_is_vendored() {
-        let lib = SOURCES
-            .iter()
-            .find(|(p, _)| *p == "src/lib.rs")
-            .expect("lib.rs is vendored")
-            .1;
+    fn every_gated_feature_is_declared_in_the_manifest() {
+        let m = manifest("0.2.0");
 
-        let declared: Vec<&str> = lib
-            .lines()
-            .filter_map(|l| l.trim().strip_prefix("pub mod "))
-            .filter_map(|l| l.strip_suffix(';'))
-            .collect();
-
-        assert!(!declared.is_empty(), "lib.rs declares no modules?");
-
-        for m in declared {
-            let want = format!("src/{m}.rs");
-            assert!(
-                SOURCES.iter().any(|(p, _)| *p == want),
-                "`{m}` is declared in nh-runtime's lib.rs but not vendored; \
-                 add it to SOURCES in crates/nh-cli/src/vendor.rs"
-            );
+        for (path, src) in SOURCES {
+            for line in src.lines() {
+                let Some(rest) = line.trim().strip_prefix("#[cfg(feature = \"") else {
+                    continue;
+                };
+                let Some(feature) = rest.split('"').next() else {
+                    continue;
+                };
+                assert!(
+                    m.contains(&format!("\n{feature} = [")),
+                    "{path} gates on feature `{feature}`, which the vendored \
+                     manifest does not declare — the generated project will \
+                     warn about an unexpected cfg"
+                );
+            }
         }
     }
 
@@ -147,14 +143,28 @@ mod tests {
         assert!(m.contains("pest = "), "{m}");
     }
 
-    /// Nothing vendored may reference the NailHammer workspace.
+    /// What `write` actually produces is a manifest plus every entry in the
+    /// table. The table's own invariants — that it covers each module `lib.rs`
+    /// declares, and that nothing in it reaches back into the toolkit — are
+    /// tested where the table lives, in `nh-runtime`'s `vendor` module.
     #[test]
-    fn the_sources_are_self_contained() {
-        for (path, src) in SOURCES {
-            assert!(
-                !src.contains("nh_syntax") && !src.contains("nh_codegen"),
-                "{path} reaches outside the runtime"
-            );
+    fn write_produces_a_manifest_and_every_source() {
+        let dir = std::env::temp_dir().join(format!("nh-vendor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let written = write(&dir, "0.2.0").expect("vendoring writes");
+
+        assert!(written.contains(&"vendor/nh-runtime/Cargo.toml".to_string()));
+        assert_eq!(
+            written.len(),
+            SOURCES.len() + 1,
+            "one manifest plus every source: {written:?}"
+        );
+        for (rel, _) in SOURCES {
+            let path = dir.join("vendor/nh-runtime").join(rel);
+            assert!(path.is_file(), "{rel} was not written");
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

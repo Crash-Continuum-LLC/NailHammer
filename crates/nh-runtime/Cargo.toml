@@ -27,3 +27,9 @@ pest_vm = { version = "2.8", features = ["grammar-extras"] }
 # atomics it never needs. See `src/shared.rs` — flipping it changes no
 # signatures, because the generated code and your handlers both say `Shared<T>`.
 threadsafe = []
+
+# Exposes this crate's own source text as `vendor::SOURCES`, which is how
+# `nh init` writes `vendor/nh-runtime/` into a scaffolded project. Only
+# `nh-cli` turns it on: without the gate, every generated project would carry
+# a copy of the runtime's source inside the runtime.
+vendor = []

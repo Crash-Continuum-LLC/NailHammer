@@ -2,6 +2,11 @@
 name = "config-example"
 description = "Worked NailHammer interpreter: one handler file per grammar rule"
 version = "0.1.0"
+# Not published. These are worked examples that exist to be read and to be
+# rebuilt by CI, and their path dependencies on the toolkit would have to become
+# version dependencies for a registry to accept them at all. `publish = false`
+# also means `cargo publish --workspace` cannot sweep them up by accident.
+publish = false
 edition = "2021"
 
 build = "build.rs"

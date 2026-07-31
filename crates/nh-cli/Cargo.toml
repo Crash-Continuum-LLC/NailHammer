@@ -31,4 +31,8 @@ pest_vm = { version = "2.8", features = ["grammar-extras"] }
 nh-codegen.workspace = true
 nh-analysis.workspace = true
 
+# `vendor` exposes the runtime's own source text, which `nh init` writes into
+# each scaffolded project. This crate is the only thing that turns it on.
+nh-runtime = { workspace = true, features = ["vendor"] }
+
 [dev-dependencies]
