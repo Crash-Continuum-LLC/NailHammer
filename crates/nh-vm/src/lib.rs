@@ -43,5 +43,8 @@ pub mod value;
 
 pub use machine::{Machine, Step};
 pub use op::{Cmp, ExtCx, Extension, Flow, NoExt, Op, Reg};
-pub use store::{DefaultStore, LocalStore, RwLockStore, SharedStore, Slot};
+pub use store::{
+    AtomicNumStore, BankLockStore, DefaultStore, LocalStore, MutexStore, RwLockStore, SharedStore,
+    Slot,
+};
 pub use value::Value;

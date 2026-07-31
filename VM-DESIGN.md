@@ -792,20 +792,60 @@ pub struct Machine<X: Extension, S: SharedStore = DefaultStore> { .. }
 A generic parameter rather than a trait object, so the default costs no virtual
 call, and a program that never shares anything never touches it.
 
-**Default:** per-slot, with reads wait-free — an atomically swapped pointer per
-slot rather than a lock, so readers never block readers or writers. That suits
-the common shape, where globals are read far more often than written.
+#### Measured, not predicted
 
-**What the default should not be:** an `RwLock` per slot, which is the obvious
-answer and a poor one — readers contend with each other on the atomic counter
-even when nothing writes, and the guard is fatter than the value it protects for
-anything number-sized.
+This section previously asserted three things and called them predictions.
+`crates/nh-vm/examples/bench_store.rs` now measures them. Apple M4 (4P + 6E),
+200k ops/thread over 64 slots, throughput in M ops/s — **ratios matter, absolute
+rates do not**:
 
-**The honest gap:** whether small values live inline in an atomic word or behind
-a pointer like everything else is a representation decision with a real
-performance consequence, and it is the kind of question that is settled by
-measuring a prototype rather than by more paragraphs here. This document should
-name the seam and stop.
+| threads / mix | bank RwLock | per-slot RwLock | per-slot Mutex | per-slot AtomicU64 |
+|---|---|---|---|---|
+| 1 · 95% read | 96 | 145 | 181 | **227** |
+| 4 · 95% read | 50 | 109 | 136 | **600** |
+| 8 · 95% read | 32 | 61 | 68 | **558** |
+| 8 · 50% read | 36 | 55 | 52 | **99** |
+| 4 · one slot, 95% read | 48 | 44 | 65 | **1812** |
+
+**Claim 1 — a bank-wide lock serialises everything: half right.** It is
+consistently worst and the gap widens with threads (2.2× behind per-slot at 4
+threads, 1.9× at 8), but it is not catastrophic, and at 2 threads on read-heavy
+work it actually *beats* per-slot `RwLock` — one `RwLock` still admits
+concurrent readers, so the bank is only a bottleneck once writes are frequent
+enough to exclude them. The claim was directionally right and rhetorically
+overstated.
+
+**Claim 2 — per-slot `RwLock` is a poor default: confirmed, and it is the
+counter-intuitive one.** A per-slot `Mutex` matches or beats it *on read-heavy
+work*, which is the workload `RwLock` exists for — 136 vs 109 at 4 threads, 181
+vs 145 single-threaded. The reason is the one predicted: an `RwLock` read is a
+write, because it bumps a reader counter, so two readers of one slot contend on
+a cache line while a `Mutex` at least does not pretend otherwise. Reaching for
+`RwLock` because a workload is read-heavy is exactly wrong here.
+
+**Claim 3 — inline small values are worth it: confirmed, emphatically.** An
+`AtomicU64` per slot is 4–6× faster in the ordinary cases and **41× faster**
+when several threads read one hot slot, where a lock serialises and an atomic
+load does not. That single row is the case a shared-globals VM will meet
+constantly — a counter, a flag, a shared accumulator — and it is where locking
+costs the most.
+
+#### What this changes
+
+**`DefaultStore` becomes `MutexStore`, not `RwLockStore`**, on the measurement
+rather than the intuition. It is the best *safe, general* store here: it holds
+any `Value`, needs no unsafe, and beats the obvious choice.
+
+**The real target is a hybrid**, and the numbers now justify building one: small
+values inline in an atomic word, heap values behind a pointer. `AtomicNumStore`
+is not a proposal — it cannot hold a string — but it establishes that the
+inline path is worth 4–40× and therefore worth the complexity of a tagged
+representation. That is the next piece of VM work, and it is now a decision
+backed by data rather than a preference.
+
+**What the benchmark does not settle:** whether a hybrid keeps the atomic
+path's advantage once a tag check is in the loop, and what a lock-free store
+costs for values that need reclamation. Both need the hybrid to exist first.
 
 #### What does not change
 

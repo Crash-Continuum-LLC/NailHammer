@@ -132,7 +132,127 @@ impl SharedStore for LocalStore {
     }
 }
 
-/// The default is the baseline until measurement says otherwise. Naming it
-/// separately means changing the default later is one line here rather than an
-/// edit at every use site.
-pub type DefaultStore = RwLockStore;
+/// One lock over the whole table — **the thing this design exists to avoid.**
+///
+/// Present so the cost of getting it wrong can be measured rather than
+/// asserted. VM-DESIGN.md §7.4 claims a bank-wide lock "serialises every
+/// program against every other for the sake of one slot"; `examples/bench_store`
+/// puts a number on that claim.
+#[derive(Debug)]
+pub struct BankLockStore {
+    slots: RwLock<Vec<Value>>,
+}
+
+impl BankLockStore {
+    pub fn new(n: usize) -> Self {
+        BankLockStore {
+            slots: RwLock::new(vec![Value::Nil; n]),
+        }
+    }
+}
+
+impl SharedStore for BankLockStore {
+    fn load(&self, slot: Slot) -> Value {
+        self.slots.read().expect("poisoned")[slot as usize].clone()
+    }
+
+    fn store(&self, slot: Slot, value: Value) {
+        self.slots.write().expect("poisoned")[slot as usize] = value;
+    }
+
+    fn len(&self) -> usize {
+        self.slots.read().expect("poisoned").len()
+    }
+}
+
+/// Per-slot `Mutex` rather than `RwLock`.
+///
+/// The interesting comparison against [`RwLockStore`]: an `RwLock` read still
+/// writes — it increments a reader counter — so two readers of the *same* slot
+/// contend on a cache line even though neither mutates the value. If that cost
+/// is real, this should not be much worse on read-heavy work despite excluding
+/// concurrent readers outright.
+#[derive(Debug)]
+pub struct MutexStore {
+    slots: Vec<std::sync::Mutex<Value>>,
+}
+
+impl MutexStore {
+    pub fn new(n: usize) -> Self {
+        MutexStore {
+            slots: (0..n).map(|_| std::sync::Mutex::new(Value::Nil)).collect(),
+        }
+    }
+}
+
+impl SharedStore for MutexStore {
+    fn load(&self, slot: Slot) -> Value {
+        self.slots[slot as usize].lock().expect("poisoned").clone()
+    }
+
+    fn store(&self, slot: Slot, value: Value) {
+        *self.slots[slot as usize].lock().expect("poisoned") = value;
+    }
+
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+}
+
+/// Numbers only, one `AtomicU64` per slot. **Lock-free in both directions.**
+///
+/// This is the ceiling, and it exists to answer the representation question
+/// VM-DESIGN.md §7.4 left open: *whether small values live inline in an atomic
+/// word or behind a pointer like everything else.* An `f64` fits in a `u64`, so
+/// for numeric globals there need be no lock, no guard and no allocation at all.
+///
+/// It cannot hold a string, which is exactly what makes it a measurement rather
+/// than a proposal: it says what the inline representation would be worth, and
+/// a real store would need a hybrid to capture it.
+#[derive(Debug)]
+pub struct AtomicNumStore {
+    slots: Vec<std::sync::atomic::AtomicU64>,
+}
+
+impl AtomicNumStore {
+    pub fn new(n: usize) -> Self {
+        AtomicNumStore {
+            slots: (0..n).map(|_| std::sync::atomic::AtomicU64::new(f64::to_bits(0.0))).collect(),
+        }
+    }
+}
+
+impl SharedStore for AtomicNumStore {
+    fn load(&self, slot: Slot) -> Value {
+        use std::sync::atomic::Ordering;
+        Value::Num(f64::from_bits(self.slots[slot as usize].load(Ordering::Acquire)))
+    }
+
+    /// A non-number is dropped rather than stored. Acceptable only because this
+    /// type exists to be benchmarked, never to be a default.
+    fn store(&self, slot: Slot, value: Value) {
+        use std::sync::atomic::Ordering;
+        if let Value::Num(n) = value {
+            self.slots[slot as usize].store(f64::to_bits(n), Ordering::Release);
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+}
+
+/// The default, chosen by measurement rather than intuition.
+///
+/// `examples/bench_store` says a per-slot `Mutex` matches or beats a per-slot
+/// `RwLock` **even on read-heavy work** — 136 vs 109 M ops/s at four threads,
+/// 181 vs 145 single-threaded on an M4. An `RwLock` read is a write: it bumps a
+/// reader counter, so two readers of one slot contend on a cache line, and the
+/// guard is fatter than the `f64` it protects. Reaching for `RwLock` because a
+/// workload reads a lot is exactly wrong here.
+///
+/// This is the best *safe, general* store in this module: it holds any `Value`,
+/// needs no unsafe, and is per slot. [`AtomicNumStore`] is 4–40× faster and
+/// cannot hold a string, which is why the next step is a hybrid rather than a
+/// swap. See VM-DESIGN.md §7.4.
+pub type DefaultStore = MutexStore;
