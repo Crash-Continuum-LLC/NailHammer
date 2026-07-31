@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/nh-syntax", "crates/nh-operators", "crates/nh-lower", "crates/nh-analysis", "crates/nh-codegen", "crates/nh-build", "crates/nh-runtime", "crates/nh-cli", "examples/config", "examples/calc-interp", "examples/basic-interp", "examples/bytecode"]
+members = ["crates/nh-syntax", "crates/nh-operators", "crates/nh-lower", "crates/nh-analysis", "crates/nh-codegen", "crates/nh-build", "crates/nh-runtime", "crates/nh-vm", "crates/nh-cli", "examples/config", "examples/calc-interp", "examples/basic-interp", "examples/bytecode"]
 resolver = "2"
 
 [workspace.package]
