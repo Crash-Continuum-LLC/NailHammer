@@ -10,15 +10,13 @@
 //! Note the body is emitted **once**, even though it may run many times — the
 //! opposite of the interpreter, where `.eval()` is called once per execution.
 
-use std::rc::Rc;
-
-use nh_runtime::{Ctx, Result};
+use nh_runtime::{Ctx, Result, Shared};
 
 use crate::generated::ast::Stmt;
 use crate::generated::dispatch::Eval;
 use crate::Interp;
 
-pub fn run(host: &mut Interp, _cond: (), body: &Rc<Stmt>, cx: &mut Ctx) -> Result<()> {
+pub fn run(host: &mut Interp, _cond: (), body: &Shared<Stmt>, cx: &mut Ctx) -> Result<()> {
     // `cond` is already on the stack: its code was emitted before this ran.
     let jump = host.emit_jump_if_false();
     body.eval(host, cx)?;          // emits the body at this point in the stream

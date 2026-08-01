@@ -8,9 +8,8 @@
 //!   are not expressions; there is nothing to evaluate. It is how a handler
 //!   asks for the node's *structure* instead of its value.
 
-use std::rc::Rc;
 
-use nh_runtime::{Ctx, Name, Result};
+use nh_runtime::{Ctx, Name, Result, Shared};
 
 use crate::generated::ast::{Line, ParamList};
 use crate::{Function, Interp, Value};
@@ -18,8 +17,8 @@ use crate::{Function, Interp, Value};
 pub fn run(
     host: &mut Interp,
     name: &Name,
-    params: Option<&Rc<ParamList>>,
-    body: &[Rc<Line>],
+    params: Option<&Shared<ParamList>>,
+    body: &[Shared<Line>],
     cx: &mut Ctx,
 ) -> Result<Value> {
     if host.funcs.contains_key(name.key()) {

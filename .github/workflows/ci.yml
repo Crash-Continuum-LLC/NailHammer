@@ -44,6 +44,14 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # `Shared<T>` is `Rc` by default and `Arc` under `threadsafe`, so a
+      # handler that spells `Rc` compiles by luck and breaks the moment anyone
+      # turns the feature on. Every worked example named `Rc` directly until it
+      # was checked -- the default build could never have caught it, because
+      # the two are the same type there.
+      - name: The examples survive a thread-safe build
+        run: cargo build --workspace --all-targets --features nh-runtime/threadsafe
+
       # `nh init` scaffolds a project that must compile and run. These are
       # `#[ignore]`d locally because they invoke cargo recursively and are slow.
       - name: Scaffold end-to-end

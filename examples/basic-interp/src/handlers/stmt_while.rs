@@ -10,9 +10,7 @@
 //! The expression itself was folded by precedence when the tree was built, so
 //! re-testing costs an evaluation and not a re-parse.
 
-use std::rc::Rc;
-
-use nh_runtime::{Ctx, Result};
+use nh_runtime::{Ctx, Result, Shared};
 
 use crate::generated::ast::{Expr, Line};
 use crate::generated::dispatch::{Eval, Values};
@@ -20,8 +18,8 @@ use crate::{Interp, Value};
 
 pub fn run(
     host: &mut Interp,
-    cond: &Rc<Expr>,
-    body: &[Rc<Line>],
+    cond: &Shared<Expr>,
+    body: &[Shared<Line>],
     cx: &mut Ctx,
 ) -> Result<Value> {
 'outer: while {

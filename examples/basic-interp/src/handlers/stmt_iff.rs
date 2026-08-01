@@ -6,15 +6,13 @@
 //! that, `IF n > 0 THEN GOTO 10` would jump unconditionally and never
 //! terminate.
 
-use std::rc::Rc;
-
-use nh_runtime::{Ctx, Result};
+use nh_runtime::{Ctx, Result, Shared};
 
 use crate::generated::ast::Stmt;
 use crate::generated::dispatch::{Eval, Values};
 use crate::{Interp, Value};
 
-pub fn run(host: &mut Interp, cond: Value, body: &Rc<Stmt>, cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, cond: Value, body: &Shared<Stmt>, cx: &mut Ctx) -> Result<Value> {
     // `truthy`, not a match on a false literal: the language has one definition
     // of truth and it lives in `Semantics`, shared with `AND`/`OR`/`NOT`.
     if !host.truthy(&cond) {

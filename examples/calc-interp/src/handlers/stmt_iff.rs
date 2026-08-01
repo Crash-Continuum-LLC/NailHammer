@@ -7,15 +7,13 @@
 //! easily as run it; calling `.eval(..)` is what makes it happen — and an `if`
 //! whose condition is false never does.
 
-use std::rc::Rc;
-
-use nh_runtime::{Ctx, Result};
+use nh_runtime::{Ctx, Result, Shared};
 
 use crate::generated::ast::Stmt;
 use crate::generated::dispatch::{Eval, Values};
 use crate::{Interp, Value};
 
-pub fn run(host: &mut Interp, cond: Value, body: &Rc<Stmt>, cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, cond: Value, body: &Shared<Stmt>, cx: &mut Ctx) -> Result<Value> {
     // `truthy` and not a match on `Value::Bool(false)`: the language has one
     // definition of truth, and it lives in `Semantics`. The short-circuit
     // defaults for `&&` and `||` already use it, so writing the test out by

@@ -8,9 +8,9 @@ use basic_interp::generated::ast;
 use basic_interp::{BasicParser, Rule};
 use nh_runtime::FileId;
 use pest::Parser;
-use std::rc::Rc;
+use nh_runtime::Shared;
 
-fn build(source: &str) -> Rc<ast::Program> {
+fn build(source: &str) -> Shared<ast::Program> {
     let pair = BasicParser::parse(Rule::program, source)
         .unwrap_or_else(|e| panic!("{source}\n{e}"))
         .next()
@@ -48,7 +48,7 @@ fn a_loop_body_is_owned_and_shareable() {
     assert_eq!(l.var.key(), "i");
 
     // Kept past the borrow it came from, which a `Deferred` could never be.
-    let kept: Vec<Rc<ast::Line>> = l.body.clone();
+    let kept: Vec<Shared<ast::Line>> = l.body.clone();
     drop(p);
     assert_eq!(kept.len(), 2);
 }

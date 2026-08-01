@@ -18,9 +18,8 @@
 //! interpreter and run them long after returning, which is what makes
 //! subroutines and jumps expressible at all.
 
-use std::rc::Rc;
 
-use nh_runtime::{Ctx, Name, Result};
+use nh_runtime::{Ctx, Name, Result, Shared};
 
 use crate::generated::ast::Line;
 use crate::generated::dispatch::Eval;
@@ -35,7 +34,7 @@ pub fn run(
     from: Value,
     to: Value,
     step: Option<Value>,
-    body: &[Rc<Line>],
+    body: &[Shared<Line>],
     closing: Option<&Name>,
     cx: &mut Ctx,
 ) -> Result<Value> {
