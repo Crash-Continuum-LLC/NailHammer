@@ -27,7 +27,7 @@ reserved from IDENT { "let" }
 // SOI/EOI anchor the entry rule. Whitespace is skipped *between* elements and
 // never before the first one, so without SOI a program that opens with a blank
 // line or a comment does not parse — silently, and only for some inputs.
-rule program = SOI stmt+ EOI;
+rule program = SOI body:stmt+ EOI -> program;
 
 rule stmt
   = "let" name:IDENT "=" value:expr ";" -> let

@@ -1,4 +1,4 @@
 grammar Diamond;
 import "left.nh";
 import "right.nh";
-rule start = SHARED_ID;
+rule start = id:SHARED_ID -> start;

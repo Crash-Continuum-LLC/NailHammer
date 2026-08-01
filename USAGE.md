@@ -393,6 +393,32 @@ the label does not need to repeat the rule name: `-> let` on `rule stmt` gives
 **`-> pass`** is a transparent passthrough. No handler is generated; the
 alternative evaluates to whatever its single child does.
 
+> **A transparent alternative must produce exactly one node**, because it has
+> none of its own and has to stand in for something. Leaving off a label — or
+> writing `-> pass` — is only legal when the body yields one node, from one
+> rule. Two things count as a node that are easy to miss:
+>
+> * **A token is a node.** `body:stmt EOL+ -> pass` looks like it names one
+>   child, but `EOL` produces a pair too, so the alternative yields two or more.
+> * **A repetition is any number of them.** `rule block = stmt*;` yields none,
+>   one, or many — never reliably one.
+>
+> Both are rejected by `nh check`, which names the count and the rule. The fix
+> is always the same: give the alternative a `-> label` so it gets a node of its
+> own.
+>
+> ```text
+> error: this alternative of `line` has `-> pass`, but produces 2 or more nodes
+>  --> basic.nh:8:13
+>   |
+> 8 | rule line = body:stmt EOL+ -> pass;
+>   |             ^^^^^^^^^^^^^^^^^^^^^^
+> help: an alternative with no label stands in for exactly one rule's node; give this one a `-> label` so it gets a node of its own
+> ```
+>
+> Literals and lookaheads produce nothing, so `"(" inner:expr ")" -> pass` is
+> one node and perfectly fine.
+
 **`place`** marks an alternative as assignable. It is only legal after a label,
 which is what keeps it distinguishable from a rule reference named `place`.
 

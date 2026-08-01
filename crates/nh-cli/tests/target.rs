@@ -27,7 +27,7 @@ precedence {
     prefix "-";
     atom atom;
 }
-rule program = SOI stmt+ EOI;
+rule program = SOI body:stmt+ EOI -> program;
 rule stmt = "print" value:expr ";" -> print;
 rule atom = primary;
 rule primary = value:NUMBER -> num | name:IDENT -> var place;

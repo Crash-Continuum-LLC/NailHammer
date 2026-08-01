@@ -14,7 +14,7 @@ grammar G;
 skip WS = " " | "\n";
 token ALPHA = @ "a".."z";
 token IDENT = @ ALPHA+;
-rule top = SOI item* EOI;
+rule top = SOI items:item* EOI -> doc;
 rule item = name:IDENT ";" -> named | "?" -> unknown;
 "#;
 
@@ -24,7 +24,7 @@ grammar G;
 skip WS = " " | "\n";
 token ALPHA = @ "a".."z";
 token IDENT = @ ALPHA+;
-rule top = SOI item* EOI;
+rule top = SOI items:item* EOI -> doc;
 rule item = name:IDENT ";" -> other;
 "#;
 

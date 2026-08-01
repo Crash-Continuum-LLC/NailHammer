@@ -23,7 +23,7 @@ reserved from IDENT { "let" "if" "else" "return" "true" "false" }
 // rule is the grammar author's job, exactly as in hand-written pest: implicit
 // skipping happens *between* elements, so without a leading SOI a program that
 // starts with a blank line will not parse.
-rule program = SOI stmt+ EOI;
+rule program = SOI body:stmt+ EOI -> program;
 
 rule stmt
   = "let" name:IDENT "=" value:expr ";"        -> let
@@ -34,11 +34,13 @@ rule stmt
 
 rule else_tail = "else" body:block -> pass;
 
-rule block = "{" body:stmt* "}" -> pass;
+// `-> block` rather than `-> pass`: `stmt*` is any number of nodes, and a
+// transparent rule has to stand in for exactly one.
+rule block = "{" body:stmt* "}" -> block;
 
 // The fold target for the operator driver. Postfix access is a grammar suffix
 // chain rather than an operator, so `-a.b` is `-(a.b)` by construction.
-rule atom = primary suffix*;
+rule atom = base:primary suffixes:suffix* -> access;
 
 rule suffix
   = "(" args:arg_list? ")" -> call
@@ -46,7 +48,12 @@ rule suffix
   | "." name:IDENT         -> field place
   ;
 
-rule arg_list = expr ("," expr)*;
+// A separator rule rather than `args:expr ("," args:expr)*`, because the
+// repetition is what makes the tail a list — the head and tail are bound
+// separately and joined by the handler.
+rule arg_list = first:expr rest:more_arg* -> args;
+
+rule more_arg = "," value:expr -> next;
 
 rule primary
   = value:NUMBER       -> num

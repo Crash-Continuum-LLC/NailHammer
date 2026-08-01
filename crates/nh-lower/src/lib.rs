@@ -177,6 +177,77 @@ impl Cardinality {
     }
 }
 
+/// How many pest pairs an expression produces.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Nodes {
+    min: usize,
+    /// `None` is unbounded — what `*` and `+` produce.
+    max: Option<usize>,
+}
+
+impl Nodes {
+    fn exactly(n: usize) -> Nodes {
+        Nodes {
+            min: n,
+            max: Some(n),
+        }
+    }
+
+    /// Sequence: the counts add.
+    fn then(self, next: Nodes) -> Nodes {
+        Nodes {
+            min: self.min + next.min,
+            max: self.max.zip(next.max).map(|(a, b)| a + b),
+        }
+    }
+
+    /// Choice: the range widens to cover both branches.
+    fn or(self, other: Nodes) -> Nodes {
+        Nodes {
+            min: self.min.min(other.min),
+            max: match (self.max, other.max) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                _ => None,
+            },
+        }
+    }
+
+    /// Under a repetition, with `min` copies guaranteed.
+    ///
+    /// Something that produces no node produces no node however often it
+    /// repeats — which is what keeps `("," | " ")*` from looking unbounded.
+    fn repeated(self, min: usize) -> Nodes {
+        if self.max == Some(0) {
+            return Nodes::exactly(0);
+        }
+        Nodes { min, max: None }
+    }
+}
+
+/// A reference that will produce a pest pair.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Producer {
+    Rule(String),
+    Token(String),
+}
+
+/// What an unlabelled alternative can stand in for.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Transparency {
+    /// Exactly one node, always this rule's. The only workable case.
+    Yields(String),
+    /// Matches without producing a node for anything to stand in for.
+    NoNode,
+    /// More or fewer than one node, so no single child is *the* node.
+    ManyNodes(Nodes),
+    /// One node, but a token's — and a token has no builder to delegate to.
+    OnlyToken(String),
+    /// One node, but not always the same rule's.
+    Ambiguous(Vec<String>),
+    /// Not determinable — a silent rule's inlined body, or an unknown name.
+    Unknown,
+}
+
 /// Lowers a resolved grammar and operator table into pest source.
 pub fn lower(ast: &Ast, table: &OperatorTable) -> Result<Lowered, Errors> {
     let mut diagnostics = Vec::new();
@@ -846,6 +917,7 @@ impl<'a> Ctx<'a> {
             match &alt.label {
                 // `-> pass` is transparent: no sub-rule, no handler.
                 Some(l) if l.value == "pass" => {
+                    self.check_transparent(&rule.name.value, alt);
                     alts.push(self.expr(&alt.body, false));
                     variants.push(LoweredVariant::Transparent {
                         child: self.sole_rule(&alt.body),
@@ -863,6 +935,7 @@ impl<'a> Ctx<'a> {
                     alts.push(sub);
                 }
                 None => {
+                    self.check_transparent(&rule.name.value, alt);
                     alts.push(self.expr(&alt.body, false));
                     variants.push(LoweredVariant::Transparent {
                         child: self.sole_rule(&alt.body),
@@ -927,42 +1000,247 @@ impl<'a> Ctx<'a> {
     /// The single *rule* a transparent alternative yields, if there is one.
     ///
     /// `"(" inner:expr ")"` yields an `expr`; `primary` yields a `primary`. An
-    /// alternative that names no rule, or more than one, yields `None` — the
-    /// AST cannot give it a type, and generation says so rather than guessing.
+    /// alternative that yields anything else yields `None`, and
+    /// [`check_transparent`](Self::check_transparent) reports why — the two
+    /// agree by construction, because this is that check's verdict.
     fn sole_rule(&self, e: &Expr) -> Option<String> {
-        let mut found = None;
-        let mut count = 0;
-        self.walk_rules(e, &mut |name| {
-            count += 1;
-            if found.is_none() {
-                found = Some(name.to_string());
-            }
-        });
-        if count == 1 {
-            found
-        } else {
-            None
+        match self.transparency(e) {
+            Transparency::Yields(name) => Some(name),
+            _ => None,
         }
     }
 
-    /// Visits every rule reference in an expression, skipping tokens and
-    /// literals — they carry no node the AST would name.
-    fn walk_rules(&self, e: &Expr, f: &mut impl FnMut(&str)) {
+    /// Whether an unlabelled alternative can stand in for exactly one node.
+    ///
+    /// # Why counting is not enough to do by eye
+    ///
+    /// A transparent alternative has no node of its own, so *something else*
+    /// has to be the node it stands for. That works only when the body
+    /// produces exactly one pest pair and that pair belongs to a rule with a
+    /// builder. Anything else is broken, and it used to break late:
+    ///
+    /// * **No sole rule at all.** Generation emitted `pub type Atom =
+    ///   Unresolved;` and a call to a `build_atom` it never defined, so the
+    ///   grammar passed `nh check`, passed `nh build`, and then failed in
+    ///   *rustc* — pointing at generated code the author did not write.
+    /// * **A sole rule that is not the sole node.** `body:stmt EOL+` names one
+    ///   rule, so the old check was satisfied; but `EOL` is a token, and a
+    ///   token is a pair too. At run time the wrapper pair was handed to
+    ///   `build_stmt`, which looks for its tags among *direct children* and
+    ///   found none.
+    ///
+    /// Both come of counting rule references rather than **nodes**. This counts
+    /// nodes: tokens count, literals and lookaheads do not, and repetition
+    /// widens the range rather than being ignored.
+    fn transparency(&self, e: &Expr) -> Transparency {
+        let Some(nodes) = self.node_count(e) else {
+            // A silent rule inlines its body, and an unknown name could be
+            // anything. Neither is worth guessing about: staying quiet costs a
+            // late error, guessing costs a rejected grammar that worked.
+            return Transparency::Unknown;
+        };
+        if nodes.max == Some(0) {
+            return Transparency::NoNode;
+        }
+        if nodes.min != 1 || nodes.max != Some(1) {
+            return Transparency::ManyNodes(nodes);
+        }
+
+        // Exactly one node — but is it always the *same* rule? `a | B` yields
+        // one node either way, and the two are not interchangeable.
+        let mut producers = Vec::new();
+        self.walk_producers(e, &mut |p| producers.push(p));
+        match producers.split_first() {
+            Some((Producer::Rule(first), rest))
+                if rest.iter().all(|p| matches!(p, Producer::Rule(n) if n == first)) =>
+            {
+                Transparency::Yields(first.clone())
+            }
+            Some((Producer::Token(name), [])) => Transparency::OnlyToken(name.clone()),
+            _ => Transparency::Ambiguous(
+                producers
+                    .iter()
+                    .map(|p| match p {
+                        Producer::Rule(n) | Producer::Token(n) => n.clone(),
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    /// Reports an unlabelled alternative that cannot stand in for one node.
+    ///
+    /// The help always names the same remedy — `-> label` — because that is
+    /// always the fix: an alternative that produces something other than one
+    /// borrowed node needs a node of its own.
+    fn check_transparent(&mut self, rule_name: &str, alt: &nh_syntax::ast::Alternative) {
+        let what = match self.transparency(&alt.body) {
+            Transparency::Yields(_) | Transparency::Unknown => return,
+            Transparency::NoNode => "produces no node".to_string(),
+            Transparency::ManyNodes(n) => match (n.min, n.max) {
+                (min, Some(max)) if min == max => format!("produces {min} nodes"),
+                (min, Some(max)) => format!("produces between {min} and {max} nodes"),
+                (min, None) => format!("produces {min} or more nodes"),
+            },
+            Transparency::OnlyToken(name) => {
+                format!("produces only the token `{name}`, which has no node of its own")
+            }
+            Transparency::Ambiguous(names) => {
+                format!("produces one node, but it may be any of: {}", names.join(", "))
+            }
+        };
+        let label = if alt.is_pass() { "`-> pass`" } else { "no label" };
+        self.diagnostics.push(
+            Diagnostic::error(format!(
+                "this alternative of `{rule_name}` has {label}, but {what}"
+            ))
+            .at(alt.span)
+            .help(
+                "an alternative with no label stands in for exactly one rule's \
+                 node; give this one a `-> label` so it gets a node of its own",
+            ),
+        );
+    }
+
+    /// How many pest pairs an expression produces, or `None` when that cannot
+    /// be known.
+    ///
+    /// Counted over *pest* semantics rather than `.nh` ones: a literal matches
+    /// text and produces nothing, a lookahead consumes nothing, a builtin like
+    /// `ANY` or `SOI` is a matcher rather than a node, and a **token produces a
+    /// pair exactly as a rule does**. That last one is the whole reason this
+    /// exists.
+    fn node_count(&self, e: &Expr) -> Option<Nodes> {
+        self.node_count_in(e, &mut Vec::new())
+    }
+
+    /// `open` is the silent rules currently being expanded, so a silent rule
+    /// that reaches itself stops rather than recursing forever.
+    fn node_count_in(&self, e: &Expr, open: &mut Vec<String>) -> Option<Nodes> {
+        match &e.kind {
+            ExprKind::Literal { .. } | ExprKind::CharRange { .. } => Some(Nodes::exactly(0)),
+            // Consumes no input, so it cannot produce a pair.
+            ExprKind::Lookahead { .. } => Some(Nodes::exactly(0)),
+            ExprKind::Bind { inner, .. } => self.node_count_in(inner, open),
+            ExprKind::Ref(name) => match self.res.kind(name) {
+                Some(resolve::DefKind::Skip) => Some(Nodes::exactly(0)),
+                Some(resolve::DefKind::Token) => Some(Nodes::exactly(1)),
+                Some(resolve::DefKind::Rule) => match self.silent_rule(name) {
+                    // A silent rule produces no pair of its own; its body's
+                    // pairs appear in its place. So count the body, in the
+                    // caller's place, rather than counting the rule as one.
+                    Some(def) => self.silent_body_count(name, def, open),
+                    None => Some(Nodes::exactly(1)),
+                },
+                // The operator driver's synthesized rule.
+                None if name == "expr" => Some(Nodes::exactly(1)),
+                None if resolve::PEST_RESERVED.contains(&name.as_str())
+                    || resolve::PEST_SHADOWABLE.contains(&name.as_str()) =>
+                {
+                    Some(Nodes::exactly(0))
+                }
+                None => None,
+            },
+            ExprKind::Seq(parts) => parts.iter().try_fold(Nodes::exactly(0), |acc, p| {
+                Some(acc.then(self.node_count_in(p, open)?))
+            }),
+            ExprKind::Choice(parts) => {
+                let mut it = parts.iter();
+                let first = self.node_count_in(it.next()?, open)?;
+                it.try_fold(first, |acc, p| Some(acc.or(self.node_count_in(p, open)?)))
+            }
+            ExprKind::Repeat { inner, kind } => {
+                let inner = self.node_count_in(inner, open)?;
+                Some(match kind {
+                    RepeatKind::Optional => Nodes { min: 0, ..inner },
+                    RepeatKind::ZeroOrMore => inner.repeated(0),
+                    RepeatKind::OneOrMore => inner.repeated(inner.min),
+                })
+            }
+        }
+    }
+
+    /// The count of a silent rule's alternatives, taken together.
+    ///
+    /// A silent rule that reaches itself has no finite count this could give,
+    /// so it yields `None` and the check stays quiet — the one case left where
+    /// a bad wrapper is still found later rather than here.
+    fn silent_body_count(
+        &self,
+        name: &str,
+        def: &RuleDef,
+        open: &mut Vec<String>,
+    ) -> Option<Nodes> {
+        if open.iter().any(|n| n == name) {
+            return None;
+        }
+        open.push(name.to_string());
+        let mut total: Option<Nodes> = None;
+        for alt in &def.alternatives {
+            let n = self.node_count_in(&alt.body, open);
+            total = match (total, n) {
+                (_, None) => {
+                    open.pop();
+                    return None;
+                }
+                (None, Some(n)) => Some(n),
+                (Some(acc), Some(n)) => Some(acc.or(n)),
+            };
+        }
+        open.pop();
+        total
+    }
+
+    fn silent_rule(&self, name: &str) -> Option<&RuleDef> {
+        self.ast
+            .rules
+            .iter()
+            .find(|r| r.name.value == name && r.silent)
+    }
+
+    /// Visits every reference that produces a pest pair, tokens included.
+    ///
+    /// Answers a different question from what the AST can *name*: what the
+    /// parse tree will actually *contain*.
+    fn walk_producers(&self, e: &Expr, f: &mut impl FnMut(Producer)) {
+        self.walk_producers_in(e, &mut Vec::new(), f)
+    }
+
+    fn walk_producers_in(
+        &self,
+        e: &Expr,
+        open: &mut Vec<String>,
+        f: &mut impl FnMut(Producer),
+    ) {
         match &e.kind {
             ExprKind::Ref(name) => match self.res.kind(name) {
-                Some(crate::resolve::DefKind::Rule) => f(name),
-                None if name == "expr" => f(name),
+                Some(resolve::DefKind::Rule) => match self.silent_rule(name) {
+                    // Silent, so what shows up in the tree is whatever its body
+                    // produces — the same substitution `node_count` makes.
+                    Some(def) => {
+                        if open.iter().any(|n| n == name) {
+                            return;
+                        }
+                        open.push(name.to_string());
+                        for alt in &def.alternatives {
+                            self.walk_producers_in(&alt.body, open, f);
+                        }
+                        open.pop();
+                    }
+                    None => f(Producer::Rule(name.clone())),
+                },
+                Some(resolve::DefKind::Token) => f(Producer::Token(name.clone())),
+                None if name == "expr" => f(Producer::Rule(name.clone())),
                 _ => {}
             },
             ExprKind::Seq(parts) | ExprKind::Choice(parts) => {
                 for p in parts {
-                    self.walk_rules(p, f);
+                    self.walk_producers_in(p, open, f);
                 }
             }
             ExprKind::Repeat { inner, .. } | ExprKind::Bind { inner, .. } => {
-                self.walk_rules(inner, f)
+                self.walk_producers_in(inner, open, f)
             }
-            // A lookahead consumes nothing, so it contributes no node.
             ExprKind::Lookahead { .. } => {}
             ExprKind::Literal { .. } | ExprKind::CharRange { .. } => {}
         }

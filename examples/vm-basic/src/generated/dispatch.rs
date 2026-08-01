@@ -699,6 +699,15 @@ impl Eval for Block {
     }
 }
 
+/// `rule atom` delegates to `primary`.
+pub fn eval_atom<H: Handlers>(
+    host: &mut H,
+    node: &Atom,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    eval_primary(host, node, cx)
+}
+
 /// Evaluates a `primary` by handing off to whichever alternative matched.
 pub fn eval_primary<H: Handlers>(host: &mut H, node: &Primary, cx: &mut Ctx) -> Result<H::Out> {
     match node {

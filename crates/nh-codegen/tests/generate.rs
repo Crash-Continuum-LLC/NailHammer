@@ -793,3 +793,57 @@ fn a_table_without_lazy_operators_gets_none_of_this() {
         "{dispatch}"
     );
 }
+
+/// Every `eval_*` a generated file calls is one it also defines.
+///
+/// A binding onto an alias — `body:atom` where `rule atom = primary;` —
+/// generates a call to `eval_atom`, and for a long time nothing defined it.
+/// Aliases were assumed to be resolved by their callers, which is true of the
+/// tree walk and false of a binding.
+///
+/// It survived because every shipped grammar's only alias is the operator
+/// table's `atom`, which the driver resolves by a separate path. Any grammar
+/// with a plain alias produced code that did not compile.
+#[test]
+fn every_eval_call_has_a_definition() {
+    let g = gen(
+        "grammar A;\n\
+         use operators::none;\n\
+         skip WS = \" \" | \"\\t\" | \"\\n\";\n\
+         token ALPHA = @ \"a\"..\"z\";\n\
+         token ID = @ ALPHA+;\n\
+         rule program = body:atom -> prog;\n\
+         rule atom = primary;\n\
+         rule primary = v:ID -> p;\n",
+    );
+    let src = &g
+        .files
+        .iter()
+        .find(|f| f.path.ends_with("dispatch.rs"))
+        .expect("a dispatch.rs")
+        .contents;
+
+    let defined: std::collections::HashSet<&str> = src
+        .match_indices("fn eval_")
+        .map(|(i, _)| {
+            let rest = &src[i + 3..];
+            &rest[..rest.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(rest.len())]
+        })
+        .collect();
+
+    let mut missing: Vec<&str> = src
+        .match_indices("eval_")
+        .map(|(i, _)| {
+            let rest = &src[i..];
+            &rest[..rest.find(|c: char| !c.is_alphanumeric() && c != '_').unwrap_or(rest.len())]
+        })
+        .filter(|name| !defined.contains(name))
+        .collect();
+    missing.sort_unstable();
+    missing.dedup();
+
+    assert!(
+        missing.is_empty(),
+        "these are called but never defined: {missing:?}\n\n{src}"
+    );
+}

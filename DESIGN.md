@@ -932,7 +932,7 @@ exactly the untyped positional destructuring this design exists to remove.
 They leave the operator table entirely and live in the grammar as a suffix chain:
 
 ```nh
-rule atom = primary suffix*;
+rule atom = base:primary suffixes:suffix* -> access;
 
 rule suffix
   = "(" args:expr_list ")"   -> call
@@ -955,9 +955,9 @@ pub fn run(s: &mut Interp, v: CallView, cx: &mut Ctx) -> Result<Value> {
 
 Three arguments for this, in ascending order of importance:
 
-1. **Precedence still works with no table involvement.** `atom = primary suffix*`
-   binds tighter than any prefix or infix operator by construction, so `-a.b` is
-   `-(a.b)` and `f(x)[0].y` chains correctly.
+1. **Precedence still works with no table involvement.** A chain of suffixes on
+   a primary binds tighter than any prefix or infix operator by construction, so
+   `-a.b` is `-(a.b)` and `f(x)[0].y` chains correctly.
 2. **The driver gets simpler** — the fold handles prefix and infix only.
 3. **These aren't boilerplate.** The operator system exists to absorb work nobody
    should have to think about. Call semantics (arity, closures, varargs, method
