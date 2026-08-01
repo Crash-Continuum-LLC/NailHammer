@@ -37,6 +37,8 @@ pub enum Stmt {
     Print(Shared<StmtPrint>),
     Iff(Shared<StmtIff>),
     Whilst(Shared<StmtWhilst>),
+    Define(Shared<StmtDefine>),
+    Ret(Shared<StmtRet>),
     Eval(Shared<StmtEval>),
 }
 
@@ -63,6 +65,22 @@ pub struct StmtWhilst {
     pub span: Span,
 }
 
+/// From `rule stmt = "fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define`.
+#[derive(Clone, Debug)]
+pub struct StmtDefine {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Shared<Block>,
+    pub span: Span,
+}
+
+/// From `rule stmt = "return" value:expr ";" -> ret`.
+#[derive(Clone, Debug)]
+pub struct StmtRet {
+    pub value: Shared<Expr>,
+    pub span: Span,
+}
+
 /// From `rule stmt = value:expr ";" -> eval`.
 #[derive(Clone, Debug)]
 pub struct StmtEval {
@@ -86,6 +104,7 @@ pub enum Primary {
     Num(Shared<PrimaryNum>),
     Str(Shared<PrimaryStr>),
     Elem(Shared<PrimaryElem>),
+    Call(Shared<PrimaryCall>),
     Var(Shared<PrimaryVar>),
     List(Shared<PrimaryList>),
     /// A transparent alternative yielding `expr`.
@@ -114,6 +133,14 @@ pub struct PrimaryElem {
     pub span: Span,
 }
 
+/// From `rule primary = name:IDENT "(" args:exprs ")" -> call`.
+#[derive(Clone, Debug)]
+pub struct PrimaryCall {
+    pub name: String,
+    pub args: Shared<Exprs>,
+    pub span: Span,
+}
+
 /// From `rule primary = name:IDENT -> var place`.
 #[derive(Clone, Debug)]
 pub struct PrimaryVar {
@@ -133,6 +160,14 @@ pub struct PrimaryList {
 #[derive(Clone, Debug)]
 pub struct MoreElem {
     pub value: Shared<Expr>,
+    pub span: Span,
+}
+
+/// From `rule exprs = first:expr rest:more_elem* -> some`.
+#[derive(Clone, Debug)]
+pub struct Exprs {
+    pub first: Shared<Expr>,
+    pub rest: Vec<Shared<MoreElem>>,
     pub span: Span,
 }
 
@@ -232,6 +267,12 @@ pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Stmt>> {
             Rule::stmt_whilst => {
                 return Ok(Shared::new(Stmt::Whilst(build_stmt_whilst(pair, file)?)))
             }
+            Rule::stmt_define => {
+                return Ok(Shared::new(Stmt::Define(build_stmt_define(pair, file)?)))
+            }
+            Rule::stmt_ret => {
+                return Ok(Shared::new(Stmt::Ret(build_stmt_ret(pair, file)?)))
+            }
             Rule::stmt_eval => {
                 return Ok(Shared::new(Stmt::Eval(build_stmt_eval(pair, file)?)))
             }
@@ -270,6 +311,26 @@ pub fn build_stmt_whilst(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<St
     }))
 }
 
+/// Builds `StmtDefine` from `"fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define`.
+pub fn build_stmt_define(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtDefine>> {
+    let view = StmtDefineView::from_pair(pair, file);
+    Ok(Shared::new(StmtDefine {
+        name: view.name().text().to_string(),
+        params: { let mut v = Vec::new(); for n in view.params() { v.push(n.text().to_string()); } v },
+        body: build_block(view.body().into_pair(), file)?,
+        span: view.span(),
+    }))
+}
+
+/// Builds `StmtRet` from `"return" value:expr ";" -> ret`.
+pub fn build_stmt_ret(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtRet>> {
+    let view = StmtRetView::from_pair(pair, file);
+    Ok(Shared::new(StmtRet {
+        value: build_expr(view.value().into_pair(), file)?,
+        span: view.span(),
+    }))
+}
+
 /// Builds `StmtEval` from `value:expr ";" -> eval`.
 pub fn build_stmt_eval(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtEval>> {
     let view = StmtEvalView::from_pair(pair, file);
@@ -302,6 +363,9 @@ pub fn build_primary(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Primar
             }
             Rule::primary_elem => {
                 return Ok(Shared::new(Primary::Elem(build_primary_elem(pair, file)?)))
+            }
+            Rule::primary_call => {
+                return Ok(Shared::new(Primary::Call(build_primary_call(pair, file)?)))
             }
             Rule::primary_var => {
                 return Ok(Shared::new(Primary::Var(build_primary_var(pair, file)?)))
@@ -346,6 +410,16 @@ pub fn build_primary_elem(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<P
     }))
 }
 
+/// Builds `PrimaryCall` from `name:IDENT "(" args:exprs ")" -> call`.
+pub fn build_primary_call(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryCall>> {
+    let view = PrimaryCallView::from_pair(pair, file);
+    Ok(Shared::new(PrimaryCall {
+        name: view.name().text().to_string(),
+        args: build_exprs(view.args().into_pair(), file)?,
+        span: view.span(),
+    }))
+}
+
 /// Builds `PrimaryVar` from `name:IDENT -> var place`.
 pub fn build_primary_var(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryVar>> {
     let view = PrimaryVarView::from_pair(pair, file);
@@ -370,6 +444,16 @@ pub fn build_more_elem(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<More
     let view = MoreElemView::from_pair(pair, file);
     Ok(Shared::new(MoreElem {
         value: build_expr(view.value().into_pair(), file)?,
+        span: view.span(),
+    }))
+}
+
+/// Builds `Exprs` from `first:expr rest:more_elem* -> some`.
+pub fn build_exprs(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Exprs>> {
+    let view = ExprsView::from_pair(pair, file);
+    Ok(Shared::new(Exprs {
+        first: build_expr(view.first().into_pair(), file)?,
+        rest: { let mut v = Vec::new(); for n in view.rest() { v.push(build_more_elem(n.into_pair(), file)?); } v },
         span: view.span(),
     }))
 }

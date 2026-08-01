@@ -138,13 +138,16 @@ fn assignment_lowers_to_a_store_by_slot() {
     // The variant is named after the `place`-marked alternative, so it tracks
     // the grammar rather than a fixed list.
     assert!(src.contains("Place::PrimaryVar { name, .. }"), "{src}");
-    assert!(src.contains("let slot = self.slot_of(name);"), "{src}");
-    assert!(src.contains("self.emit(Op::StoreGlobal { slot, src: value });"), "{src}");
+    // Through `store_var`, not straight to a slot: *where* a name lives is one
+    // decision, made in the `Emitter`, so assignment inside a function reaches
+    // the parameter rather than a global of the same name.
+    assert!(src.contains("self.store_var(name, value);"), "{src}");
 
     // `a = b = 1` chains, so the store yields the value.
     assert!(src.contains("Ok(value)"), "{src}");
 
-    // Compound assignment needs to read the target first.
+    // Compound assignment needs to read the target first, through the same
+    // seam for the same reason.
     assert!(src.contains("fn place_read"), "{src}");
-    assert!(src.contains("self.emit(Op::LoadGlobal { dst, slot });"), "{src}");
+    assert!(src.contains("Ok(self.read_var(name))"), "{src}");
 }

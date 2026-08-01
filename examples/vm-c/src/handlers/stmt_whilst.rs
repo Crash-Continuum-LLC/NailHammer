@@ -9,6 +9,8 @@ use nh_vm::{Op, Reg};
 
 use crate::generated::ast::{Block, Expr};
 use crate::generated::dispatch::Eval;
+use nh_vm::Emitter;
+
 use crate::Interp;
 
 pub fn run(

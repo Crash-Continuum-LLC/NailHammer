@@ -16,7 +16,7 @@
 // host whose `Out` is a register cannot answer.
 
 use nh_runtime::{Ctx, Result, Shared};
-use nh_vm::{Cmp, Op, Reg};
+use nh_vm::{Cmp, Emitter, Op, Reg};
 
 use super::dispatch::{CompareOp, Eval, Operators, ShortCircuit};
 use super::ast::Expr;
@@ -129,8 +129,7 @@ impl Operators for crate::Interp {
                 Ok(value)
             }
             Place::PrimaryVar { name, .. } => {
-                let slot = self.slot_of(name);
-                self.emit(Op::StoreGlobal { slot, src: value });
+                self.store_var(name, value);
                 Ok(value)
             }
         }
@@ -145,12 +144,7 @@ impl Operators for crate::Interp {
                 self.emit(Op::Index { dst, seq: target, idx: *index });
                 Ok(dst)
             }
-            Place::PrimaryVar { name, .. } => {
-                let slot = self.slot_of(name);
-                let dst = self.alloc();
-                self.emit(Op::LoadGlobal { dst, slot });
-                Ok(dst)
-            }
+            Place::PrimaryVar { name, .. } => Ok(self.read_var(name))
         }
     }
 }

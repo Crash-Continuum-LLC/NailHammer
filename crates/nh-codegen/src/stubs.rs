@@ -63,6 +63,15 @@ pub fn generate(alt: &LoweredAlternative, opts: &Options) -> String {
     } else {
         ""
     };
+    // A project with a VM target compiles rather than evaluates, so its
+    // handlers call `emit`, `alloc` and the rest. Importing the trait here
+    // means the first line an author writes in a stub compiles, instead of
+    // failing with `no method named alloc` and a note about traits in scope.
+    let emitter = if opts.target.is_some() {
+        "\nuse nh_vm::Emitter;"
+    } else {
+        ""
+    };
     let dispatch_items = if lazy.is_empty() {
         "Handlers".to_string()
     } else {
@@ -72,7 +81,7 @@ pub fn generate(alt: &LoweredAlternative, opts: &Options) -> String {
     let _ = writeln!(
         out,
         "{std_import}\
-         use nh_runtime::{{Ctx, Result}};\n\
+         use nh_runtime::{{Ctx, Result}};{emitter}\n\
          {name_import}\n\
          {ast_import}\
          use {}::dispatch::{dispatch_items};\n",

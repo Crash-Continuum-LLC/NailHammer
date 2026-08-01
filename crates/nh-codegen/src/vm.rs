@@ -261,7 +261,10 @@ pub fn operators_impl(
     // cannot act on -- which this project treats as a defect in the generator.
     let mut runtime = vec!["Result"];
     let mut dispatch = vec!["Operators"];
-    let mut vm = vec!["Op", "Reg"];
+    // `Emitter` is always needed: every method below calls at least one of
+    // its defaults. Naming it here is what turns seven mystery methods on the
+    // host into one trait the author implements in six lines.
+    let mut vm = vec!["Emitter", "Op", "Reg"];
     let mut extra = String::new();
 
     if body.contains("Cmp::") {
@@ -459,19 +462,13 @@ fn emit_assignment(out: &mut String, lowered: &nh_lower::Lowered) {
             let _ = writeln!(
                 store,
                 "            Place::{variant} {{ {field}, .. }} => {{\n\
-                 \x20               let slot = self.slot_of({field});\n\
-                 \x20               self.emit(Op::StoreGlobal {{ slot, src: value }});\n\
+                 \x20               self.store_var({field}, value);\n\
                  \x20               Ok(value)\n\
                  \x20           }}"
             );
             let _ = writeln!(
                 read,
-                "            Place::{variant} {{ {field}, .. }} => {{\n\
-                 \x20               let slot = self.slot_of({field});\n\
-                 \x20               let dst = self.alloc();\n\
-                 \x20               self.emit(Op::LoadGlobal {{ dst, slot }});\n\
-                 \x20               Ok(dst)\n\
-                 \x20           }}"
+                "            Place::{variant} {{ {field}, .. }} => Ok(self.read_var({field}))"
             );
         } else if let Some((seq, idx)) = indexed(alt) {
             // `a[i] = v`. The index arrives **already evaluated**, exactly once

@@ -7,6 +7,8 @@ use nh_vm::{Op, Reg};
 
 use crate::generated::ast::Block;
 use crate::generated::dispatch::Eval;
+use nh_vm::Emitter;
+
 use crate::Interp;
 
 pub fn run(host: &mut Interp, cond: Reg, body: &Shared<Block>, cx: &mut Ctx) -> Result<Reg> {

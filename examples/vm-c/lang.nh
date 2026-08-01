@@ -16,7 +16,7 @@ token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 token STRING = @ "\"" (!"\"" ANY)* "\"";
 
-reserved from IDENT { "print" "if" "while" "await" "len" }
+reserved from IDENT { "print" "if" "while" "await" "len" "fn" "return" }
 
 // The operator table is the language's own; the instructions it lowers to are
 // the machine's. That split is the whole point of the target.
@@ -43,6 +43,8 @@ rule stmt
   = "print" value:expr ";"                             -> print
   | "if" "(" cond:expr ")" lazy body:block             -> iff
   | "while" "(" lazy cond:expr ")" lazy body:block     -> whilst
+  | "fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define
+  | "return" value:expr ";"                            -> ret
   | value:expr ";"                                     -> eval
   ;
 
@@ -57,6 +59,7 @@ rule primary
   = value:NUMBER                      -> num
   | text:STRING                       -> str
   | name:IDENT "[" index:expr "]"     -> elem place
+  | name:IDENT "(" args:exprs ")"     -> call
   | name:IDENT                        -> var place
   | "[" first:expr rest:more_elem* "]" -> list
   | "(" inner:expr ")"                -> pass
@@ -66,3 +69,8 @@ rule primary
 // recognises it structurally -- one name, one evaluated index -- rather than by
 // spelling, so a BASIC could write `a(i)` and get the same store.
 rule more_elem = "," value:expr -> next;
+
+// Arguments are expressions; parameters are bound as *names* directly in the
+// `define` alternative above, repeated so they arrive as a list. A call and a
+// definition cannot share a rule for exactly that reason.
+rule exprs = first:expr rest:more_elem* -> some;

@@ -17,27 +17,31 @@ expr = { nh_pre_op* ~ atom ~ (nh_bin_op ~ nh_pre_op* ~ atom)* }
 
 // Rules
 program = { SOI ~ (#body = stmt)+ ~ EOI }
-stmt = { stmt_print | stmt_iff | stmt_whilst | stmt_eval }
+stmt = { stmt_print | stmt_iff | stmt_whilst | stmt_define | stmt_ret | stmt_eval }
 stmt_print = { nh_kw_print ~ #value = expr ~ ";" }
 stmt_iff = { nh_kw_if ~ "(" ~ #cond = expr ~ ")" ~ #body = block }
 stmt_whilst = { nh_kw_while ~ "(" ~ #cond = expr ~ ")" ~ #body = block }
+stmt_define = { nh_kw_fn ~ #name = IDENT ~ "(" ~ (#params = IDENT ~ ","?)* ~ ")" ~ #body = block }
+stmt_ret = { nh_kw_return ~ #value = expr ~ ";" }
 stmt_eval = { #value = expr ~ ";" }
 block = { "{" ~ (#body = stmt)+ ~ "}" }
 atom = { primary }
-primary = { primary_num | primary_str | primary_elem | primary_var | primary_list | "(" ~ #inner = expr ~ ")" }
+primary = { primary_num | primary_str | primary_elem | primary_call | primary_var | primary_list | "(" ~ #inner = expr ~ ")" }
 primary_num = { #value = NUMBER_ }
 primary_str = { #text = STRING }
 primary_elem = { #name = IDENT ~ "[" ~ #index = expr ~ "]" }
+primary_call = { #name = IDENT ~ "(" ~ #args = exprs ~ ")" }
 primary_var = { #name = IDENT }
 primary_list = { "[" ~ #first = expr ~ (#rest = more_elem)* ~ "]" }
 more_elem = { "," ~ #value = expr }
+exprs = { #first = expr ~ (#rest = more_elem)* }
 
 // ---------------------------------------------------------------------------
 // Generated support rules
 // ---------------------------------------------------------------------------
 
 nh_cont_IDENT = _{ "_" | ALPHA | DIGIT }
-nh_reserved_IDENT = @{ ("await" | "print" | "while" | "len" | "if") ~ !nh_cont_IDENT }
+nh_reserved_IDENT = @{ ("return" | "await" | "print" | "while" | "len" | "fn" | "if") ~ !nh_cont_IDENT }
 nh_op_bang_eq = @{ "!=" }
 nh_op_amp_amp = @{ "&&" }
 nh_op_lt_eq = @{ "<=" }
@@ -62,3 +66,5 @@ nh_pre_op = _{ nh_op_await | nh_op_len | nh_op_bang | nh_op_minus }
 nh_kw_print = @{ "print" ~ !nh_cont_IDENT }
 nh_kw_if = @{ "if" ~ !nh_cont_IDENT }
 nh_kw_while = @{ "while" ~ !nh_cont_IDENT }
+nh_kw_fn = @{ "fn" ~ !nh_cont_IDENT }
+nh_kw_return = @{ "return" ~ !nh_cont_IDENT }

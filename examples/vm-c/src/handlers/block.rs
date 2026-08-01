@@ -5,6 +5,8 @@
 use nh_runtime::{Ctx, Result};
 use nh_vm::Reg;
 
+use nh_vm::Emitter;
+
 use crate::Interp;
 
 pub fn run(host: &mut Interp, body: Vec<Reg>, _cx: &mut Ctx) -> Result<Reg> {

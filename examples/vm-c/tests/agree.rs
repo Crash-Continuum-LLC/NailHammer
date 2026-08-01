@@ -285,3 +285,63 @@ fn an_array_constant_crosses_the_wire() {
     assert!(matches!(m.resume(), nh_vm::Step::Done));
     assert_eq!(m.output, ["[1, 2, 3]"]);
 }
+
+// ---------------------------------------------------------------------------
+// Functions — reachable from a grammar, not just from hand-built bytecode
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_function_is_defined_and_called() {
+    assert_eq!(run_c("fn double(n) { return n + n; } print double(21);"), ["42"]);
+    assert_eq!(run_c("fn add(a, b) { return a + b; } print add(3, 4);"), ["7"]);
+}
+
+/// Recursion, which is why functions are looked up by name at run time: the
+/// body calls itself before the compiler has finished emitting it.
+#[test]
+fn a_function_can_recurse() {
+    let src = "fn fact(n) { if (n < 2) { return 1; } return n * fact(n - 1); } print fact(5);";
+    assert_eq!(run_c(src), ["120"]);
+}
+
+/// Parameters are registers, and they are **live for the whole body**.
+///
+/// Both bugs this caught are silent-wrong rather than loud. Resetting scratch
+/// to register zero handed a parameter back out between statements, so `fact`
+/// returned its base case; and `reuse` freeing a parameter wrote a comparison
+/// result into it, so `n < 2` destroyed `n`. Neither crashes — they return a
+/// plausible number — which is why this asserts values rather than success.
+#[test]
+fn a_parameter_survives_the_statements_around_it() {
+    // `n` is read after a statement boundary and after a comparison has run.
+    let src = "fn f(n) { if (n > 0) { return n; } return 0 - n; } print f(7); print f(0 - 3);";
+    assert_eq!(run_c(src), ["7", "3"]);
+}
+
+/// A call before the definition works, because the callee is found by name when
+/// the program runs rather than patched when it is compiled.
+#[test]
+fn a_function_may_be_called_before_it_is_defined() {
+    assert_eq!(run_c("print later(2); fn later(x) { return x * 10; }"), ["20"]);
+}
+
+#[test]
+fn calling_something_undefined_names_it() {
+    match vm_c::run(&vm_c::compile("print nope(1);").expect("compiles")) {
+        Err(e) => assert!(e.contains("nope"), "{e}"),
+        Ok(o) => panic!("expected an error, got {o:?}"),
+    }
+}
+
+/// Functions cross the wire with the program, since they are part of it.
+#[test]
+fn functions_survive_the_wire() {
+    let p = vm_c::compile("fn sq(n) { return n * n; } print sq(9);").expect("compiles");
+    assert_eq!(p.fns.len(), 1, "the function table travels too");
+
+    let back = nh_vm::Program::<nh_vm::NoExt>::from_bytes(&p.to_bytes()).expect("decodes");
+    let globals = nh_vm::DefaultStore::new(back.globals);
+    let mut m = nh_vm::Machine::new(&back, &globals);
+    assert!(matches!(m.resume(), nh_vm::Step::Done));
+    assert_eq!(m.output, ["81"]);
+}

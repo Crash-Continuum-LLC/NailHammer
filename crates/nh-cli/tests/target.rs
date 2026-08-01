@@ -71,7 +71,7 @@ fn a_supported_grammar_generates_its_operator_implementation() {
 
     // A module, not an orphan to `include!`: it brings its own imports and the
     // generator wired it into mod.rs, so the author writes no glue at all.
-    assert!(generated.contains("use nh_vm::{Cmp, Op, Reg};"), "{generated}");
+    assert!(generated.contains("use nh_vm::{Cmp, Emitter, Op, Reg};"), "the Emitter trait must be in scope: {generated}");
     assert!(generated.contains("use super::dispatch::{CompareOp, Operators};"), "{generated}");
     // Imports track what the body uses: this grammar has no lazy operator, so
     // nothing here mentions `ShortCircuit` or `Shared`. An unused import in

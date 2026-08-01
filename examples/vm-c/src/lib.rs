@@ -18,9 +18,7 @@
 //! it binds the **same roles**, so `&` here and `AND` there both become
 //! `Op::And`. `tests/agree.rs` checks the two produce identical output.
 
-use std::collections::HashMap;
-
-use nh_vm::{NoExt, Op, Reg, Slot, Value};
+use nh_vm::{Emit, Emitter, NoExt, Reg};
 
 pub mod generated {
     include!("generated/mod.rs");
@@ -32,108 +30,30 @@ pub mod handlers;
 pub struct CLangParser;
 
 /// The compiler. `Out = Reg`: evaluating a node leaves its value in a register.
+///
+/// Everything a compiler needs — the register allocator, the slot table, jump
+/// patching — comes from [`Emitter`]. Before that trait existed this struct was
+/// 130 lines of it, written identically in both twins.
 #[derive(Debug, Default)]
 pub struct Interp {
-    pub code: Vec<Op<NoExt>>,
-    /// Next free register, and the high-water mark — the frame size.
-    next: Reg,
-    high: Reg,
-    /// Variable name to global slot, assigned in first-seen order — which is
-    /// why the two twins agree: they meet the same names in the same order.
-    slots: HashMap<String, Slot>,
+    emit: Emit<NoExt>,
+    /// How many arguments the most recent list held.
+    ///
+    /// `Out` is uniformly `Reg`, so a handler cannot hand back a register *and*
+    /// a count. The count rides here instead — language-specific state, which
+    /// is why it is on `Interp` rather than in `Emit`.
+    pub argc: usize,
 }
 
-impl Interp {
-    pub fn emit(&mut self, op: Op<NoExt>) -> usize {
-        self.code.push(op);
-        self.code.len() - 1
+impl Emitter for Interp {
+    type Ext = NoExt;
+
+    fn emit_state(&mut self) -> &mut Emit<NoExt> {
+        &mut self.emit
     }
 
-    // ---- register allocation, in stack discipline --------------------------
-    //
-    // `free` only does anything for the *top* register, which keeps an
-    // expression's temporaries contiguous. The generated operator methods call
-    // `reuse`, so this allocator is part of the contract with generated code.
-
-    pub fn alloc(&mut self) -> Reg {
-        let r = self.next;
-        self.next += 1;
-        self.high = self.high.max(self.next);
-        r
-    }
-
-    pub fn free(&mut self, r: Reg) {
-        if self.next == r + 1 {
-            self.next -= 1;
-        }
-    }
-
-    /// Frees the operands, then takes a destination — so `Add` reuses the
-    /// register its left operand was in instead of growing the frame.
-    pub fn reuse(&mut self, operands: &[Reg]) -> Reg {
-        for r in operands.iter().rev() {
-            self.free(*r);
-        }
-        self.alloc()
-    }
-
-    /// Registers are per-statement scratch, so resetting keeps frames small.
-    pub fn reset_regs(&mut self) {
-        self.next = 0;
-    }
-
-    pub fn frame_size(&self) -> usize {
-        self.high as usize + 1
-    }
-
-    // ---- variables ---------------------------------------------------------
-
-    pub fn slot_of(&mut self, name: &str) -> Slot {
-        if let Some(s) = self.slots.get(name) {
-            return *s;
-        }
-        let s = self.slots.len() as Slot;
-        self.slots.insert(name.to_string(), s);
-        s
-    }
-
-    pub fn globals_needed(&self) -> usize {
-        self.slots.len().max(1)
-    }
-
-    // ---- emitting ----------------------------------------------------------
-
-    pub fn konst(&mut self, v: f64) -> Reg {
-        let dst = self.alloc();
-        self.emit(Op::LoadK { dst, value: Value::Num(v) });
-        dst
-    }
-
-    pub fn read_var(&mut self, name: &str) -> Reg {
-        let slot = self.slot_of(name);
-        let dst = self.alloc();
-        self.emit(Op::LoadGlobal { dst, slot });
-        dst
-    }
-
-    pub fn here(&self) -> usize {
-        self.code.len()
-    }
-
-    pub fn patch_to_here(&mut self, at: usize) {
-        let here = self.here();
-        match &mut self.code[at] {
-            Op::Jump(t) | Op::JumpIfFalse { target: t, .. } | Op::JumpIfTrue { target: t, .. } => {
-                *t = here
-            }
-            other => panic!("{other:?} at {at} is not a jump"),
-        }
-    }
-
-    /// Finishes the program. Running off the end is `Done` too, but an explicit
-    /// stop is what a real driver expects.
-    pub fn finish(&mut self) {
-        self.emit(Op::Halt);
+    fn emit_state_ref(&self) -> &Emit<NoExt> {
+        &self.emit
     }
 }
 
@@ -172,12 +92,7 @@ pub fn compile(source: &str) -> std::result::Result<Program<NoExt>, String> {
             .join("\n")
     })?;
 
-    Ok(Program {
-        frame: host.frame_size(),
-        globals: host.globals_needed(),
-        code: host.code,
-        fns: Default::default(),
-    })
+    Ok(host.finish())
 }
 
 /// Runs it and gives back whatever it printed.

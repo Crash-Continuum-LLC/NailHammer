@@ -1060,6 +1060,33 @@ or extend the VM.
 Each is named with a spelling you actually typed. Remove the operator, or add
 the instruction to the machine.
 
+### Control flow needs `lazy`, and loops need it twice
+
+A handler receives its operands **already evaluated** — which for a compiler
+means *already emitted*. That is wrong for control flow, where the point is to
+put a jump in front of something:
+
+```
+| "if" "(" cond:expr ")" lazy body:block             -> iff
+| "while" "(" lazy cond:expr ")" lazy body:block     -> whilst
+```
+
+`if` needs it on the body: the jump that skips the body has to be emitted
+before the body is.
+
+**`while` needs it on both, and the condition is the one people miss.** A loop
+re-tests every iteration, so the condition's code belongs at the top of the
+loop — which means the handler has to know where the top *is* before the
+condition is emitted. An eager `cond` is already behind you, and the loop jumps
+back to the wrong place.
+
+The symptom is a loop that runs once, or forever, with nothing in the grammar
+looking wrong. If a handler needs to emit something *before* an operand, that
+operand is `lazy`.
+
+Defining a function is the same shape — its body is emitted behind a jump, so
+`lazy body:block` again.
+
 ### `--host`
 
 The generated implementation is written for `crate::Interp`, which is what the

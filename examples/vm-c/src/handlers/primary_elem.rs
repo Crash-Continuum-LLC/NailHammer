@@ -6,6 +6,8 @@
 use nh_runtime::{Ctx, Result};
 use nh_vm::{Op, Reg};
 
+use nh_vm::Emitter;
+
 use crate::Interp;
 
 pub fn run(host: &mut Interp, name: &str, index: Reg, _cx: &mut Ctx) -> Result<Reg> {

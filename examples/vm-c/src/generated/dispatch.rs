@@ -268,6 +268,16 @@ pub trait Handlers: Operators + Sized {
     /// * `body` — the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
     fn stmt_whilst(&mut self, cond: &Shared<Expr>, body: &Shared<Block>, cx: &mut Ctx) -> Result<Self::Out>;
 
+    /// `stmt_define` — from `rule stmt = "fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define`.
+    /// * `name` — the text of the `IDENT` token
+    /// * `params` — the text of the `IDENT` token (repeated in the grammar)
+    /// * `body` — the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
+    fn stmt_define(&mut self, name: &str, params: &[String], body: &Shared<Block>, cx: &mut Ctx) -> Result<Self::Out>;
+
+    /// `stmt_ret` — from `rule stmt = "return" value:expr ";" -> ret`.
+    /// * `value` — the value of the `expr` rule, already evaluated
+    fn stmt_ret(&mut self, value: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
+
     /// `stmt_eval` — from `rule stmt = value:expr ";" -> eval`.
     /// * `value` — the value of the `expr` rule, already evaluated
     fn stmt_eval(&mut self, value: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
@@ -289,6 +299,11 @@ pub trait Handlers: Operators + Sized {
     /// * `index` — the value of the `expr` rule, already evaluated
     fn primary_elem(&mut self, name: &str, index: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
 
+    /// `primary_call` — from `rule primary = name:IDENT "(" args:exprs ")" -> call`.
+    /// * `name` — the text of the `IDENT` token
+    /// * `args` — the value of the `exprs` rule, already evaluated
+    fn primary_call(&mut self, name: &str, args: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
+
     /// `primary_var` — from `rule primary = name:IDENT -> var place`.
     /// * `name` — the text of the `IDENT` token
     fn primary_var(&mut self, name: &str, cx: &mut Ctx) -> Result<Self::Out>;
@@ -301,6 +316,11 @@ pub trait Handlers: Operators + Sized {
     /// `more_elem` — from `rule more_elem = "," value:expr -> next`.
     /// * `value` — the value of the `expr` rule, already evaluated
     fn more_elem(&mut self, value: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
+
+    /// `exprs` — from `rule exprs = first:expr rest:more_elem* -> some`.
+    /// * `first` — the value of the `expr` rule, already evaluated
+    /// * `rest` — the value of the `more_elem` rule, already evaluated (repeated in the grammar; items that failed and were already reported are omitted)
+    fn exprs(&mut self, first: Self::Out, rest: Vec<Self::Out>, cx: &mut Ctx) -> Result<Self::Out>;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,6 +377,8 @@ pub fn eval_stmt<H: Handlers>(host: &mut H, node: &Stmt, cx: &mut Ctx) -> Result
         Stmt::Print(n) => eval_stmt_print(host, n, cx),
         Stmt::Iff(n) => eval_stmt_iff(host, n, cx),
         Stmt::Whilst(n) => eval_stmt_whilst(host, n, cx),
+        Stmt::Define(n) => eval_stmt_define(host, n, cx),
+        Stmt::Ret(n) => eval_stmt_ret(host, n, cx),
         Stmt::Eval(n) => eval_stmt_eval(host, n, cx),
     }
 }
@@ -444,6 +466,58 @@ impl Eval for StmtWhilst {
     }
 }
 
+/// Evaluates `stmt`, from `"fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define`.
+pub fn eval_stmt_define<H: Handlers>(host: &mut H, node: &StmtDefine, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_stmt_define_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_stmt_define_inner<H: Handlers>(
+    host: &mut H,
+    node: &StmtDefine,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let name = &node.name;
+    let params = &node.params;
+    let body = &node.body;
+    host.stmt_define(name, params, body, cx)
+}
+
+impl Eval for StmtDefine {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_stmt_define(host, self, cx)
+    }
+}
+
+/// Evaluates `stmt`, from `"return" value:expr ";" -> ret`.
+pub fn eval_stmt_ret<H: Handlers>(host: &mut H, node: &StmtRet, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_stmt_ret_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_stmt_ret_inner<H: Handlers>(
+    host: &mut H,
+    node: &StmtRet,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let value = eval_expr(host, &node.value, cx)?;
+    host.stmt_ret(value, cx)
+}
+
+impl Eval for StmtRet {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_stmt_ret(host, self, cx)
+    }
+}
+
 /// Evaluates `stmt`, from `value:expr ";" -> eval`.
 pub fn eval_stmt_eval<H: Handlers>(host: &mut H, node: &StmtEval, cx: &mut Ctx) -> Result<H::Out> {
     // Entering the node's span is what makes `cx.err(..)` inside the
@@ -510,6 +584,7 @@ pub fn eval_primary<H: Handlers>(host: &mut H, node: &Primary, cx: &mut Ctx) -> 
         Primary::Num(n) => eval_primary_num(host, n, cx),
         Primary::Str(n) => eval_primary_str(host, n, cx),
         Primary::Elem(n) => eval_primary_elem(host, n, cx),
+        Primary::Call(n) => eval_primary_call(host, n, cx),
         Primary::Var(n) => eval_primary_var(host, n, cx),
         Primary::List(n) => eval_primary_list(host, n, cx),
         Primary::Expr(n) => eval_expr(host, n, cx),
@@ -598,6 +673,32 @@ impl Eval for PrimaryElem {
     }
 }
 
+/// Evaluates `primary`, from `name:IDENT "(" args:exprs ")" -> call`.
+pub fn eval_primary_call<H: Handlers>(host: &mut H, node: &PrimaryCall, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_primary_call_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_primary_call_inner<H: Handlers>(
+    host: &mut H,
+    node: &PrimaryCall,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let name = &node.name;
+    let args = eval_exprs(host, &node.args, cx)?;
+    host.primary_call(name, args, cx)
+}
+
+impl Eval for PrimaryCall {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_primary_call(host, self, cx)
+    }
+}
+
 /// Evaluates `primary`, from `name:IDENT -> var place`.
 pub fn eval_primary_var<H: Handlers>(host: &mut H, node: &PrimaryVar, cx: &mut Ctx) -> Result<H::Out> {
     // Entering the node's span is what makes `cx.err(..)` inside the
@@ -681,6 +782,42 @@ fn eval_more_elem_inner<H: Handlers>(
 impl Eval for MoreElem {
     fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
         eval_more_elem(host, self, cx)
+    }
+}
+
+/// Evaluates `exprs`, from `first:expr rest:more_elem* -> some`.
+pub fn eval_exprs<H: Handlers>(host: &mut H, node: &Exprs, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_exprs_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_exprs_inner<H: Handlers>(
+    host: &mut H,
+    node: &Exprs,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let first = eval_expr(host, &node.first, cx)?;
+    let rest = {
+                let mut v = Vec::new();
+                for n in &node.rest {
+                    match eval_more_elem(host, n, cx) {
+                        Ok(x) => v.push(x),
+                        Err(Error::AlreadyReported) => continue,
+                        Err(e) => return Err(e),
+                    }
+                }
+                v
+            };
+    host.exprs(first, rest, cx)
+}
+
+impl Eval for Exprs {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_exprs(host, self, cx)
     }
 }
 
@@ -914,6 +1051,22 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_whilst::run(self, cond, body, cx)
             }
+            fn stmt_define(
+                &mut self,
+                name: &str,
+                params: &[String],
+                body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_define::run(self, name, params, body, cx)
+            }
+            fn stmt_ret(
+                &mut self,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_ret::run(self, value, cx)
+            }
             fn stmt_eval(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
@@ -950,6 +1103,14 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::primary_elem::run(self, name, index, cx)
             }
+            fn primary_call(
+                &mut self,
+                name: &str,
+                args: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_call::run(self, name, args, cx)
+            }
             fn primary_var(
                 &mut self,
                 name: &str,
@@ -971,6 +1132,14 @@ macro_rules! nh_handlers {
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::more_elem::run(self, value, cx)
+            }
+            fn exprs(
+                &mut self,
+                first: <Self as $crate::generated::dispatch::Semantics>::Out,
+                rest: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::exprs::run(self, first, rest, cx)
             }
         }
         impl $crate::generated::dispatch::ShortCircuit for $host {
@@ -1036,6 +1205,22 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_whilst::run(self, cond, body, cx)
             }
+            fn stmt_define(
+                &mut self,
+                name: &str,
+                params: &[String],
+                body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_define::run(self, name, params, body, cx)
+            }
+            fn stmt_ret(
+                &mut self,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_ret::run(self, value, cx)
+            }
             fn stmt_eval(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
@@ -1072,6 +1257,14 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::primary_elem::run(self, name, index, cx)
             }
+            fn primary_call(
+                &mut self,
+                name: &str,
+                args: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_call::run(self, name, args, cx)
+            }
             fn primary_var(
                 &mut self,
                 name: &str,
@@ -1093,6 +1286,14 @@ macro_rules! nh_handlers {
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::more_elem::run(self, value, cx)
+            }
+            fn exprs(
+                &mut self,
+                first: <Self as $crate::generated::dispatch::Semantics>::Out,
+                rest: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::exprs::run(self, first, rest, cx)
             }
         }
     };

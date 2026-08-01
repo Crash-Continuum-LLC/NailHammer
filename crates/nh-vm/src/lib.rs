@@ -40,6 +40,7 @@
 //! mutable shared slots should be synchronised — something to measure instead
 //! of something to argue about.
 
+pub mod emit;
 pub mod machine;
 pub mod op;
 pub mod program;
@@ -47,6 +48,7 @@ pub mod store;
 pub mod value;
 pub mod wire;
 
+pub use emit::{Emit, Emitter};
 pub use machine::{Machine, Snapshot, Step};
 pub use program::{FnDef, Program};
 pub use op::{Cmp, ExtCx, Extension, Flow, NoExt, Op, Reg};

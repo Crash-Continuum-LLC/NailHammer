@@ -16,7 +16,7 @@
 // host whose `Out` is a register cannot answer.
 
 use nh_runtime::{Ctx, Result, Shared};
-use nh_vm::{Cmp, Op, Reg};
+use nh_vm::{Cmp, Emitter, Op, Reg};
 
 use super::dispatch::{CompareOp, Eval, Operators, ShortCircuit};
 use super::ast::Expr;
