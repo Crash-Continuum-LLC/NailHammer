@@ -247,7 +247,12 @@ so, rather than quietly compiling the previous grammar.
 > clone instead, or `cargo install --path crates/nh-cli` to put your working
 > copy on the `PATH`.
 
-Read [USAGE.md](USAGE.md) for the language reference, and
+**New here?** [**guide/**](guide/README.md) is a short book that builds a small
+language from an empty file: tokens, expressions you do not write, handlers,
+control flow, assignment, and error recovery. About an hour, and each chapter
+ends with something that runs.
+
+Then [USAGE.md](USAGE.md) for the language reference, and
 [DESIGN.md](DESIGN.md) for why it is built this way — including a running
 record of what went wrong and what that taught.
 

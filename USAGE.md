@@ -204,6 +204,10 @@ $ nh check mylang.nh --json
 
 ---
 
+> **Building your first language?** [`guide/`](guide/README.md) walks through
+> one from an empty file, in order, with each chapter ending in something that
+> runs. This document is the reference to reach for once you know the shape.
+
 ## Your first grammar
 
 ```nh
