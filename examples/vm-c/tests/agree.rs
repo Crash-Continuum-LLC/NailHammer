@@ -171,3 +171,50 @@ fn assignment_and_reference_reach_one_slot() {
     assert_eq!(vm_c::run(&p).expect("runs"), ["42"]);
     assert_eq!(p.globals, 1, "one variable, one slot");
 }
+
+// ---------------------------------------------------------------------------
+// The boundary is bytes (VM-DESIGN.md §8.1)
+// ---------------------------------------------------------------------------
+
+/// Source in one place, bytes in the middle, execution somewhere else.
+///
+/// Nothing but the byte stream connects the two halves — no Rust types cross,
+/// which is what makes two vendored copies of `nh-vm` indistinguishable and a
+/// plugin able to compile without linking an execution engine.
+#[test]
+fn a_program_runs_from_bytes_alone() {
+    let compiled = vm_c::compile("x = 6; print x * 7;").expect("compiles");
+    let bytes = compiled.to_bytes();
+
+    // Everything past here has only the bytes.
+    let loaded = nh_vm::Program::<nh_vm::NoExt>::from_bytes(&bytes).expect("loads");
+    let globals = nh_vm::DefaultStore::new(loaded.globals);
+    let mut m = nh_vm::Machine::new(&loaded, &globals);
+
+    assert!(matches!(m.resume(), nh_vm::Step::Done));
+    assert_eq!(m.output, ["42"]);
+}
+
+/// **Two languages, one host.** The strongest form of the claim: a host that
+/// knows neither grammar loads bytecode from both and runs them the same way.
+///
+/// This is what the whole design is for. If it needed to know which language
+/// produced a stream, "pluggable" would be a word rather than a property.
+#[test]
+fn one_host_runs_bytecode_from_both_languages() {
+    let from_c = vm_c::compile("print 2 + 3 * 4;").expect("C compiles").to_bytes();
+    let from_basic = vm_basic::compile("PRINT 2 + 3 * 4\n").expect("BASIC compiles").to_bytes();
+
+    // The "host": no mention of either language, only the format.
+    let run = |bytes: &[u8]| {
+        let p = nh_vm::Program::<nh_vm::NoExt>::from_bytes(bytes).expect("loads");
+        let globals = nh_vm::DefaultStore::new(p.globals);
+        let mut m = nh_vm::Machine::new(&p, &globals);
+        assert!(matches!(m.resume(), nh_vm::Step::Done));
+        m.output
+    };
+
+    assert_eq!(run(&from_c), ["14"]);
+    assert_eq!(run(&from_basic), ["14"]);
+    assert_eq!(from_c, from_basic, "same program, same bytes, whatever it was written in");
+}

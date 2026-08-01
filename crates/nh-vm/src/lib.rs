@@ -45,6 +45,7 @@ pub mod op;
 pub mod program;
 pub mod store;
 pub mod value;
+pub mod wire;
 
 pub use machine::{Machine, Step};
 pub use program::{FnDef, Program};
@@ -54,3 +55,4 @@ pub use store::{
     SharedStore, Slot,
 };
 pub use value::Value;
+pub use wire::{Reader, Wire, WireError, FORMAT_VERSION};
