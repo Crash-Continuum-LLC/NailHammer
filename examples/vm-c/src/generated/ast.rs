@@ -35,6 +35,7 @@ pub struct Program {
 #[derive(Clone, Debug)]
 pub enum Stmt {
     Print(Shared<StmtPrint>),
+    Ifelse(Shared<StmtIfelse>),
     Iff(Shared<StmtIff>),
     Whilst(Shared<StmtWhilst>),
     Define(Shared<StmtDefine>),
@@ -46,6 +47,15 @@ pub enum Stmt {
 #[derive(Clone, Debug)]
 pub struct StmtPrint {
     pub value: Shared<Expr>,
+    pub span: Span,
+}
+
+/// From `rule stmt = "if" "(" cond:expr ")" lazy body:block "else" lazy alt:block -> ifelse`.
+#[derive(Clone, Debug)]
+pub struct StmtIfelse {
+    pub cond: Shared<Expr>,
+    pub body: Shared<Block>,
+    pub alt: Shared<Block>,
     pub span: Span,
 }
 
@@ -261,6 +271,9 @@ pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Stmt>> {
             Rule::stmt_print => {
                 return Ok(Shared::new(Stmt::Print(build_stmt_print(pair, file)?)))
             }
+            Rule::stmt_ifelse => {
+                return Ok(Shared::new(Stmt::Ifelse(build_stmt_ifelse(pair, file)?)))
+            }
             Rule::stmt_iff => {
                 return Ok(Shared::new(Stmt::Iff(build_stmt_iff(pair, file)?)))
             }
@@ -287,6 +300,17 @@ pub fn build_stmt_print(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Stm
     let view = StmtPrintView::from_pair(pair, file);
     Ok(Shared::new(StmtPrint {
         value: build_expr(view.value().into_pair(), file)?,
+        span: view.span(),
+    }))
+}
+
+/// Builds `StmtIfelse` from `"if" "(" cond:expr ")" lazy body:block "else" lazy alt:block -> ifelse`.
+pub fn build_stmt_ifelse(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtIfelse>> {
+    let view = StmtIfelseView::from_pair(pair, file);
+    Ok(Shared::new(StmtIfelse {
+        cond: build_expr(view.cond().into_pair(), file)?,
+        body: build_block(view.body().into_pair(), file)?,
+        alt: build_block(view.alt().into_pair(), file)?,
         span: view.span(),
     }))
 }

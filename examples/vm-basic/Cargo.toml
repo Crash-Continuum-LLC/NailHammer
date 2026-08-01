@@ -4,6 +4,7 @@ description = "A BASIC-flavoured language compiled to nh-vm bytecode — operato
 version = "0.1.0"
 publish = false
 edition = "2021"
+default-run = "vm-basic"
 
 build = "build.rs"
 

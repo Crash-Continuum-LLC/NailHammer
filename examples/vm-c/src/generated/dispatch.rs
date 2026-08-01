@@ -258,6 +258,12 @@ pub trait Handlers: Operators + Sized {
     /// * `value` — the value of the `expr` rule, already evaluated
     fn stmt_print(&mut self, value: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
 
+    /// `stmt_ifelse` — from `rule stmt = "if" "(" cond:expr ")" lazy body:block "else" lazy alt:block -> ifelse`.
+    /// * `cond` — the value of the `expr` rule, already evaluated
+    /// * `body` — the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
+    /// * `alt` — the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
+    fn stmt_ifelse(&mut self, cond: Self::Out, body: &Shared<Block>, alt: &Shared<Block>, cx: &mut Ctx) -> Result<Self::Out>;
+
     /// `stmt_iff` — from `rule stmt = "if" "(" cond:expr ")" lazy body:block -> iff`.
     /// * `cond` — the value of the `expr` rule, already evaluated
     /// * `body` — the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
@@ -375,6 +381,7 @@ impl Eval for Program {
 pub fn eval_stmt<H: Handlers>(host: &mut H, node: &Stmt, cx: &mut Ctx) -> Result<H::Out> {
     match node {
         Stmt::Print(n) => eval_stmt_print(host, n, cx),
+        Stmt::Ifelse(n) => eval_stmt_ifelse(host, n, cx),
         Stmt::Iff(n) => eval_stmt_iff(host, n, cx),
         Stmt::Whilst(n) => eval_stmt_whilst(host, n, cx),
         Stmt::Define(n) => eval_stmt_define(host, n, cx),
@@ -411,6 +418,33 @@ fn eval_stmt_print_inner<H: Handlers>(
 impl Eval for StmtPrint {
     fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
         eval_stmt_print(host, self, cx)
+    }
+}
+
+/// Evaluates `stmt`, from `"if" "(" cond:expr ")" lazy body:block "else" lazy alt:block -> ifelse`.
+pub fn eval_stmt_ifelse<H: Handlers>(host: &mut H, node: &StmtIfelse, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_stmt_ifelse_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_stmt_ifelse_inner<H: Handlers>(
+    host: &mut H,
+    node: &StmtIfelse,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let cond = eval_expr(host, &node.cond, cx)?;
+    let body = &node.body;
+    let alt = &node.alt;
+    host.stmt_ifelse(cond, body, alt, cx)
+}
+
+impl Eval for StmtIfelse {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_stmt_ifelse(host, self, cx)
     }
 }
 
@@ -1035,6 +1069,15 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_print::run(self, value, cx)
             }
+            fn stmt_ifelse(
+                &mut self,
+                cond: <Self as $crate::generated::dispatch::Semantics>::Out,
+                body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                alt: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_ifelse::run(self, cond, body, alt, cx)
+            }
             fn stmt_iff(
                 &mut self,
                 cond: <Self as $crate::generated::dispatch::Semantics>::Out,
@@ -1188,6 +1231,15 @@ macro_rules! nh_handlers {
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_print::run(self, value, cx)
+            }
+            fn stmt_ifelse(
+                &mut self,
+                cond: <Self as $crate::generated::dispatch::Semantics>::Out,
+                body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                alt: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_ifelse::run(self, cond, body, alt, cx)
             }
             fn stmt_iff(
                 &mut self,

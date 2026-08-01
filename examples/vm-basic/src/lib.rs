@@ -37,6 +37,12 @@ pub struct BasicLangParser;
 #[derive(Debug, Default)]
 pub struct Interp {
     emit: Emit<NoExt>,
+    /// How many arguments the most recent list held.
+    ///
+    /// `Out` is uniformly `Reg`, so a handler cannot hand back a register *and*
+    /// a count. The count rides here instead -- language-specific state, which
+    /// is why it is on `Interp` rather than in `Emit`.
+    pub argc: usize,
 }
 
 impl Emitter for Interp {

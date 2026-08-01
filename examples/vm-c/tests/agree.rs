@@ -10,6 +10,11 @@
 //! gets is everything else.
 
 /// The same program, written twice.
+///
+/// **Keep these two in step.** The point of the pair is that a change to one
+/// language shows up as a difference in bytecode, and a program that exercises
+/// less of the language proves less. `the_pair_covers_the_whole_language`
+/// below fails if a construct exists in a grammar and is missing from here.
 const C: &str = r#"
 x = 10;
 y = 4;
@@ -223,6 +228,57 @@ fn one_host_runs_bytecode_from_both_languages() {
 // Sequences
 // ---------------------------------------------------------------------------
 
+/// Every construct the pair is supposed to cover, anchored on the text that
+/// *defines* it in each grammar.
+///
+/// Anchors, not bare words. A first version matched `"LEN"` anywhere, and
+/// deleting the operator left the entry in `reserved from` — so the guard
+/// passed while the languages had genuinely diverged. A guard that can be
+/// satisfied by a keyword list is not a guard.
+const COVERED: &[(&str, &str, &str)] = &[
+    ("print", r#""print" value:expr"#, r#""PRINT" value:expr"#),
+    ("if", r#""if" "(" cond"#, r#""IF" cond"#),
+    ("else", r#""else" lazy alt"#, r#""ELSE" lazy alt"#),
+    ("while", r#""while" "(""#, r#""WHILE" lazy cond"#),
+    ("functions", r#""fn" name:IDENT"#, r#""FUNCTION" name:IDENT"#),
+    ("return", r#""return" value:expr"#, r#""RETURN" value:expr"#),
+    ("calls", r#"name:IDENT "(" args"#, r#"name:IDENT "(" args"#),
+    ("await", r#"prefix word "await""#, r#"prefix word "AWAIT""#),
+    ("len", r#"prefix word "len""#, r#"prefix word "LEN""#),
+    ("array literals", r#""[" first:expr"#, r#""[" first:expr"#),
+    ("indexing", r#"name:IDENT "[" index:expr "]""#, r#"name:IDENT "[" index:expr "]""#),
+    ("strings", "text:STRING", "text:STRING"),
+];
+
+/// The guard against this pair quietly becoming a pair of *different*
+/// languages.
+///
+/// The agreement tests only compare a program written twice, so they prove
+/// exactly as much as that program exercises. The twins diverged badly once —
+/// functions, arrays, strings, `await` and `len` existed only in C for several
+/// commits — and every agreement test still passed, because the shared sample
+/// used none of them. A test that reads like broad coverage while covering less
+/// and less is worse than no test.
+///
+/// This one fails when a construct is in one grammar and not the other.
+#[test]
+fn the_pair_covers_the_whole_language() {
+    let c = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/lang.nh")).unwrap();
+    let b = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../vm-basic/lang.nh"))
+        .unwrap();
+
+    let mut missing = Vec::new();
+    for (feature, in_c, in_b) in COVERED {
+        if !c.contains(in_c) {
+            missing.push(format!("{feature}: vm-c no longer has `{in_c}`"));
+        }
+        if !b.contains(in_b) {
+            missing.push(format!("{feature}: vm-basic no longer has `{in_b}`"));
+        }
+    }
+    assert!(missing.is_empty(), "the twins have diverged:\n  {}", missing.join("\n  "));
+}
+
 fn run_c(src: &str) -> Vec<String> {
     vm_c::run(&vm_c::compile(src).expect("compiles")).expect("runs")
 }
@@ -424,4 +480,67 @@ fn recursion_is_bounded_rather_than_taking_the_process_down() {
         Err(e) => assert!(e.contains("call stack exceeded"), "{e}"),
         Ok(o) => panic!("expected a failure, got {o:?}"),
     }
+}
+
+/// The same *program* in both languages, using everything the pair covers.
+///
+/// The narrow version of this — arithmetic and a loop — is what let the twins
+/// drift. This one has to be updated when a language grows, which is the point.
+#[test]
+fn the_twins_agree_on_a_program_that_uses_everything() {
+    let c = r#"
+fn fact(n) { if (n < 2) { return 1; } else { return n * fact(n - 1); } }
+print fact(5);
+a = [10, 20, 30];
+a[1] = 99;
+print a;
+print len a;
+s = "hammer";
+print s[0];
+print "nail" + s;
+n = 0;
+while (n < 3) { print n; n = n + 1; }
+print 12 & 10;
+print 0 && (1 / 0);
+"#;
+    let b = r#"
+FUNCTION fact(n)
+IF n < 2 THEN
+RETURN 1
+ELSE
+RETURN n * fact(n - 1)
+END IF
+END FUNCTION
+PRINT fact(5)
+LET a = [10, 20, 30]
+LET a[1] = 99
+PRINT a
+PRINT LEN a
+LET s = "hammer"
+PRINT s[0]
+PRINT "nail" + s
+LET n = 0
+WHILE n < 3
+PRINT n
+LET n = n + 1
+WEND
+PRINT 12 AND 10
+PRINT 0 ANDALSO (1 / 0)
+"#;
+
+    let cp = vm_c::compile(c).expect("C compiles");
+    let bp = vm_basic::compile(b).expect("BASIC compiles");
+
+    let out = vm_c::run(&cp).expect("C runs");
+    assert_eq!(
+        out,
+        ["120", "[10, 99, 30]", "3", "h", "nailhammer", "0", "1", "2", "8", "0"],
+        "and the answers are right, not merely equal"
+    );
+    assert_eq!(vm_basic::run(&bp).expect("BASIC runs"), out, "two syntaxes, one language");
+
+    // The strong form: same decisions, not merely the same answers.
+    assert_eq!(cp.code.len(), bp.code.len(), "same instruction count");
+    assert_eq!(cp.fns.len(), bp.fns.len(), "same functions");
+    assert_eq!(format!("{:?}", cp.code), format!("{:?}", bp.code), "instruction for instruction");
 }

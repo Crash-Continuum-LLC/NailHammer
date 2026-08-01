@@ -103,6 +103,20 @@ impl Operators for crate::Interp {
         self.emit(Op::Not { dst, a: operand });
         Ok(dst)
     }
+
+    /// `AWAIT` — emits `Op::Await`.
+    fn r#await(&mut self, operand: Reg) -> Result<Reg> {
+        let dst = self.reuse(&[operand]);
+        self.emit(Op::Await { dst, src: operand });
+        Ok(dst)
+    }
+
+    /// `LEN` — emits `Op::Len`.
+    fn len(&mut self, operand: Reg) -> Result<Reg> {
+        let dst = self.reuse(&[operand]);
+        self.emit(Op::Len { dst, src: operand });
+        Ok(dst)
+    }
 }
 
 impl ShortCircuit for crate::Interp {

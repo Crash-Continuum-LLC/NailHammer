@@ -86,6 +86,66 @@ impl<'i> StmtPrintView<'i> {
     }
 }
 
+/// One matched `stmt_ifelse`.
+///
+/// From this alternative of `rule stmt`:
+///
+/// ```text
+/// "if" "(" cond:expr ")" lazy body:block "else" lazy alt:block -> ifelse
+/// ```
+#[derive(Clone, Debug)]
+pub struct StmtIfelseView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for StmtIfelseView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        StmtIfelseView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> StmtIfelseView<'i> {
+
+    /// `cond` — the `expr` rule.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `cond: Self::Out`:
+    /// the value of the `expr` rule, already evaluated
+    pub fn cond(&self) -> Node<'i, Rule> {
+        self.node.tagged("cond").expect(
+            "the grammar guarantees `cond` is present; regenerate if it changed",
+        )
+    }
+
+    /// `body` — the `block` rule.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `body: &Shared<Block>`:
+    /// the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
+    pub fn body(&self) -> Node<'i, Rule> {
+        self.node.tagged("body").expect(
+            "the grammar guarantees `body` is present; regenerate if it changed",
+        )
+    }
+
+    /// `alt` — the `block` rule.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `alt: &Shared<Block>`:
+    /// the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
+    pub fn alt(&self) -> Node<'i, Rule> {
+        self.node.tagged("alt").expect(
+            "the grammar guarantees `alt` is present; regenerate if it changed",
+        )
+    }
+}
+
 /// One matched `stmt_iff`.
 ///
 /// From this alternative of `rule stmt`:

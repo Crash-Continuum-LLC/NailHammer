@@ -17,8 +17,9 @@ expr = { nh_pre_op* ~ atom ~ (nh_bin_op ~ nh_pre_op* ~ atom)* }
 
 // Rules
 program = { SOI ~ (#body = stmt)+ ~ EOI }
-stmt = { stmt_print | stmt_iff | stmt_whilst | stmt_define | stmt_ret | stmt_eval }
+stmt = { stmt_print | stmt_ifelse | stmt_iff | stmt_whilst | stmt_define | stmt_ret | stmt_eval }
 stmt_print = { nh_kw_print ~ #value = expr ~ ";" }
+stmt_ifelse = { nh_kw_if ~ "(" ~ #cond = expr ~ ")" ~ #body = block ~ nh_kw_else ~ #alt = block }
 stmt_iff = { nh_kw_if ~ "(" ~ #cond = expr ~ ")" ~ #body = block }
 stmt_whilst = { nh_kw_while ~ "(" ~ #cond = expr ~ ")" ~ #body = block }
 stmt_define = { nh_kw_fn ~ #name = IDENT ~ "(" ~ (#params = IDENT ~ ","?)* ~ ")" ~ #body = block }
@@ -41,7 +42,7 @@ exprs = { #first = expr ~ (#rest = more_elem)* }
 // ---------------------------------------------------------------------------
 
 nh_cont_IDENT = _{ "_" | ALPHA | DIGIT }
-nh_reserved_IDENT = @{ ("return" | "await" | "print" | "while" | "len" | "fn" | "if") ~ !nh_cont_IDENT }
+nh_reserved_IDENT = @{ ("return" | "await" | "print" | "while" | "else" | "len" | "fn" | "if") ~ !nh_cont_IDENT }
 nh_op_bang_eq = @{ "!=" }
 nh_op_amp_amp = @{ "&&" }
 nh_op_lt_eq = @{ "<=" }
@@ -65,6 +66,7 @@ nh_op_bang = @{ "!" }
 nh_pre_op = _{ nh_op_await | nh_op_len | nh_op_bang | nh_op_minus }
 nh_kw_print = @{ "print" ~ !nh_cont_IDENT }
 nh_kw_if = @{ "if" ~ !nh_cont_IDENT }
+nh_kw_else = @{ "else" ~ !nh_cont_IDENT }
 nh_kw_while = @{ "while" ~ !nh_cont_IDENT }
 nh_kw_fn = @{ "fn" ~ !nh_cont_IDENT }
 nh_kw_return = @{ "return" ~ !nh_cont_IDENT }

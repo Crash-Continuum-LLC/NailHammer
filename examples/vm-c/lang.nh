@@ -16,7 +16,7 @@ token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 token STRING = @ "\"" (!"\"" ANY)* "\"";
 
-reserved from IDENT { "print" "if" "while" "await" "len" "fn" "return" }
+reserved from IDENT { "print" "if" "else" "while" "await" "len" "fn" "return" }
 
 // The operator table is the language's own; the instructions it lowers to are
 // the machine's. That split is the whole point of the target.
@@ -41,6 +41,7 @@ rule program = SOI body:stmt+ EOI -> program;
 
 rule stmt
   = "print" value:expr ";"                             -> print
+  | "if" "(" cond:expr ")" lazy body:block "else" lazy alt:block -> ifelse
   | "if" "(" cond:expr ")" lazy body:block             -> iff
   | "while" "(" lazy cond:expr ")" lazy body:block     -> whilst
   | "fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define

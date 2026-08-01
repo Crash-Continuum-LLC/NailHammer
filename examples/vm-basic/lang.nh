@@ -16,9 +16,10 @@ token DIGIT = @ "0".."9";
 token ALPHA = @ "a".."z" | "A".."Z";
 token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT = @ ALPHA (ALPHA | DIGIT)*;
+token STRING = @ "\"" (!"\"" ANY)* "\"";
 token EOL = @ "\n";
 
-reserved from IDENT { "PRINT" "LET" "IF" "THEN" "END" "WHILE" "WEND" "NOT" "AND" "OR" "XOR" "ANDALSO" "ORELSE" }
+reserved from IDENT { "PRINT" "LET" "IF" "THEN" "ELSE" "END" "WHILE" "WEND" "NOT" "AND" "OR" "XOR" "ANDALSO" "ORELSE" "FUNCTION" "RETURN" "AWAIT" "LEN" }
 
 // Word operators, and the same roles the C twin binds.
 precedence {
@@ -32,6 +33,8 @@ precedence {
     left   "*" | "/";
     prefix "-";
     prefix word "NOT" -> not;
+    prefix word "AWAIT" -> await;
+    prefix word "LEN" -> len;
     atom   atom;
 }
 
@@ -40,9 +43,13 @@ rule line = body:stmt EOL+ -> code | EOL -> blank;
 
 rule stmt
   = "PRINT" value:expr                                         -> print
+  | "IF" cond:expr "THEN" lazy body:block "ELSE" lazy alt:block "END" "IF" -> ifelse
   | "IF" cond:expr "THEN" lazy body:block "END" "IF"           -> iff
   | "WHILE" lazy cond:expr lazy body:block "WEND"              -> whilst
+  | "LET" name:IDENT "[" index:expr "]" "=" value:expr         -> setelem
   | "LET" name:IDENT "=" value:expr                            -> assign
+  | "FUNCTION" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block "END" "FUNCTION" -> define
+  | "RETURN" value:expr                                        -> ret
   ;
 
 // Same shape as the C twin's, for the same reason: `lazy` is what lets a
@@ -52,7 +59,14 @@ rule block = EOL+ body:line+ -> block;
 rule atom = primary;
 
 rule primary
-  = value:NUMBER       -> num
-  | name:IDENT         -> var place
-  | "(" inner:expr ")" -> pass
+  = value:NUMBER                       -> num
+  | text:STRING                        -> str
+  | name:IDENT "[" index:expr "]"      -> elem place
+  | name:IDENT "(" args:exprs? ")"     -> call
+  | name:IDENT                         -> var place
+  | "[" first:expr rest:more_elem* "]" -> list
+  | "(" inner:expr ")"                 -> pass
   ;
+
+rule more_elem = "," value:expr -> next;
+rule exprs = first:expr rest:more_elem* -> some;

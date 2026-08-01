@@ -10,6 +10,7 @@ DIGIT = @{ '0'..'9' }
 ALPHA = @{ 'a'..'z' | 'A'..'Z' }
 NUMBER_ = @{ DIGIT+ ~ ("." ~ DIGIT+)? }
 IDENT = @{ !nh_reserved_IDENT ~ (ALPHA ~ (ALPHA | DIGIT)*) }
+STRING = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 EOL = @{ "\n" }
 
 // Expressions (operator table is resolved at build time)
@@ -20,23 +21,33 @@ program = { SOI ~ (#body = line)+ ~ EOI }
 line = { line_code | line_blank }
 line_code = { #body = stmt ~ EOL+ }
 line_blank = { EOL }
-stmt = { stmt_print | stmt_iff | stmt_whilst | stmt_assign }
+stmt = { stmt_print | stmt_ifelse | stmt_iff | stmt_whilst | stmt_setelem | stmt_assign | stmt_define | stmt_ret }
 stmt_print = { nh_kw_print ~ #value = expr }
+stmt_ifelse = { nh_kw_if ~ #cond = expr ~ nh_kw_then ~ #body = block ~ nh_kw_else ~ #alt = block ~ nh_kw_end ~ nh_kw_if }
 stmt_iff = { nh_kw_if ~ #cond = expr ~ nh_kw_then ~ #body = block ~ nh_kw_end ~ nh_kw_if }
 stmt_whilst = { nh_kw_while ~ #cond = expr ~ #body = block ~ nh_kw_wend }
+stmt_setelem = { nh_kw_let ~ #name = IDENT ~ "[" ~ #index = expr ~ "]" ~ "=" ~ #value = expr }
 stmt_assign = { nh_kw_let ~ #name = IDENT ~ "=" ~ #value = expr }
+stmt_define = { nh_kw_function ~ #name = IDENT ~ "(" ~ (#params = IDENT ~ ","?)* ~ ")" ~ #body = block ~ nh_kw_end ~ nh_kw_function }
+stmt_ret = { nh_kw_return ~ #value = expr }
 block = { EOL+ ~ (#body = line)+ }
 atom = { primary }
-primary = { primary_num | primary_var | "(" ~ #inner = expr ~ ")" }
+primary = { primary_num | primary_str | primary_elem | primary_call | primary_var | primary_list | "(" ~ #inner = expr ~ ")" }
 primary_num = { #value = NUMBER_ }
+primary_str = { #text = STRING }
+primary_elem = { #name = IDENT ~ "[" ~ #index = expr ~ "]" }
+primary_call = { #name = IDENT ~ "(" ~ (#args = exprs)? ~ ")" }
 primary_var = { #name = IDENT }
+primary_list = { "[" ~ #first = expr ~ (#rest = more_elem)* ~ "]" }
+more_elem = { "," ~ #value = expr }
+exprs = { #first = expr ~ (#rest = more_elem)* }
 
 // ---------------------------------------------------------------------------
 // Generated support rules
 // ---------------------------------------------------------------------------
 
 nh_cont_IDENT = _{ ALPHA | DIGIT }
-nh_reserved_IDENT = @{ (^"ANDALSO" | ^"ORELSE" | ^"PRINT" | ^"WHILE" | ^"THEN" | ^"WEND" | ^"AND" | ^"END" | ^"LET" | ^"NOT" | ^"XOR" | ^"IF" | ^"OR") ~ !nh_cont_IDENT }
+nh_reserved_IDENT = @{ (^"FUNCTION" | ^"ANDALSO" | ^"ORELSE" | ^"RETURN" | ^"AWAIT" | ^"PRINT" | ^"WHILE" | ^"ELSE" | ^"THEN" | ^"WEND" | ^"AND" | ^"END" | ^"LEN" | ^"LET" | ^"NOT" | ^"XOR" | ^"IF" | ^"OR") ~ !nh_cont_IDENT }
 nh_op_andalso = @{ ^"ANDALSO" ~ !nh_cont_IDENT }
 nh_op_orelse = @{ ^"ORELSE" ~ !nh_cont_IDENT }
 nh_op_and = @{ ^"AND" ~ !nh_cont_IDENT }
@@ -53,12 +64,17 @@ nh_op_lt = @{ "<" }
 nh_op_eq = @{ "=" }
 nh_op_gt = @{ ">" }
 nh_bin_op = _{ nh_op_andalso | nh_op_orelse | nh_op_and | nh_op_xor | nh_op_lt_eq | nh_op_lt_gt | nh_op_gt_eq | nh_op_or | nh_op_star | nh_op_plus | nh_op_minus | nh_op_slash | nh_op_lt | nh_op_eq | nh_op_gt }
+nh_op_await = @{ ^"AWAIT" ~ !nh_cont_IDENT }
+nh_op_len = @{ ^"LEN" ~ !nh_cont_IDENT }
 nh_op_not = @{ ^"NOT" ~ !nh_cont_IDENT }
-nh_pre_op = _{ nh_op_not | nh_op_minus }
+nh_pre_op = _{ nh_op_await | nh_op_len | nh_op_not | nh_op_minus }
 nh_kw_print = @{ ^"PRINT" ~ !nh_cont_IDENT }
 nh_kw_if = @{ ^"IF" ~ !nh_cont_IDENT }
 nh_kw_then = @{ ^"THEN" ~ !nh_cont_IDENT }
+nh_kw_else = @{ ^"ELSE" ~ !nh_cont_IDENT }
 nh_kw_end = @{ ^"END" ~ !nh_cont_IDENT }
 nh_kw_while = @{ ^"WHILE" ~ !nh_cont_IDENT }
 nh_kw_wend = @{ ^"WEND" ~ !nh_cont_IDENT }
 nh_kw_let = @{ ^"LET" ~ !nh_cont_IDENT }
+nh_kw_function = @{ ^"FUNCTION" ~ !nh_cont_IDENT }
+nh_kw_return = @{ ^"RETURN" ~ !nh_cont_IDENT }

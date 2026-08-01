@@ -18,6 +18,7 @@ pub mod primary_var;
 pub mod program;
 pub mod stmt_define;
 pub mod stmt_eval;
+pub mod stmt_ifelse;
 pub mod stmt_iff;
 pub mod stmt_print;
 pub mod stmt_ret;
