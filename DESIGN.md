@@ -211,9 +211,11 @@ short-circuit operators. NailHammer generates its own driver.
 
 ---
 
-## 3. The `.nh` language (sketch)
+## 3. The `.nh` language
 
-Illustrative, not final. The point is which constructs must exist.
+Every construct the language must carry, in one file. This one parses — the
+character classes are written out because `.nh` has no `digit` or `alpha`
+builtin, which is itself one of the decisions below.
 
 ```nh
 grammar Calc;
@@ -229,10 +231,14 @@ precedence override {
 skip  WHITESPACE = " " | "\t" | "\r" | "\n";
 skip  COMMENT    = "//" (!"\n" ANY)*;
 
-token NUMBER = @ digit+ ("." digit+)?;
-token IDENT  = @ (alpha | "_") (alnum | "_")*;
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 
 reserved from IDENT { "let" "if" "else" "while" "fn" "return" }
+
+rule program = SOI body:stmt* EOI -> program;
 
 rule atom
   = value:NUMBER                          -> num
@@ -245,6 +251,8 @@ rule stmt
   | "if" cond:expr body:block             -> if_stmt
   | value:expr ";"                        -> expr_stmt
   ;
+
+rule block = "{" body:stmt* "}" -> block;
 
 recover stmt sync ";" | "}";
 expect "(" in atom as "opening parenthesis";
@@ -721,6 +729,8 @@ delta-only override was rejected: its operators are *words*, `^` is
 exponentiation rather than XOR, `NOT` binds **looser** than comparison (so
 `NOT A = B` means `NOT (A = B)` — the opposite of C's `!`), and classic
 `AND`/`OR` are bitwise and **non**-short-circuiting.
+
+The table alone — the grammar's tokens and its `primary` rule are omitted:
 
 ```nh
 grammar Basic;
