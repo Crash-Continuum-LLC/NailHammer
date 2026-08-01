@@ -105,6 +105,13 @@ impl Operators for crate::Interp {
         Ok(dst)
     }
 
+    /// `await` — emits `Op::Await`.
+    fn r#await(&mut self, operand: Reg) -> Result<Reg> {
+        let dst = self.reuse(&[operand]);
+        self.emit(Op::Await { dst, src: operand });
+        Ok(dst)
+    }
+
     /// Stores `value` at `place`, and yields it — so `a = b = 1` chains.
     fn assign(&mut self, place: Place<'_, Reg>, value: Reg) -> Result<Reg> {
         match place {

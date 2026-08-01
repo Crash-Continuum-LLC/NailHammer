@@ -15,7 +15,7 @@ token ALPHA = @ "a".."z" | "A".."Z";
 token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 
-reserved from IDENT { "print" "if" "while" }
+reserved from IDENT { "print" "if" "while" "await" }
 
 // The operator table is the language's own; the instructions it lowers to are
 // the machine's. That split is the whole point of the target.
@@ -31,6 +31,7 @@ precedence {
     left   "*" | "/";
     prefix "-";
     prefix "!" -> not;
+    prefix word "await" -> await;
     atom   atom;
 }
 

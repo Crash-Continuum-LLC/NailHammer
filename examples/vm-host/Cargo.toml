@@ -1,0 +1,13 @@
+[package]
+name = "vm-host"
+description = "A host that runs bytecode from any NailHammer language, interleaving programs that suspend"
+version = "0.1.0"
+publish = false
+edition = "2021"
+
+[dependencies]
+nh-vm = { path = "../../crates/nh-vm" }
+
+[dev-dependencies]
+vm-c = { path = "../vm-c" }
+vm-basic = { path = "../vm-basic" }

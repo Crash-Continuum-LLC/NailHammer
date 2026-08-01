@@ -210,6 +210,12 @@ pub trait Operators: ShortCircuit {
         Err(Error::unsupported("not"))
     }
 
+    /// `await` (prefix).
+    fn r#await(&mut self, operand: Self::Out) -> Result<Self::Out> {
+        let _ = operand;
+        Err(Error::unsupported("await"))
+    }
+
     /// Stores `value` at `place`.
     ///
     /// `place` arrives with its parts already evaluated, so a subscript
@@ -552,6 +558,7 @@ pub fn op_info(rule: Rule) -> Option<OpInfo> {
     match rule {
         Rule::nh_op_amp => info(6, Fixity::Infix, Assoc::Left),
         Rule::nh_op_amp_amp => info(3, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_await => info(12, Fixity::Prefix, Assoc::Right),
         Rule::nh_op_bang => info(11, Fixity::Prefix, Assoc::Right),
         Rule::nh_op_bang_eq => info(7, Fixity::Infix, Assoc::Left),
         Rule::nh_op_caret => info(5, Fixity::Infix, Assoc::Left),
@@ -585,6 +592,7 @@ pub fn prefix_info(rule: Rule) -> Option<OpInfo> {
     match rule {
         Rule::nh_op_minus => info(10),
         Rule::nh_op_bang => info(11),
+        Rule::nh_op_await => info(12),
         _ => None,
     }
 }
@@ -606,6 +614,7 @@ pub fn eval_expr<H: Handlers>(
             match op {
                 Rule::nh_op_minus => host.neg(value),
                 Rule::nh_op_bang => host.not(value),
+                Rule::nh_op_await => host.r#await(value),
                 other => Err(Error::runtime(format!(
                     "`{other:?}` is not a prefix operator"
                 ))),

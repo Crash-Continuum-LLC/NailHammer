@@ -75,6 +75,32 @@ impl<'a, X: Extension, S: SharedStore> Machine<'a, X, S> {
         self.frames.len()
     }
 
+    /// Everything a suspended program needs to carry on later.
+    ///
+    /// A `Machine` borrows its program and its store, so a host that runs many
+    /// programs cannot simply keep one alive per task without tangling
+    /// lifetimes. This is the way out: a suspended machine's state is a value,
+    /// so a host can hold it, schedule something else, and resume later — which
+    /// is the whole reason `Step::Awaiting` exists.
+    ///
+    /// The registers are the part that is easy to forget. A program that
+    /// suspends mid-expression has operands live in its frame, and losing them
+    /// would make `await` work only as the first thing a program does.
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            pc: self.pc,
+            frames: self.frames.clone(),
+            awaiting: self.awaiting,
+        }
+    }
+
+    /// Puts a machine back where a snapshot left off.
+    pub fn restore(&mut self, s: Snapshot) {
+        self.pc = s.pc;
+        self.frames = s.frames;
+        self.awaiting = s.awaiting;
+    }
+
     /// Runs until the program finishes, fails, or needs something.
     pub fn resume(&mut self) -> Step {
         while self.pc < self.program.code.len() {
@@ -296,6 +322,14 @@ impl<'a, X: Extension, S: SharedStore> Machine<'a, X, S> {
         self.frames[caller].regs[f.ret_reg as usize] = v;
         Ok(Flow::Jump(f.ret_pc))
     }
+}
+
+/// A suspended program, as a value. See [`Machine::snapshot`].
+#[derive(Clone, Debug)]
+pub struct Snapshot {
+    pc: usize,
+    frames: Vec<Frame>,
+    awaiting: Option<Reg>,
 }
 
 /// Deep enough for any reasonable program, shallow enough to fail before the

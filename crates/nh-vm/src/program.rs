@@ -47,7 +47,7 @@ impl<X> Default for Program<X> {
 }
 
 /// One call's registers, and where to go when it returns.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Frame {
     pub regs: Vec<crate::value::Value>,
     pub ret_pc: usize,

@@ -47,7 +47,7 @@ pub mod store;
 pub mod value;
 pub mod wire;
 
-pub use machine::{Machine, Step};
+pub use machine::{Machine, Snapshot, Step};
 pub use program::{FnDef, Program};
 pub use op::{Cmp, ExtCx, Extension, Flow, NoExt, Op, Reg};
 pub use store::{

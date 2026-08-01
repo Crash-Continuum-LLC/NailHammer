@@ -36,8 +36,10 @@ use crate::operators::{emitted, Emitted};
 pub enum Shape {
     /// `Op::Name { dst, a, b }`
     Binary(&'static str),
-    /// `Op::Name { dst, a }`
-    Unary(&'static str),
+    /// `Op::Name { dst, <field> }` — the operand's field name travels with the
+    /// shape, because it is not always `a`: `Await` calls it `src`, since what
+    /// it holds is the thing being waited on rather than an arithmetic operand.
+    Unary(&'static str, &'static str),
     /// `Op::Compare { dst, cmp, a, b }` — one instruction, discriminant as an
     /// operand, rather than six near-identical opcodes.
     Compare,
@@ -83,8 +85,8 @@ impl Target {
         ops.insert("sub", Shape::Binary("Sub"));
         ops.insert("mul", Shape::Binary("Mul"));
         ops.insert("div", Shape::Binary("Div"));
-        ops.insert("neg", Shape::Unary("Neg"));
-        ops.insert("not", Shape::Unary("Not"));
+        ops.insert("neg", Shape::Unary("Neg", "a"));
+        ops.insert("not", Shape::Unary("Not", "a"));
         ops.insert("bit_and", Shape::Binary("And"));
         ops.insert("bit_or", Shape::Binary("Or"));
         ops.insert("bit_xor", Shape::Binary("Xor"));
@@ -93,9 +95,13 @@ impl Target {
         ops.insert("shl", Shape::Binary("Shl"));
         ops.insert("shr", Shape::Binary("Shr"));
         ops.insert("shift", Shape::Compare); // grouped `<< >>` in c_style
-        ops.insert("bit_not", Shape::Unary("BitNot"));
+        ops.insert("bit_not", Shape::Unary("BitNot", "a"));
         ops.insert("pos", Shape::Identity);
         ops.insert("assign", Shape::Assign);
+        // Suspension is a unary operation on the machine: the operand is what
+        // the program is waiting on, and the result is what it is handed back.
+        // `ident` escapes the role to `r#await`, since it is a Rust keyword.
+        ops.insert("await", Shape::Unary("Await", "src"));
         // Lazy roles. Not an instruction but a *sequence with a patch point*,
         // which is why they need their own shape: short-circuiting is control
         // flow to a compiler, not an operation.
@@ -305,13 +311,13 @@ fn emit_role(out: &mut String, e: &Emitted<'_>, all: &[Emitted<'_>], target: &Ta
     let shape = target.ops[e.role.as_str()];
 
     match (shape, e.tier.fixity) {
-        (Shape::Unary(op), Fixity::Prefix | Fixity::Postfix) => {
+        (Shape::Unary(op, field), Fixity::Prefix | Fixity::Postfix) => {
             let _ = writeln!(
                 out,
                 "\n    /// `{}` — emits `Op::{op}`.\n\
                 \x20   fn {m}(&mut self, operand: Reg) -> Result<Reg> {{\n\
                 \x20       let dst = self.reuse(&[operand]);\n\
-                \x20       self.emit(Op::{op} {{ dst, a: operand }});\n\
+                \x20       self.emit(Op::{op} {{ dst, {field}: operand }});\n\
                 \x20       Ok(dst)\n\
                 \x20   }}",
                 e.op.literal
