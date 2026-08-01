@@ -17,6 +17,15 @@ use super::dispatch::{eval_expr, Handlers};
 /// expressions arrive **already evaluated**, exactly once.
 #[derive(Debug)]
 pub enum Place<'a, Out> {
+    /// From `primary_elem` (`-> elem place`).
+    PrimaryElem {
+        /// The whole target, for diagnostics.
+        span: Span,
+        /// `name` — a name, not a value.
+        name: &'a str,
+        /// `index` — evaluated once, when the place was resolved.
+        index: Out,
+    },
     /// From `primary_var` (`-> var place`).
     PrimaryVar {
         /// The whole target, for diagnostics.
@@ -32,6 +41,7 @@ impl<'a, Out> Place<'a, Out> {
     /// Where the target appears in the source.
     pub fn span(&self) -> Span {
         match self {
+            Place::PrimaryElem { span, .. } => *span,
             Place::PrimaryVar { span, .. } => *span,
         }
     }
@@ -64,6 +74,14 @@ fn resolve_place_primary<'a, H: Handlers>(
     cx: &mut Ctx,
 ) -> Result<Place<'a, H::Out>> {
     match node {
+        Primary::Elem(n) => {
+            let span = n.span;
+            let name = &n.name;
+            // Evaluated exactly once: this is what keeps `a[f()] += 1`
+            // from calling `f()` twice.
+            let index = eval_expr(host, &n.index, cx)?;
+            Ok(Place::PrimaryElem { span, name, index })
+        }
         Primary::Var(n) => {
             let span = n.span;
             let name = &n.name;

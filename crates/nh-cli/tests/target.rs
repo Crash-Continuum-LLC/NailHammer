@@ -149,8 +149,10 @@ fn roles_the_target_cannot_execute_stop_the_build() {
     assert!(!out.status.success(), "an unexecutable role must fail the build");
 
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("`comma` role"), "names the role: {err}");
-    assert!(err.contains("`,`"), "names a spelling the author typed: {err}");
+    // `arrow` is the last honest gap: in a C-family grammar `->` is member
+    // access, and this machine has no aggregate to reach into.
+    assert!(err.contains("`arrow` role"), "names the role: {err}");
+    assert!(err.contains("`->`"), "names a spelling the author typed: {err}");
     assert!(err.contains("nh-vm cannot execute"), "names the target: {err}");
 
     // And it must not leave a half-written file behind for a later build to

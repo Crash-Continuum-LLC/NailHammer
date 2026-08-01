@@ -218,3 +218,70 @@ fn one_host_runs_bytecode_from_both_languages() {
     assert_eq!(run(&from_basic), ["14"]);
     assert_eq!(from_c, from_basic, "same program, same bytes, whatever it was written in");
 }
+
+// ---------------------------------------------------------------------------
+// Sequences
+// ---------------------------------------------------------------------------
+
+fn run_c(src: &str) -> Vec<String> {
+    vm_c::run(&vm_c::compile(src).expect("compiles")).expect("runs")
+}
+
+#[test]
+fn arrays_are_built_indexed_and_assigned() {
+    assert_eq!(run_c("a = [10, 20, 30]; print a[0]; print a[2];"), ["10", "30"]);
+    assert_eq!(run_c("a = [1, 2]; a[1] = 9; print a;"), ["[1, 9]"]);
+    // Writing one past the end appends, so a program grows an array without a
+    // separate instruction.
+    assert_eq!(run_c("a = [1]; a[1] = 2; print a;"), ["[1, 2]"]);
+}
+
+/// Arrays are **reference types**: two names for one array see each other's
+/// writes. That is what `Arc<RwLock<..>>` buys and what `Arc<Vec<..>>` would
+/// not — and it is why arrays pay a lock and strings do not.
+#[test]
+fn two_names_for_one_array_share_it() {
+    assert_eq!(run_c("a = [1, 2]; b = a; b[0] = 99; print a[0];"), ["99"]);
+}
+
+/// Strings index and measure the same way arrays do, because the VM decides
+/// what has a length rather than each language deciding for itself.
+#[test]
+fn strings_index_and_measure() {
+    assert_eq!(run_c(r#"s = "hammer"; print s[0]; print len s;"#), ["h", "6"]);
+    assert_eq!(run_c(r#"print len [1, 2, 3];"#), ["3"]);
+    assert_eq!(run_c(r#"print "nail" + "hammer";"#), ["nailhammer"]);
+}
+
+/// Out of range is an error, not a silent `Nil` — and the message says which
+/// index and which length.
+#[test]
+fn an_index_out_of_range_is_reported() {
+    let p = vm_c::compile("a = [1]; print a[5];").expect("compiles");
+    match vm_c::run(&p) {
+        Err(e) => assert!(e.contains("out of range") && e.contains("5"), "{e}"),
+        Ok(o) => panic!("expected an error, got {o:?}"),
+    }
+}
+
+/// Indexing is 0-based and a fractional index is a mistake rather than a
+/// truncation: `a[1.5]` reading `a[1]` would hide the bug.
+#[test]
+fn a_fractional_index_is_refused() {
+    let p = vm_c::compile("a = [1, 2]; print a[1 / 2];").expect("compiles");
+    match vm_c::run(&p) {
+        Err(e) => assert!(e.contains("whole number"), "{e}"),
+        Ok(o) => panic!("expected an error, got {o:?}"),
+    }
+}
+
+/// Arrays survive the wire, so a host can be handed one in a constant.
+#[test]
+fn an_array_constant_crosses_the_wire() {
+    let p = vm_c::compile("a = [1, 2, 3]; print a;").expect("compiles");
+    let back = nh_vm::Program::<nh_vm::NoExt>::from_bytes(&p.to_bytes()).expect("decodes");
+    let globals = nh_vm::DefaultStore::new(back.globals);
+    let mut m = nh_vm::Machine::new(&back, &globals);
+    assert!(matches!(m.resume(), nh_vm::Step::Done));
+    assert_eq!(m.output, ["[1, 2, 3]"]);
+}

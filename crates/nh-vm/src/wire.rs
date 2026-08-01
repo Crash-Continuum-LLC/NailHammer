@@ -181,6 +181,7 @@ const V_NIL: u8 = 0;
 const V_BOOL: u8 = 1;
 const V_NUM: u8 = 2;
 const V_STR: u8 = 3;
+const V_ARRAY: u8 = 4;
 
 fn put_value(out: &mut Vec<u8>, v: &Value) {
     match v {
@@ -197,6 +198,17 @@ fn put_value(out: &mut Vec<u8>, v: &Value) {
             out.push(V_STR);
             put_str(out, s);
         }
+        Value::Array(a) => {
+            // Encoded by value. An array constant in the code is a literal, so
+            // two of them are two arrays -- sharing is something a *program*
+            // arranges at run time, not something the wire format preserves.
+            out.push(V_ARRAY);
+            let g = a.read().expect("poisoned");
+            put_usize(out, g.len());
+            for v in g.iter() {
+                put_value(out, v);
+            }
+        }
     }
 }
 
@@ -206,6 +218,14 @@ fn get_value(r: &mut Reader<'_>) -> Result<Value, WireError> {
         V_BOOL => Value::Bool(r.u8()? != 0),
         V_NUM => Value::Num(r.f64()?),
         V_STR => Value::str(&r.str()?),
+        V_ARRAY => {
+            let n = r.usize()?;
+            let mut items = Vec::new();
+            for _ in 0..n {
+                items.push(get_value(r)?);
+            }
+            Value::array(items)
+        }
         tag => return Err(WireError::UnknownTag { what: "value", tag }),
     })
 }
@@ -246,6 +266,10 @@ const TAG_AWAIT: u8 = 24;
 const TAG_CALL: u8 = 25;
 const TAG_RETURN: u8 = 26;
 const TAG_RETURNUNIT: u8 = 27;
+const TAG_NEWARRAY: u8 = 28;
+const TAG_INDEX: u8 = 29;
+const TAG_SETINDEX: u8 = 30;
+const TAG_LEN: u8 = 31;
 const TAG_EXT: u8 = 255;
 
 fn cmp_tag(c: Cmp) -> u8 {
@@ -354,6 +378,25 @@ fn put_op<X: Wire>(out: &mut Vec<u8>, op: &Op<X>) {
             put_str(out, key);
             put_str(out, shown);
         }
+        Op::NewArray { dst, base, len } => {
+            out.push(TAG_NEWARRAY);
+            put_u16(out, *dst);
+            put_u16(out, *base);
+            put_usize(out, *len);
+        }
+        Op::Index { dst, seq, idx } => {
+            out.push(TAG_INDEX);
+            put_u16(out, *dst);
+            put_u16(out, *seq);
+            put_u16(out, *idx);
+        }
+        Op::SetIndex { seq, idx, src } => {
+            out.push(TAG_SETINDEX);
+            put_u16(out, *seq);
+            put_u16(out, *idx);
+            put_u16(out, *src);
+        }
+        Op::Len { dst, src } => un!(TAG_LEN, dst, src),
         Op::Return { src } => {
             out.push(TAG_RETURN);
             put_u16(out, *src);
@@ -412,6 +455,10 @@ fn get_op<X: Wire>(r: &mut Reader<'_>) -> Result<Op<X>, WireError> {
             key: r.str()?,
             shown: r.str()?,
         },
+        TAG_NEWARRAY => Op::NewArray { dst: r.reg()?, base: r.reg()?, len: r.usize()? },
+        TAG_INDEX => Op::Index { dst: r.reg()?, seq: r.reg()?, idx: r.reg()? },
+        TAG_SETINDEX => Op::SetIndex { seq: r.reg()?, idx: r.reg()?, src: r.reg()? },
+        TAG_LEN => Op::Len { dst: r.reg()?, src: r.reg()? },
         TAG_RETURN => Op::Return { src: r.reg()? },
         TAG_RETURNUNIT => Op::ReturnUnit,
         TAG_EXT => Op::Ext(X::decode(r)?),

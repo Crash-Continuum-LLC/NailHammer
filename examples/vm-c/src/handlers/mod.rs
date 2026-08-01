@@ -7,7 +7,11 @@
 // this list is regenerated so a new alternative wires itself up.
 
 pub mod block;
+pub mod more_elem;
+pub mod primary_elem;
+pub mod primary_list;
 pub mod primary_num;
+pub mod primary_str;
 pub mod primary_var;
 pub mod program;
 pub mod stmt_eval;

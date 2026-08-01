@@ -216,6 +216,12 @@ pub trait Operators: ShortCircuit {
         Err(Error::unsupported("await"))
     }
 
+    /// `len` (prefix).
+    fn len(&mut self, operand: Self::Out) -> Result<Self::Out> {
+        let _ = operand;
+        Err(Error::unsupported("len"))
+    }
+
     /// Stores `value` at `place`.
     ///
     /// `place` arrives with its parts already evaluated, so a subscript
@@ -274,9 +280,27 @@ pub trait Handlers: Operators + Sized {
     /// * `value` — the text of the `NUMBER` token
     fn primary_num(&mut self, value: &str, cx: &mut Ctx) -> Result<Self::Out>;
 
+    /// `primary_str` — from `rule primary = text:STRING -> str`.
+    /// * `text` — the text of the `STRING` token
+    fn primary_str(&mut self, text: &str, cx: &mut Ctx) -> Result<Self::Out>;
+
+    /// `primary_elem` — from `rule primary = name:IDENT "[" index:expr "]" -> elem place`.
+    /// * `name` — the text of the `IDENT` token
+    /// * `index` — the value of the `expr` rule, already evaluated
+    fn primary_elem(&mut self, name: &str, index: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
+
     /// `primary_var` — from `rule primary = name:IDENT -> var place`.
     /// * `name` — the text of the `IDENT` token
     fn primary_var(&mut self, name: &str, cx: &mut Ctx) -> Result<Self::Out>;
+
+    /// `primary_list` — from `rule primary = "[" first:expr rest:more_elem* "]" -> list`.
+    /// * `first` — the value of the `expr` rule, already evaluated
+    /// * `rest` — the value of the `more_elem` rule, already evaluated (repeated in the grammar; items that failed and were already reported are omitted)
+    fn primary_list(&mut self, first: Self::Out, rest: Vec<Self::Out>, cx: &mut Ctx) -> Result<Self::Out>;
+
+    /// `more_elem` — from `rule more_elem = "," value:expr -> next`.
+    /// * `value` — the value of the `expr` rule, already evaluated
+    fn more_elem(&mut self, value: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
 }
 
 // ---------------------------------------------------------------------------
@@ -484,7 +508,10 @@ impl Eval for Block {
 pub fn eval_primary<H: Handlers>(host: &mut H, node: &Primary, cx: &mut Ctx) -> Result<H::Out> {
     match node {
         Primary::Num(n) => eval_primary_num(host, n, cx),
+        Primary::Str(n) => eval_primary_str(host, n, cx),
+        Primary::Elem(n) => eval_primary_elem(host, n, cx),
         Primary::Var(n) => eval_primary_var(host, n, cx),
+        Primary::List(n) => eval_primary_list(host, n, cx),
         Primary::Expr(n) => eval_expr(host, n, cx),
     }
 }
@@ -520,6 +547,57 @@ impl Eval for PrimaryNum {
     }
 }
 
+/// Evaluates `primary`, from `text:STRING -> str`.
+pub fn eval_primary_str<H: Handlers>(host: &mut H, node: &PrimaryStr, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_primary_str_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_primary_str_inner<H: Handlers>(
+    host: &mut H,
+    node: &PrimaryStr,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let text = &node.text;
+    host.primary_str(text, cx)
+}
+
+impl Eval for PrimaryStr {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_primary_str(host, self, cx)
+    }
+}
+
+/// Evaluates `primary`, from `name:IDENT "[" index:expr "]" -> elem place`.
+pub fn eval_primary_elem<H: Handlers>(host: &mut H, node: &PrimaryElem, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_primary_elem_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_primary_elem_inner<H: Handlers>(
+    host: &mut H,
+    node: &PrimaryElem,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let name = &node.name;
+    let index = eval_expr(host, &node.index, cx)?;
+    host.primary_elem(name, index, cx)
+}
+
+impl Eval for PrimaryElem {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_primary_elem(host, self, cx)
+    }
+}
+
 /// Evaluates `primary`, from `name:IDENT -> var place`.
 pub fn eval_primary_var<H: Handlers>(host: &mut H, node: &PrimaryVar, cx: &mut Ctx) -> Result<H::Out> {
     // Entering the node's span is what makes `cx.err(..)` inside the
@@ -545,6 +623,67 @@ impl Eval for PrimaryVar {
     }
 }
 
+/// Evaluates `primary`, from `"[" first:expr rest:more_elem* "]" -> list`.
+pub fn eval_primary_list<H: Handlers>(host: &mut H, node: &PrimaryList, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_primary_list_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_primary_list_inner<H: Handlers>(
+    host: &mut H,
+    node: &PrimaryList,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let first = eval_expr(host, &node.first, cx)?;
+    let rest = {
+                let mut v = Vec::new();
+                for n in &node.rest {
+                    match eval_more_elem(host, n, cx) {
+                        Ok(x) => v.push(x),
+                        Err(Error::AlreadyReported) => continue,
+                        Err(e) => return Err(e),
+                    }
+                }
+                v
+            };
+    host.primary_list(first, rest, cx)
+}
+
+impl Eval for PrimaryList {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_primary_list(host, self, cx)
+    }
+}
+
+/// Evaluates `more_elem`, from `"," value:expr -> next`.
+pub fn eval_more_elem<H: Handlers>(host: &mut H, node: &MoreElem, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_more_elem_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_more_elem_inner<H: Handlers>(
+    host: &mut H,
+    node: &MoreElem,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let value = eval_expr(host, &node.value, cx)?;
+    host.more_elem(value, cx)
+}
+
+impl Eval for MoreElem {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_more_elem(host, self, cx)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The operator driver
 // ---------------------------------------------------------------------------
@@ -566,6 +705,7 @@ pub fn op_info(rule: Rule) -> Option<OpInfo> {
         Rule::nh_op_eq_eq => info(7, Fixity::Infix, Assoc::Left),
         Rule::nh_op_gt => info(7, Fixity::Infix, Assoc::Left),
         Rule::nh_op_gt_eq => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_len => info(13, Fixity::Prefix, Assoc::Right),
         Rule::nh_op_lt => info(7, Fixity::Infix, Assoc::Left),
         Rule::nh_op_lt_eq => info(7, Fixity::Infix, Assoc::Left),
         Rule::nh_op_minus => info(8, Fixity::Infix, Assoc::Left),
@@ -593,6 +733,7 @@ pub fn prefix_info(rule: Rule) -> Option<OpInfo> {
         Rule::nh_op_minus => info(10),
         Rule::nh_op_bang => info(11),
         Rule::nh_op_await => info(12),
+        Rule::nh_op_len => info(13),
         _ => None,
     }
 }
@@ -615,6 +756,7 @@ pub fn eval_expr<H: Handlers>(
                 Rule::nh_op_minus => host.neg(value),
                 Rule::nh_op_bang => host.not(value),
                 Rule::nh_op_await => host.r#await(value),
+                Rule::nh_op_len => host.len(value),
                 other => Err(Error::runtime(format!(
                     "`{other:?}` is not a prefix operator"
                 ))),
@@ -793,12 +935,42 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::primary_num::run(self, value, cx)
             }
+            fn primary_str(
+                &mut self,
+                text: &str,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_str::run(self, text, cx)
+            }
+            fn primary_elem(
+                &mut self,
+                name: &str,
+                index: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_elem::run(self, name, index, cx)
+            }
             fn primary_var(
                 &mut self,
                 name: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::primary_var::run(self, name, cx)
+            }
+            fn primary_list(
+                &mut self,
+                first: <Self as $crate::generated::dispatch::Semantics>::Out,
+                rest: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_list::run(self, first, rest, cx)
+            }
+            fn more_elem(
+                &mut self,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::more_elem::run(self, value, cx)
             }
         }
         impl $crate::generated::dispatch::ShortCircuit for $host {
@@ -885,12 +1057,42 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::primary_num::run(self, value, cx)
             }
+            fn primary_str(
+                &mut self,
+                text: &str,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_str::run(self, text, cx)
+            }
+            fn primary_elem(
+                &mut self,
+                name: &str,
+                index: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_elem::run(self, name, index, cx)
+            }
             fn primary_var(
                 &mut self,
                 name: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::primary_var::run(self, name, cx)
+            }
+            fn primary_list(
+                &mut self,
+                first: <Self as $crate::generated::dispatch::Semantics>::Out,
+                rest: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_list::run(self, first, rest, cx)
+            }
+            fn more_elem(
+                &mut self,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::more_elem::run(self, value, cx)
             }
         }
     };

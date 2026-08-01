@@ -45,6 +45,12 @@ pub enum Shape {
     Compare,
     /// No instruction at all: the operand *is* the answer. Unary `+`.
     Identity,
+    /// Sequencing: evaluate both, yield the right one.
+    ///
+    /// Also no instruction — the operands emitted themselves, in order, before
+    /// this ran. All that is left is to say which register holds the answer and
+    /// to release the other. `a, b` is exactly that.
+    Sequence,
     /// Assignment: lazy in its **left** operand, which arrives as a `Place`.
     ///
     /// Different in shape from everything else here. The others take values and
@@ -97,6 +103,8 @@ impl Target {
         ops.insert("shift", Shape::Compare); // grouped `<< >>` in c_style
         ops.insert("bit_not", Shape::Unary("BitNot", "a"));
         ops.insert("pos", Shape::Identity);
+        ops.insert("comma", Shape::Sequence);
+        ops.insert("len", Shape::Unary("Len", "src"));
         ops.insert("assign", Shape::Assign);
         // Suspension is a unary operation on the machine: the operand is what
         // the program is waiting on, and the result is what it is handed back.
@@ -386,6 +394,18 @@ fn emit_role(out: &mut String, e: &Emitted<'_>, all: &[Emitted<'_>], target: &Ta
             );
         }
 
+        (Shape::Sequence, Fixity::Left | Fixity::Right) => {
+            let _ = writeln!(
+                out,
+                "\n    /// `{}` — both operands already ran; the right one is the answer.\n\
+                \x20   fn {m}(&mut self, lhs: Reg, rhs: Reg) -> Result<Reg> {{\n\
+                \x20       self.free(lhs);\n\
+                \x20       Ok(rhs)\n\
+                \x20   }}",
+                e.op.literal
+            );
+        }
+
         // A shape that does not fit the fixity it was bound at. `nh-operators`
         // already rejects one role at two fixities, so reaching here means the
         // target table disagrees with the grammar about what kind of thing a
@@ -453,9 +473,33 @@ fn emit_assignment(out: &mut String, lowered: &nh_lower::Lowered) {
                  \x20               Ok(dst)\n\
                  \x20           }}"
             );
+        } else if let Some((seq, idx)) = indexed(alt) {
+            // `a[i] = v`. The index arrives **already evaluated**, exactly once
+            // — so a subscript with a side effect runs once, which is the whole
+            // reason `Place` carries evaluated fields rather than nodes.
+            let seq = ident(&seq);
+            let idx = ident(&idx);
+            let _ = writeln!(
+                store,
+                "            Place::{variant} {{ {seq}, {idx}, .. }} => {{\n\
+                 \x20               let target = self.read_var({seq});\n\
+                 \x20               self.emit(Op::SetIndex {{ seq: target, idx: {idx}, src: value }});\n\
+                 \x20               self.free(target);\n\
+                 \x20               Ok(value)\n\
+                 \x20           }}"
+            );
+            let _ = writeln!(
+                read,
+                "            Place::{variant} {{ {seq}, {idx}, .. }} => {{\n\
+                 \x20               let target = self.read_var({seq});\n\
+                 \x20               let dst = self.reuse(&[target]);\n\
+                 \x20               self.emit(Op::Index {{ dst, seq: target, idx: *{idx} }});\n\
+                 \x20               Ok(dst)\n\
+                 \x20           }}"
+            );
         } else {
             let msg = format!(
-                "`{}` cannot be assigned to on this machine: it has no indexed store",
+                "`{}` cannot be assigned to on this machine",
                 alt.source.trim()
             );
             let _ = writeln!(
@@ -481,4 +525,24 @@ fn emit_assignment(out: &mut String, lowered: &nh_lower::Lowered) {
         \x20       match place {{\n{read}\x20       }}\n\
         \x20   }}"
     );
+}
+
+/// A `place` alternative that looks like `a[i]`: one name and one evaluated
+/// index, in that order.
+///
+/// Recognised structurally rather than by spelling, so a language can write it
+/// `a[i]`, `a(i)` — which is what a BASIC does — or anything else, and still
+/// get an indexed store.
+fn indexed(alt: &nh_lower::LoweredAlternative) -> Option<(String, String)> {
+    match alt.bindings.as_slice() {
+        [name, index]
+            if name.token.is_some()
+                && index.token.is_none()
+                && matches!(name.cardinality, nh_lower::Cardinality::One)
+                && matches!(index.cardinality, nh_lower::Cardinality::One) =>
+        {
+            Some((name.name.clone(), index.name.clone()))
+        }
+        _ => None,
+    }
 }

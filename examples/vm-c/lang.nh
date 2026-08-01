@@ -14,8 +14,9 @@ token DIGIT = @ "0".."9";
 token ALPHA = @ "a".."z" | "A".."Z";
 token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
+token STRING = @ "\"" (!"\"" ANY)* "\"";
 
-reserved from IDENT { "print" "if" "while" "await" }
+reserved from IDENT { "print" "if" "while" "await" "len" }
 
 // The operator table is the language's own; the instructions it lowers to are
 // the machine's. That split is the whole point of the target.
@@ -32,6 +33,7 @@ precedence {
     prefix "-";
     prefix "!" -> not;
     prefix word "await" -> await;
+    prefix word "len" -> len;
     atom   atom;
 }
 
@@ -52,7 +54,15 @@ rule block = "{" body:stmt+ "}" -> block;
 rule atom = primary;
 
 rule primary
-  = value:NUMBER      -> num
-  | name:IDENT        -> var place
-  | "(" inner:expr ")" -> pass
+  = value:NUMBER                      -> num
+  | text:STRING                       -> str
+  | name:IDENT "[" index:expr "]"     -> elem place
+  | name:IDENT                        -> var place
+  | "[" first:expr rest:more_elem* "]" -> list
+  | "(" inner:expr ")"                -> pass
   ;
+
+// `a[i]` is a `place`, so it can be assigned to as well as read. The generator
+// recognises it structurally -- one name, one evaluated index -- rather than by
+// spelling, so a BASIC could write `a(i)` and get the same store.
+rule more_elem = "," value:expr -> next;

@@ -112,9 +112,22 @@ impl Operators for crate::Interp {
         Ok(dst)
     }
 
+    /// `len` — emits `Op::Len`.
+    fn len(&mut self, operand: Reg) -> Result<Reg> {
+        let dst = self.reuse(&[operand]);
+        self.emit(Op::Len { dst, src: operand });
+        Ok(dst)
+    }
+
     /// Stores `value` at `place`, and yields it — so `a = b = 1` chains.
     fn assign(&mut self, place: Place<'_, Reg>, value: Reg) -> Result<Reg> {
         match place {
+            Place::PrimaryElem { name, index, .. } => {
+                let target = self.read_var(name);
+                self.emit(Op::SetIndex { seq: target, idx: index, src: value });
+                self.free(target);
+                Ok(value)
+            }
             Place::PrimaryVar { name, .. } => {
                 let slot = self.slot_of(name);
                 self.emit(Op::StoreGlobal { slot, src: value });
@@ -126,6 +139,12 @@ impl Operators for crate::Interp {
     /// Reads the current value at `place`, for compound assignment.
     fn place_read(&mut self, place: &Place<'_, Reg>) -> Result<Reg> {
         match place {
+            Place::PrimaryElem { name, index, .. } => {
+                let target = self.read_var(name);
+                let dst = self.reuse(&[target]);
+                self.emit(Op::Index { dst, seq: target, idx: *index });
+                Ok(dst)
+            }
             Place::PrimaryVar { name, .. } => {
                 let slot = self.slot_of(name);
                 let dst = self.alloc();

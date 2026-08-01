@@ -10,6 +10,7 @@ DIGIT = @{ '0'..'9' }
 ALPHA = @{ 'a'..'z' | 'A'..'Z' }
 NUMBER_ = @{ DIGIT+ ~ ("." ~ DIGIT+)? }
 IDENT = @{ !nh_reserved_IDENT ~ ((ALPHA | "_") ~ (ALPHA | DIGIT | "_")*) }
+STRING = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
 
 // Expressions (operator table is resolved at build time)
 expr = { nh_pre_op* ~ atom ~ (nh_bin_op ~ nh_pre_op* ~ atom)* }
@@ -23,16 +24,20 @@ stmt_whilst = { nh_kw_while ~ "(" ~ #cond = expr ~ ")" ~ #body = block }
 stmt_eval = { #value = expr ~ ";" }
 block = { "{" ~ (#body = stmt)+ ~ "}" }
 atom = { primary }
-primary = { primary_num | primary_var | "(" ~ #inner = expr ~ ")" }
+primary = { primary_num | primary_str | primary_elem | primary_var | primary_list | "(" ~ #inner = expr ~ ")" }
 primary_num = { #value = NUMBER_ }
+primary_str = { #text = STRING }
+primary_elem = { #name = IDENT ~ "[" ~ #index = expr ~ "]" }
 primary_var = { #name = IDENT }
+primary_list = { "[" ~ #first = expr ~ (#rest = more_elem)* ~ "]" }
+more_elem = { "," ~ #value = expr }
 
 // ---------------------------------------------------------------------------
 // Generated support rules
 // ---------------------------------------------------------------------------
 
 nh_cont_IDENT = _{ "_" | ALPHA | DIGIT }
-nh_reserved_IDENT = @{ ("await" | "print" | "while" | "if") ~ !nh_cont_IDENT }
+nh_reserved_IDENT = @{ ("await" | "print" | "while" | "len" | "if") ~ !nh_cont_IDENT }
 nh_op_bang_eq = @{ "!=" }
 nh_op_amp_amp = @{ "&&" }
 nh_op_lt_eq = @{ "<=" }
@@ -51,8 +56,9 @@ nh_op_caret = @{ "^" }
 nh_op_pipe = @{ "|" }
 nh_bin_op = _{ nh_op_bang_eq | nh_op_amp_amp | nh_op_lt_eq | nh_op_eq_eq | nh_op_gt_eq | nh_op_pipe_pipe | nh_op_amp | nh_op_star | nh_op_plus | nh_op_minus | nh_op_slash | nh_op_lt | nh_op_eq | nh_op_gt | nh_op_caret | nh_op_pipe }
 nh_op_await = @{ ^"await" ~ !nh_cont_IDENT }
+nh_op_len = @{ ^"len" ~ !nh_cont_IDENT }
 nh_op_bang = @{ "!" }
-nh_pre_op = _{ nh_op_await | nh_op_bang | nh_op_minus }
+nh_pre_op = _{ nh_op_await | nh_op_len | nh_op_bang | nh_op_minus }
 nh_kw_print = @{ "print" ~ !nh_cont_IDENT }
 nh_kw_if = @{ "if" ~ !nh_cont_IDENT }
 nh_kw_while = @{ "while" ~ !nh_cont_IDENT }

@@ -298,6 +298,93 @@ impl<'i> PrimaryNumView<'i> {
     }
 }
 
+/// One matched `primary_str`.
+///
+/// From this alternative of `rule primary`:
+///
+/// ```text
+/// text:STRING -> str
+/// ```
+#[derive(Clone, Debug)]
+pub struct PrimaryStrView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for PrimaryStrView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        PrimaryStrView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> PrimaryStrView<'i> {
+
+    /// `text` — the `STRING` token.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `text: &str`:
+    /// the text of the `STRING` token
+    pub fn text(&self) -> Node<'i, Rule> {
+        self.node.tagged("text").expect(
+            "the grammar guarantees `text` is present; regenerate if it changed",
+        )
+    }
+}
+
+/// One matched `primary_elem`.
+///
+/// From this alternative of `rule primary`:
+///
+/// ```text
+/// name:IDENT "[" index:expr "]" -> elem place
+/// ```
+#[derive(Clone, Debug)]
+pub struct PrimaryElemView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for PrimaryElemView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        PrimaryElemView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> PrimaryElemView<'i> {
+
+    /// `name` — the `IDENT` token.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `name: &str`:
+    /// the text of the `IDENT` token
+    pub fn name(&self) -> Node<'i, Rule> {
+        self.node.tagged("name").expect(
+            "the grammar guarantees `name` is present; regenerate if it changed",
+        )
+    }
+
+    /// `index` — the `expr` rule.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `index: Self::Out`:
+    /// the value of the `expr` rule, already evaluated
+    pub fn index(&self) -> Node<'i, Rule> {
+        self.node.tagged("index").expect(
+            "the grammar guarantees `index` is present; regenerate if it changed",
+        )
+    }
+}
+
 /// One matched `primary_var`.
 ///
 /// From this alternative of `rule primary`:
@@ -332,6 +419,94 @@ impl<'i> PrimaryVarView<'i> {
     pub fn name(&self) -> Node<'i, Rule> {
         self.node.tagged("name").expect(
             "the grammar guarantees `name` is present; regenerate if it changed",
+        )
+    }
+}
+
+/// One matched `primary_list`.
+///
+/// From this alternative of `rule primary`:
+///
+/// ```text
+/// "[" first:expr rest:more_elem* "]" -> list
+/// ```
+#[derive(Clone, Debug)]
+pub struct PrimaryListView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for PrimaryListView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        PrimaryListView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> PrimaryListView<'i> {
+
+    /// `first` — the `expr` rule.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `first: Self::Out`:
+    /// the value of the `expr` rule, already evaluated
+    pub fn first(&self) -> Node<'i, Rule> {
+        self.node.tagged("first").expect(
+            "the grammar guarantees `first` is present; regenerate if it changed",
+        )
+    }
+
+    /// `rest` — the `more_elem` rule.
+    /// Repeated in the grammar (`*` or `+`), so this may be empty.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `rest: Vec<Self::Out>`:
+    /// the value of the `more_elem` rule, already evaluated (repeated in
+    /// the grammar; items that failed and were already reported are
+    /// omitted)
+    pub fn rest(&self) -> Vec<Node<'i, Rule>> {
+        self.node.tagged_all("rest")
+    }
+}
+
+/// One matched `more_elem`.
+///
+/// From this alternative of `rule more_elem`:
+///
+/// ```text
+/// "," value:expr -> next
+/// ```
+#[derive(Clone, Debug)]
+pub struct MoreElemView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for MoreElemView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        MoreElemView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> MoreElemView<'i> {
+
+    /// `value` — the `expr` rule.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `value: Self::Out`:
+    /// the value of the `expr` rule, already evaluated
+    pub fn value(&self) -> Node<'i, Rule> {
+        self.node.tagged("value").expect(
+            "the grammar guarantees `value` is present; regenerate if it changed",
         )
     }
 }

@@ -77,6 +77,17 @@ pub enum Op<X> {
     /// that was already built for a VM it does not own.
     Await { dst: Reg, src: Reg },
 
+    // ---- sequences ---------------------------------------------------------
+    /// `[a, b, c]` — `len` values starting at `base`.
+    NewArray { dst: Reg, base: Reg, len: usize },
+    /// `a[i]`. Out-of-range reads are an error, not a silent `Nil`.
+    Index { dst: Reg, seq: Reg, idx: Reg },
+    /// `a[i] = v`. Writing one past the end appends, which is how a program
+    /// grows an array without a separate instruction.
+    SetIndex { seq: Reg, idx: Reg, src: Reg },
+    /// Length of a string or an array.
+    Len { dst: Reg, src: Reg },
+
     // ---- calls -------------------------------------------------------------
     //
     // Arguments live in `base .. base + argc` -- contiguous, because the

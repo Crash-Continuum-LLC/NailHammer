@@ -84,7 +84,10 @@ pub type Atom = Primary;
 #[derive(Clone, Debug)]
 pub enum Primary {
     Num(Shared<PrimaryNum>),
+    Str(Shared<PrimaryStr>),
+    Elem(Shared<PrimaryElem>),
     Var(Shared<PrimaryVar>),
+    List(Shared<PrimaryList>),
     /// A transparent alternative yielding `expr`.
     Expr(Shared<Expr>),
 }
@@ -96,10 +99,40 @@ pub struct PrimaryNum {
     pub span: Span,
 }
 
+/// From `rule primary = text:STRING -> str`.
+#[derive(Clone, Debug)]
+pub struct PrimaryStr {
+    pub text: String,
+    pub span: Span,
+}
+
+/// From `rule primary = name:IDENT "[" index:expr "]" -> elem place`.
+#[derive(Clone, Debug)]
+pub struct PrimaryElem {
+    pub name: String,
+    pub index: Shared<Expr>,
+    pub span: Span,
+}
+
 /// From `rule primary = name:IDENT -> var place`.
 #[derive(Clone, Debug)]
 pub struct PrimaryVar {
     pub name: String,
+    pub span: Span,
+}
+
+/// From `rule primary = "[" first:expr rest:more_elem* "]" -> list`.
+#[derive(Clone, Debug)]
+pub struct PrimaryList {
+    pub first: Shared<Expr>,
+    pub rest: Vec<Shared<MoreElem>>,
+    pub span: Span,
+}
+
+/// From `rule more_elem = "," value:expr -> next`.
+#[derive(Clone, Debug)]
+pub struct MoreElem {
+    pub value: Shared<Expr>,
     pub span: Span,
 }
 
@@ -264,8 +297,17 @@ pub fn build_primary(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Primar
             Rule::primary_num => {
                 return Ok(Shared::new(Primary::Num(build_primary_num(pair, file)?)))
             }
+            Rule::primary_str => {
+                return Ok(Shared::new(Primary::Str(build_primary_str(pair, file)?)))
+            }
+            Rule::primary_elem => {
+                return Ok(Shared::new(Primary::Elem(build_primary_elem(pair, file)?)))
+            }
             Rule::primary_var => {
                 return Ok(Shared::new(Primary::Var(build_primary_var(pair, file)?)))
+            }
+            Rule::primary_list => {
+                return Ok(Shared::new(Primary::List(build_primary_list(pair, file)?)))
             }
             Rule::expr => {
                 return Ok(Shared::new(Primary::Expr(build_expr(pair, file)?)))
@@ -285,11 +327,49 @@ pub fn build_primary_num(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Pr
     }))
 }
 
+/// Builds `PrimaryStr` from `text:STRING -> str`.
+pub fn build_primary_str(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryStr>> {
+    let view = PrimaryStrView::from_pair(pair, file);
+    Ok(Shared::new(PrimaryStr {
+        text: view.text().text().to_string(),
+        span: view.span(),
+    }))
+}
+
+/// Builds `PrimaryElem` from `name:IDENT "[" index:expr "]" -> elem place`.
+pub fn build_primary_elem(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryElem>> {
+    let view = PrimaryElemView::from_pair(pair, file);
+    Ok(Shared::new(PrimaryElem {
+        name: view.name().text().to_string(),
+        index: build_expr(view.index().into_pair(), file)?,
+        span: view.span(),
+    }))
+}
+
 /// Builds `PrimaryVar` from `name:IDENT -> var place`.
 pub fn build_primary_var(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryVar>> {
     let view = PrimaryVarView::from_pair(pair, file);
     Ok(Shared::new(PrimaryVar {
         name: view.name().text().to_string(),
+        span: view.span(),
+    }))
+}
+
+/// Builds `PrimaryList` from `"[" first:expr rest:more_elem* "]" -> list`.
+pub fn build_primary_list(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryList>> {
+    let view = PrimaryListView::from_pair(pair, file);
+    Ok(Shared::new(PrimaryList {
+        first: build_expr(view.first().into_pair(), file)?,
+        rest: { let mut v = Vec::new(); for n in view.rest() { v.push(build_more_elem(n.into_pair(), file)?); } v },
+        span: view.span(),
+    }))
+}
+
+/// Builds `MoreElem` from `"," value:expr -> next`.
+pub fn build_more_elem(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<MoreElem>> {
+    let view = MoreElemView::from_pair(pair, file);
+    Ok(Shared::new(MoreElem {
+        value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
     }))
 }

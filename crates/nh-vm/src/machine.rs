@@ -259,6 +259,45 @@ impl<'a, X: Extension, S: SharedStore> Machine<'a, X, S> {
                 Ok(Flow::Suspend(reg!(*src).clone()))
             }
 
+            // ---- sequences -------------------------------------------------
+            Op::NewArray { dst, base, len } => {
+                let start = *base as usize;
+                let items: Vec<Value> =
+                    self.frames[top].regs[start..start + *len].to_vec();
+                reg!(*dst) = Value::array(items);
+                Ok(Flow::Next)
+            }
+            Op::Index { dst, seq, idx } => {
+                let i = reg!(*idx).as_num()?;
+                let out = index_of(&reg!(*seq), i)?;
+                reg!(*dst) = out;
+                Ok(Flow::Next)
+            }
+            Op::SetIndex { seq, idx, src } => {
+                let i = reg!(*idx).as_num()?;
+                let v = reg!(*src).clone();
+                match &reg!(*seq) {
+                    Value::Array(a) => {
+                        let mut g = a.write().expect("poisoned");
+                        let n = index_usize(i, g.len() + 1)?;
+                        if n == g.len() {
+                            g.push(v);
+                        } else {
+                            g[n] = v;
+                        }
+                        Ok(Flow::Next)
+                    }
+                    other => Err(format!("cannot index into {other:?}")),
+                }
+            }
+            Op::Len { dst, src } => {
+                let n = reg!(*src)
+                    .len()
+                    .ok_or_else(|| format!("{:?} has no length", reg!(*src)))?;
+                reg!(*dst) = Value::Num(n as f64);
+                Ok(Flow::Next)
+            }
+
             // ---- calls ----------------------------------------------------
             Op::Call { dst, base, argc, key, shown } => {
                 let Some(f) = self.program.fns.get(key).copied() else {
@@ -321,6 +360,41 @@ impl<'a, X: Extension, S: SharedStore> Machine<'a, X, S> {
         let caller = self.frames.len() - 1;
         self.frames[caller].regs[f.ret_reg as usize] = v;
         Ok(Flow::Jump(f.ret_pc))
+    }
+}
+
+/// Turns a numeric index into a position, or says why it cannot.
+///
+/// Indexing is **0-based**, mandated rather than configured (VM-DESIGN.md
+/// §3.7). A fractional or negative index is an error rather than a truncation:
+/// `a[1.5]` is a mistake in the program, and quietly reading `a[1]` would hide
+/// it.
+fn index_usize(i: f64, len: usize) -> Result<usize, String> {
+    if i.fract() != 0.0 {
+        return Err(format!("index {i} is not a whole number"));
+    }
+    if i < 0.0 {
+        return Err(format!("index {i} is negative"));
+    }
+    let n = i as usize;
+    if n >= len {
+        return Err(format!("index {n} is out of range for length {len}"));
+    }
+    Ok(n)
+}
+
+fn index_of(v: &Value, i: f64) -> Result<Value, String> {
+    match v {
+        Value::Array(a) => {
+            let g = a.read().expect("poisoned");
+            Ok(g[index_usize(i, g.len())?].clone())
+        }
+        Value::Str(s) => {
+            let chars: Vec<char> = s.chars().collect();
+            let n = index_usize(i, chars.len())?;
+            Ok(Value::str(&chars[n].to_string()))
+        }
+        other => Err(format!("cannot index into {other:?}")),
     }
 }
 

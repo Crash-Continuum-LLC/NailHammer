@@ -87,19 +87,20 @@ fn a_comparison_tier_becomes_one_instruction() {
 /// plugin that fails to load later or generated code that will not compile.
 #[test]
 fn a_role_the_vm_cannot_execute_is_reported_not_emitted() {
-    // `,` is the honest remaining gap: sequencing is a language construct
-    // rather than a machine operation, and nh-vm has no instruction for it.
+    // `arrow` is the honest remaining gap. In a C-family grammar `->` is
+    // member access, and this machine has no aggregate to reach into -- so it
+    // is not an oversight, it is a language feature the VM does not have.
     let (t, l) = compiled(
         "precedence {\n  left \"+\";\n  \
-         left \",\" -> comma;\n  right \"=\" -> assign;\n  atom atom;\n}",
+         left \"->\" -> arrow;\n  right \"=\" -> assign;\n  atom atom;\n}",
     );
 
     let missing = operators_impl(&t, &l, &Target::nh_vm(), "Compiler")
-        .expect_err("nh-vm has no Comma");
+        .expect_err("nh-vm has no member access");
 
     let roles: Vec<&str> = missing.iter().map(|u| u.role.as_str()).collect();
-    assert_eq!(roles, ["comma"], "sorted and deduplicated: {missing:?}");
-    assert_eq!(missing[0].spelling, ",", "named by something the author typed");
+    assert_eq!(roles, ["arrow"], "sorted and deduplicated: {missing:?}");
+    assert_eq!(missing[0].spelling, "->", "named by something the author typed");
 }
 
 /// The report must name a role once even when several spellings bind it, or a
@@ -108,12 +109,12 @@ fn a_role_the_vm_cannot_execute_is_reported_not_emitted() {
 fn one_report_per_role_not_per_spelling() {
     let (t, l) = compiled(
         "precedence {\n  \
-         left \",\" | \";\" -> comma;\n  atom atom;\n}",
+         left \"->\" | \"=>\" -> arrow;\n  atom atom;\n}",
     );
 
-    let missing = operators_impl(&t, &l, &Target::nh_vm(), "Compiler").expect_err("nh-vm has no Comma");
+    let missing = operators_impl(&t, &l, &Target::nh_vm(), "Compiler").expect_err("nh-vm has no member access");
     assert_eq!(missing.len(), 1, "{missing:?}");
-    assert_eq!(missing[0].role, "comma");
+    assert_eq!(missing[0].role, "arrow");
 }
 
 /// A grammar with no operators at all generates an empty impl rather than

@@ -30,11 +30,40 @@ pub enum Value {
     /// allocation and a refcount bump, and it is immutable, so no lock is
     /// needed to read it from either.
     Str(Arc<str>),
+    /// A growable, **shared and mutable** sequence.
+    ///
+    /// `Arc<RwLock<..>>` rather than `Arc<Vec<..>>` because arrays are
+    /// reference types: assigning one to two variables and writing through
+    /// either must be visible through both. That costs a lock per array, which
+    /// strings do not pay — they are immutable, so sharing them needs only a
+    /// refcount. The difference is not an inconsistency; it is what mutability
+    /// costs.
+    Array(Arc<std::sync::RwLock<Vec<Value>>>),
 }
 
 impl Value {
     pub fn str(s: &str) -> Self {
         Value::Str(Arc::from(s))
+    }
+
+    pub fn array(items: Vec<Value>) -> Self {
+        Value::Array(Arc::new(std::sync::RwLock::new(items)))
+    }
+
+    /// Length, for whatever has one. `None` for a value that has no notion of
+    /// one -- a number is not empty, it simply is not a sequence.
+    pub fn len(&self) -> Option<usize> {
+        match self {
+            Value::Str(s) => Some(s.chars().count()),
+            Value::Array(a) => Some(a.read().expect("poisoned").len()),
+            _ => None,
+        }
+    }
+
+    /// Whether a sequence has no elements. `None` for a non-sequence, matching
+    /// [`len`](Self::len) rather than pretending a number is non-empty.
+    pub fn is_empty(&self) -> Option<bool> {
+        self.len().map(|n| n == 0)
     }
 
     /// The VM's opinion about truth, and the reason a language cannot bring its
@@ -45,6 +74,9 @@ impl Value {
             Value::Bool(b) => *b,
             Value::Num(n) => *n != 0.0,
             Value::Str(s) => !s.is_empty(),
+            // An empty array is false, matching the string rule -- one decision
+            // about emptiness rather than two.
+            Value::Array(a) => !a.read().expect("poisoned").is_empty(),
         }
     }
 
@@ -63,6 +95,12 @@ impl PartialEq for Value {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Num(a), Value::Num(b)) => a == b,
             (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Array(a), Value::Array(b)) => {
+                // Identity first: an array is always equal to itself, and the
+                // shortcut also avoids locking one array twice.
+                Arc::ptr_eq(a, b)
+                    || *a.read().expect("poisoned") == *b.read().expect("poisoned")
+            }
             _ => false,
         }
     }
@@ -75,6 +113,17 @@ impl std::fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b}"),
             Value::Num(n) => write!(f, "{n}"),
             Value::Str(s) => write!(f, "{s}"),
+            Value::Array(a) => {
+                let g = a.read().expect("poisoned");
+                write!(f, "[")?;
+                for (i, v) in g.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{v}")?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
