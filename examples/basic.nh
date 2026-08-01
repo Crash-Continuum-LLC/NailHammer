@@ -64,9 +64,7 @@ rule stmt
   | "END"                                   -> end
   ;
 
-rule print_list = first:expr rest:more_print* -> items;
-
-rule more_print = (";" | ",") value:expr -> next;
+rule print_list = items:expr ((";" | ",") items:expr)* -> items;
 
 // BASIC subscripts with parentheses, so an assignment target is either a bare
 // name or an array element.

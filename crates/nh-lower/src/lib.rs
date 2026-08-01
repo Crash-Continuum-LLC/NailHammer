@@ -1255,6 +1255,7 @@ impl<'a> Ctx<'a> {
     ) {
         let mut bindings = Vec::new();
         collect_bindings(&alt.body, Cardinality::One, self.res, &mut bindings);
+        merge_repeated_bindings(&alt.body, &mut bindings);
         self.check_lazy(rule, &bindings, alt);
         self.collected_alternatives.push(LoweredAlternative {
             rule: rule.name.value.clone(),
@@ -1450,6 +1451,105 @@ fn collect_bindings(e: &Expr, ctx: Cardinality, res: &Resolution, out: &mut Vec<
         // node that survives into the tree.
         ExprKind::Lookahead { .. } => {}
         _ => {}
+    }
+}
+
+/// Collapses each binding name to one entry, with the cardinality of *all* its
+/// occurrences taken together.
+///
+/// # Why the first occurrence is not the answer
+///
+/// A name can be bound more than once in one alternative, and generation has
+/// always kept the first entry and dropped the rest. That is right for the case
+/// it was written for — two branches of a choice binding the same field, where
+/// both occurrences agree — and wrong for a list:
+///
+/// ```nh
+/// rule args = items:ID ("," items:ID)*;
+/// ```
+///
+/// The first `items` is outside the repetition, so it is `One`; the second is
+/// inside it, so it is `Many`. Keeping the first produced an accessor returning
+/// a single `Node`, and every argument after the first was **silently
+/// discarded** — no error, no warning, just one item where the grammar plainly
+/// asks for a list.
+///
+/// So the count comes from the whole body rather than from any one occurrence.
+/// A choice still collapses correctly, because its branches are alternatives:
+/// `("a" x:A | "b" x:B)` binds `x` exactly once whichever branch matches.
+fn merge_repeated_bindings(body: &Expr, bindings: &mut Vec<Binding>) {
+    let mut distinct: Vec<Binding> = Vec::new();
+    for b in bindings.drain(..) {
+        if distinct.iter().any(|d| d.name == b.name) {
+            continue;
+        }
+        distinct.push(b);
+    }
+    for b in &mut distinct {
+        b.cardinality = cardinality_of(binding_occurrences(body, &b.name));
+    }
+    *bindings = distinct;
+}
+
+fn cardinality_of(n: Nodes) -> Cardinality {
+    match n.max {
+        // More than one, or no bound at all: the accessor is a list.
+        Some(2..) | None => Cardinality::Many,
+        // At most one, and not guaranteed to be there.
+        _ if n.min == 0 => Cardinality::Optional,
+        _ => Cardinality::One,
+    }
+}
+
+/// How many times `name` can be bound by an expression.
+///
+/// The same interval arithmetic [`node_count`](Ctx::node_count) uses, over a
+/// different question: not what the parse tree contains, but how often one tag
+/// appears in it.
+fn binding_occurrences(e: &Expr, name: &str) -> Nodes {
+    match &e.kind {
+        ExprKind::Bind { name: n, inner, .. } => {
+            let own = if n.value == name {
+                // A repetition *inside* the binding is the binding's own:
+                // `args:arg_list?` tags an optional node.
+                own_nodes(inner)
+            } else {
+                Nodes::exactly(0)
+            };
+            // A binding nested inside another is still reachable.
+            own.then(binding_occurrences(inner, name))
+        }
+        ExprKind::Seq(parts) => parts
+            .iter()
+            .fold(Nodes::exactly(0), |acc, p| acc.then(binding_occurrences(p, name))),
+        ExprKind::Choice(parts) => parts
+            .iter()
+            .map(|p| binding_occurrences(p, name))
+            .reduce(Nodes::or)
+            .unwrap_or(Nodes::exactly(0)),
+        ExprKind::Repeat { inner, kind } => {
+            let inner = binding_occurrences(inner, name);
+            match kind {
+                RepeatKind::Optional => Nodes { min: 0, ..inner },
+                RepeatKind::ZeroOrMore => inner.repeated(0),
+                RepeatKind::OneOrMore => inner.repeated(inner.min),
+            }
+        }
+        // Consumes nothing, so nothing inside it reaches the tree.
+        ExprKind::Lookahead { .. } => Nodes::exactly(0),
+        _ => Nodes::exactly(0),
+    }
+}
+
+/// What a binding contributes on its own, before anything enclosing it.
+fn own_nodes(inner: &Expr) -> Nodes {
+    match &inner.kind {
+        ExprKind::Repeat { kind, .. } => match kind {
+            RepeatKind::Optional => Nodes { min: 0, max: Some(1) },
+            RepeatKind::ZeroOrMore => Nodes { min: 0, max: None },
+            RepeatKind::OneOrMore => Nodes { min: 1, max: None },
+        },
+        _ => Nodes::exactly(1),
     }
 }
 

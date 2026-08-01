@@ -1090,3 +1090,124 @@ fn a_recursive_silent_rule_terminates() {
          rule stmt = v:ID -> s;\n",
     );
 }
+
+// ---------------------------------------------------------------------------
+// A binding name used more than once
+//
+// Generation keeps one accessor per name, so the cardinality it gets has to
+// cover *every* occurrence. Keeping the first was right for a choice and wrong
+// for a list.
+// ---------------------------------------------------------------------------
+
+fn card(rules: &str, label: &str, name: &str) -> nh_lower::Cardinality {
+    let l = build_str(&format!(
+        "grammar C;\n\
+         use operators::none;\n\
+         skip WS = \" \" | \"\\t\" | \"\\n\";\n\
+         token ALPHA = @ \"a\"..\"z\";\n\
+         token ID = @ ALPHA+;\n\
+         token NUM = @ \"0\"..\"9\";\n\
+         {rules}"
+    ));
+    binding(&l, label, name).cardinality
+}
+
+/// The head-and-tail list: one binding outside a repetition and the same name
+/// inside it.
+///
+/// This was the bug. The first occurrence is `One`, the second `Many`, and
+/// keeping the first gave an accessor returning a single node — so every item
+/// after the first was silently dropped. No error, no warning, one item where
+/// the grammar asks for a list.
+#[test]
+fn a_name_bound_inside_and_outside_a_repetition_is_a_list() {
+    assert_eq!(
+        card("rule r = items:ID (\",\" items:ID)* -> list;\n", "list", "items"),
+        nh_lower::Cardinality::Many
+    );
+}
+
+/// Two occurrences in sequence are two nodes, repetition or not.
+#[test]
+fn a_name_bound_twice_in_sequence_is_a_list() {
+    assert_eq!(
+        card("rule r = a:ID \",\" a:ID -> pair;\n", "pair", "a"),
+        nh_lower::Cardinality::Many
+    );
+}
+
+/// The case the old dedup was written for still collapses: the branches of a
+/// choice are alternatives, so exactly one of them binds `x`.
+#[test]
+fn a_name_bound_in_both_branches_of_a_choice_is_still_one() {
+    assert_eq!(
+        card("rule r = (\"a\" x:ID | \"b\" x:NUM) -> either;\n", "either", "x"),
+        nh_lower::Cardinality::One
+    );
+}
+
+/// And when only one branch binds it, it may not be there at all.
+#[test]
+fn a_name_bound_in_only_one_branch_is_optional() {
+    assert_eq!(
+        card("rule r = (\"a\" x:ID | \"b\") -> maybe;\n", "maybe", "x"),
+        nh_lower::Cardinality::Optional
+    );
+}
+
+/// A repetition inside the binding is still the binding's own.
+#[test]
+fn a_repetition_inside_the_binding_still_counts() {
+    assert_eq!(
+        card("rule r = items:ID* -> some;\n", "some", "items"),
+        nh_lower::Cardinality::Many
+    );
+    assert_eq!(
+        card("rule r = value:ID? -> maybe;\n", "maybe", "value"),
+        nh_lower::Cardinality::Optional
+    );
+}
+
+/// A name bound once, plainly, is unaffected.
+#[test]
+fn a_name_bound_once_is_one() {
+    assert_eq!(
+        card("rule r = value:ID -> only;\n", "only", "value"),
+        nh_lower::Cardinality::One
+    );
+}
+
+/// And the tags are really all there, so the `Vec` accessor has something to
+/// collect.
+///
+/// The cardinality decides whether generation emits `tagged` or `tagged_all`;
+/// this pins the other half — that the grammar tags every element, so choosing
+/// `tagged_all` actually recovers them. Together they are the difference
+/// between three arguments and one.
+#[test]
+fn every_element_of_a_repeated_binding_is_tagged() {
+    let l = build_str(
+        "grammar C;\n\
+         use operators::none;\n\
+         skip WS = \" \" | \"\\t\" | \"\\n\";\n\
+         token ALPHA = @ \"a\"..\"z\";\n\
+         token ID = @ ALPHA+;\n\
+         rule r = items:ID (\",\" items:ID)* -> list;\n",
+    );
+    let v = vm(&l.pest);
+    let mut pairs = v.parse("r", "a, b, c").expect("`a, b, c` should parse");
+    let node = pairs.next().expect("one `r` pair");
+
+    // **Direct** children, because that is what `tagged_all` scans. If the
+    // `("," items:ID)*` group put its elements one level down, the accessor
+    // would find only the first and the list would silently lose the rest —
+    // which is the bug this whole change is about, one layer lower.
+    let tagged = node
+        .into_inner()
+        .filter(|p| p.as_node_tag() == Some("items"))
+        .count();
+    assert_eq!(
+        tagged, 3,
+        "all three elements should be direct children carrying the tag"
+    );
+}

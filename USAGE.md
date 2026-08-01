@@ -1273,6 +1273,22 @@ you. Here is what each binding turns into:
 Parameters appear in grammar order, and each one is documented on its own line
 above the stub. The signature alone tells you what the handler is working with.
 
+**Bind the same name more than once and you get one parameter covering all of
+them.** This is how to write a separated list without a helper rule:
+
+```nh
+rule arg_list = args:expr ("," args:expr)* -> args;
+```
+
+`args` is a single `Vec` holding every element, head included — there is no
+first-and-rest to join. The cardinality comes from all the occurrences together,
+so the outer one being singular does not make the accessor singular.
+
+A choice still collapses, because its branches are alternatives rather than
+additions: `("a" x:ID | "b" x:NUM)` binds `x` exactly once whichever branch
+matches, so `x` stays a single value. Bind it in only one branch and it becomes
+`Option`.
+
 `.key()` exists **only** on folding tokens. Calling it in a case-sensitive
 grammar is a compile error rather than a silent no-op, so a symbol-table lookup
 cannot forget to fold. Use `.text()` in messages — reporting `counter` when

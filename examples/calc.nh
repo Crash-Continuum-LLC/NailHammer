@@ -48,12 +48,10 @@ rule suffix
   | "." name:IDENT         -> field place
   ;
 
-// A separator rule rather than `args:expr ("," args:expr)*`, because the
-// repetition is what makes the tail a list — the head and tail are bound
-// separately and joined by the handler.
-rule arg_list = first:expr rest:more_arg* -> args;
-
-rule more_arg = "," value:expr -> next;
+// Binding the same name on both sides of the separator: `args` covers every
+// element, so the handler receives one list rather than a head and a tail to
+// join.
+rule arg_list = args:expr ("," args:expr)* -> args;
 
 rule primary
   = value:NUMBER       -> num
