@@ -18,7 +18,8 @@ rule else_tail = "else" body:block -> pass;
 rule block = "{" body:stmt* "}" -> block;
 ```
 
-Regenerate, and look at what changed in the signatures:
+Regenerate, and look at what changed in the signatures (narrowed to `Interp`,
+as chapter 4 described):
 
 ```rust
 // handlers/stmt_branch.rs

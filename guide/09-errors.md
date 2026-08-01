@@ -84,15 +84,21 @@ would catch it unless you happened to write one for `letter`.
 $ nh check --lints
 Determinism lints. Silence one with `allow <name> in <rule>;`
 
-  left-recursion    a rule that can reach itself without consuming input
-  shadow            an alternative an earlier one always matches first
-  ...
+  left-recursion           a rule that can reach itself without consuming input
+  nullable-repetition      a repetition whose body can match nothing
+  shadow                   an earlier alternative that makes a later one unreachable
+  unreachable-alternative  an alternative after one that always matches
+  duplicate-binding        the same binding name twice in one sequence
+  unused                   a rule or token nothing refers to
+  recover-sync             a `recover` sync point that can match nothing
+  silent-binding           a binding onto a rule that produces no node
 ```
 
-Several are **errors**, not warnings, because they mean the grammar cannot work
-at all. The rest fire only when the tool is *certain* — a lint that goes off on
-working code is one you learn to ignore, which costs more than it saves. When
-you know better than the lint:
+Five of the eight are **errors**, not warnings, because each means the grammar
+cannot work at all — a left-recursive rule does not terminate, and a binding
+onto a silent rule has no node to attach to. The rest fire only when the tool is
+*certain*: a lint that goes off on working code is one you learn to ignore,
+which costs more than it saves. When you know better than the lint:
 
 ```nh
 allow shadow in kw;
@@ -126,4 +132,4 @@ Problems panel as you type, and `nh trace` runs in a live pane.
 
 ---
 
-Next: [Choosing a host shape](08-hosts.md).
+Next: [Choosing a host shape](10-hosts.md).

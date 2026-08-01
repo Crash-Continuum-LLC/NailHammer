@@ -12,10 +12,10 @@ rule stmt
 
 ```console
 $ nh build pebble.nh -o src/pebble.pest --rust src
-ok: generated 14 file(s) in src  [7 new handler(s), 0 kept]
+ok: generated 15 file(s) in src  [7 new handler(s), 0 kept]
 ```
 
-Seven handler files, one per alternative. Open one:
+Seven handler files, one per labelled alternative. Open one:
 
 ```rust
 //! Handler for `stmt_declare`.
@@ -25,29 +25,48 @@ Seven handler files, one per alternative. Open one:
 //! ```text
 //! "let" name:IDENT "=" value:expr ";" -> declare
 //! ```
+//!
+//! Created once by `nh build --rust` and never overwritten. Edit freely.
 
 /// * `name` — the text of the `IDENT` token
 /// * `value` — the value of the `expr` rule, already evaluated
-pub fn run(host: &mut Interp, name: &str, value: Value, cx: &mut Ctx)
-    -> Result<Value>
+pub fn run<H: Handlers>(host: &mut H, name: &str, value: H::Out, cx: &mut Ctx)
+    -> Result<H::Out>
+{
+    compile_error!("handler `stmt_declare` is not implemented. ...");
+    cx.err("`stmt_declare` is not implemented yet")
+}
 ```
 
 **The bindings are the parameters.** `name:IDENT` became `name: &str`;
-`value:expr` became `value: Value`, already evaluated, because the generated
+`value:expr` became `value: H::Out`, already evaluated, because the generated
 evaluator walked the tree and ran it before calling you.
 
 There is no parse tree in a handler. There is nothing to walk, nothing to index,
 and no `pair.into_inner().nth(2)` to get wrong.
 
+The two doc lines above the signature are not decoration — they are the only
+place that says *which* of your parameters arrived evaluated and which did not.
+Chapter 5 is entirely about that distinction.
+
 ## Writing them
+
+The stub is generic over `H: Handlers` so it compiles before you have picked a
+host. **Narrow it to your own type** as you fill it in — every worked example in
+the repository does — and the signature gets shorter and the errors get better:
 
 ```rust
 // handlers/stmt_declare.rs
+use nh_runtime::{Ctx, Result};
+use crate::{Interp, Value};
+
 pub fn run(host: &mut Interp, name: &str, value: Value, _cx: &mut Ctx) -> Result<Value> {
     host.set(name, value.clone());
     Ok(value)
 }
 ```
+
+The rest of this book shows handlers in that narrowed form.
 
 ```rust
 // handlers/atom_number.rs

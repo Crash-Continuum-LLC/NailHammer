@@ -114,3 +114,7 @@ with to target a machine it did not write.
 
 That is the book. You have a language, and the parts of it you wrote are the
 parts that were actually about your language.
+
+The [appendix](11-pebble-in-full.md) has the finished grammar in one piece,
+alongside every handler signature it generated — worth a look even if you built
+along, because seeing the two side by side is the argument in one page.

@@ -6,8 +6,13 @@ with variables, arithmetic that gets precedence right, string concatenation,
 going — and you will not have written a parser, a precedence climber, or a
 single line that walks a parse tree.
 
-Pebble is about 25 lines of grammar and ten handler files averaging six lines
-each. That ratio is the point of the exercise.
+It also grows: the last two chapters before the appendix add a **new type** —
+a point, `(4, 2)` — and a **new block form**, `begin frame … end frame`,
+walking every step of each. Adding to a language you already have is what you
+will actually spend your time doing.
+
+The ratio is the point of the exercise: a page of grammar, and a handler per
+alternative that mostly fits on a screen.
 
 ```pebble
 let width = 4;
@@ -24,6 +29,11 @@ while n <= 5 {
   n = n + 1;
 }
 show total;                       # 15
+
+let a = (3, 4);                   # a type you added in chapter 7
+begin frame                       # a block form you added in chapter 8
+  show a + (1, 2);                # (4, 6)
+end frame
 ```
 
 ## The chapters
@@ -36,8 +46,11 @@ show total;                       # 15
 | [4. Handlers are your language](04-handlers.md) | Bindings arrive as parameters. This is the chapter that matters |
 | [5. Control flow, and what `lazy` is for](05-control-flow.md) | `if`, `while`, and why a condition is sometimes not a value |
 | [6. Assignment, and `place`](06-assignment.md) | The one enum the grammar generates for you |
-| [7. When programs are wrong](07-errors.md) | Recovery, better messages, and the determinism lints |
-| [8. Choosing a host shape](08-hosts.md) | Interpreter, compiler, or a shared VM — and where to go next |
+| [7. Adding a type](07-a-new-type.md) | A point, `(4, 2)` — and which decisions the compiler forces on you |
+| [8. Adding a block form](08-a-new-block.md) | `begin frame … end frame`, and why a body that runs once is still `lazy` |
+| [9. When programs are wrong](09-errors.md) | Recovery, better messages, and the determinism lints |
+| [10. Choosing a host shape](10-hosts.md) | Interpreter, compiler, or a shared VM — and where to go next |
+| [Appendix: Pebble in full](11-pebble-in-full.md) | The finished grammar in one piece, and every handler signature |
 
 ## Before you start
 

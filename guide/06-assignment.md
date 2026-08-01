@@ -114,9 +114,13 @@ taller than wide
 15
 ```
 
-Pebble is finished: 25 lines of grammar, ten handlers averaging six lines, and
-a `lib.rs` that is almost entirely arithmetic.
+That is the core language: a page of grammar, a handler per alternative none of
+them longer than a screen, and a `lib.rs` that is almost entirely arithmetic.
+
+The next two chapters grow it — a new *type*, then a new kind of *block* —
+because adding to a language you already have is the thing you will actually
+spend your time doing.
 
 ---
 
-Next: [When programs are wrong](07-errors.md).
+Next: [Adding a type](07-a-new-type.md).

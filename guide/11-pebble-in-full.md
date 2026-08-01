@@ -17,17 +17,19 @@ token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 token TEXT   = @ "\"" (!"\"" ANY)* "\"";
 
-reserved from IDENT { "let" "show" "if" "else" "while" "not" }
+reserved from IDENT { "let" "show" "if" "else" "while" "not"
+                      "begin" "end" "frame" }
 
 rule program = SOI body:stmt* EOI -> program;
 
 rule stmt
-  = "let" name:IDENT "=" value:expr ";"          -> declare
-  | "show" value:expr ";"                        -> show
+  = "let" name:IDENT "=" value:expr ";"           -> declare
+  | "show" value:expr ";"                         -> show
   | "if" cond:expr lazy then:block
-      lazy otherwise:else_tail?                  -> branch
-  | "while" lazy cond:expr lazy body:block       -> loop
-  | value:expr ";"                               -> evaluate
+      lazy otherwise:else_tail?                   -> branch
+  | "while" lazy cond:expr lazy body:block        -> loop
+  | "begin" "frame" lazy body:stmt* "end" "frame" -> frame
+  | value:expr ";"                                -> evaluate
   ;
 
 rule else_tail = "else" body:block -> pass;
@@ -35,10 +37,11 @@ rule else_tail = "else" body:block -> pass;
 rule block = "{" body:stmt* "}" -> block;
 
 rule atom
-  = value:NUMBER        -> number
-  | text:TEXT           -> text
-  | name:IDENT          -> name place
-  | "(" inner:expr ")"  -> pass
+  = value:NUMBER              -> number
+  | text:TEXT                 -> text
+  | name:IDENT                -> name place
+  | "(" x:expr "," y:expr ")" -> point
+  | "(" inner:expr ")"        -> pass
   ;
 
 recover stmt sync ";" | "}";
@@ -46,13 +49,14 @@ recover stmt sync ";" | "}";
 
 ## What that generated
 
-Ten handler files, because there are ten labelled alternatives:
+Twelve handler files, one per labelled alternative:
 
 ```
 handlers/program.rs        handlers/stmt_declare.rs   handlers/atom_number.rs
 handlers/block.rs          handlers/stmt_show.rs      handlers/atom_text.rs
                            handlers/stmt_branch.rs    handlers/atom_name.rs
-                           handlers/stmt_loop.rs
+                           handlers/stmt_loop.rs      handlers/atom_point.rs
+                           handlers/stmt_frame.rs
                            handlers/stmt_evaluate.rs
 ```
 
@@ -71,13 +75,20 @@ stmt_branch    (host, cond: Value,
                       otherwise: Option<&Shared<ElseTail>>, cx)
 stmt_loop      (host, cond: &Shared<Expr>,
                       body: &Shared<Block>,       cx)
+stmt_frame     (host, body: &[Shared<Stmt>],      cx)
 atom_number    (host, value: &str,                cx)
 atom_text      (host, text: &str,                 cx)
 atom_name      (host, name: &str,                 cx)
+atom_point     (host, x: Value, y: Value,         cx)
 ```
 
 Every parameter name came from a binding. Every type came from a cardinality or
 a `lazy`. Nothing was written twice, and nothing indexes a parse tree.
+
+Read that list top to bottom and the language is visible in it. `stmt_branch`
+and `stmt_loop` get their bodies unrun because they choose *whether* to run
+them. `stmt_frame` gets a whole slice unrun because it wraps them. Everything
+else gets values, because everything else is arithmetic.
 
 ## The sample program
 
@@ -104,6 +115,15 @@ while n <= 5 {
   n = n + 1;
 }
 show total;
+
+let a = (3, 4);
+let b = (1, 2);
+
+begin frame
+  show "points";
+  show a + b;
+  show a == (3, 4);
+end frame
 ```
 
 ```console
@@ -112,6 +132,11 @@ $ cargo run
 hello, pebble
 taller than wide
 15
++--------+
+| points |
+| (4, 6) |
+| true   |
++--------+
 ```
 
 ---
