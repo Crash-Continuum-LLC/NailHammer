@@ -1,6 +1,20 @@
-# Draft — An extensible VM, and what languages must agree with it
+# An extensible VM, and what languages must agree with it
 
-**Status: draft. Nothing implemented yet; prototyping starts from §7.**
+**Status: §7 is built and shipping as the `nh-vm` crate; §1–§6 are superseded
+reasoning, kept deliberately; §8's published contract is designed, not built.**
+
+What exists: `Op<X>` with a language's own instructions in `Ext`, a `Machine`
+with call frames and `Step::Awaiting` suspension, `snapshot`/`restore`, the
+`SharedStore` trait with five implementations, the `Emitter` trait a compiler
+implements in two methods, and a versioned wire format. `nh build --target
+nh-vm` generates the `Operators` impl rather than making you write it, and
+`examples/vm-c` and `examples/vm-basic` are two unrelated languages proved to
+emit identical bytecode.
+
+What does not exist yet is §8.3's **published configuration** — the file a VM
+owner ships so a language developer can read the contract, and the
+`nh explain --config` that would print it. Where this document shows that flag,
+it is describing a design, not a command you can run.
 
 How a pluggable interpreter system can accept languages it has never seen.
 
@@ -19,8 +33,8 @@ marked.
 
 ## 1. The problem
 
-Today `nh init` (compiler shape) writes a 507-line `src/lib.rs` into the user's
-project and hands them ownership of it. That file contains all four of:
+`nh init` writes a `src/lib.rs` into the user's project and hands them ownership
+of it. That one file contains all four of:
 
 ```rust
 pub enum Op { .. }        // the opcode set
@@ -618,8 +632,8 @@ const COMPILER_FN_OPS: &str = r##"
 
 So a NailHammer VM is *already* a core instruction set plus opt-in additions.
 The only thing wrong with it is the mechanism: the composition happens as **text
-substitution at scaffold time**, producing a 507-line file the author then owns
-and can never receive a fix to. Promote that from text to types and the same
+substitution at scaffold time**, producing a file the author then owns and can
+never receive a fix to. Promote that from text to types and the same
 design becomes a dependency instead of a copy.
 
 ### 7.2 What it collapses

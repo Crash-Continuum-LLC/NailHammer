@@ -3,7 +3,7 @@
 The other examples interpret. This one emits instructions for a **stack
 machine**, from a grammar that does not know the difference.
 
-> `nh init --compiler` scaffolds a **register** machine instead — three-address
+> `nh init` scaffolds a **register** machine instead — three-address
 > code with locals in slots, which is what you would build on. This example
 > stays a stack machine on purpose: it is the shortest way to see that the shape
 > of a host is one line, without a register allocator in the way. USAGE.md
@@ -61,7 +61,7 @@ stream before the handler could put a jump in front of it:
 
 ```rust
 // src/handlers/stmt_iff.rs
-pub fn run(host: &mut Interp, _cond: (), body: &Rc<Stmt>, cx: &mut Ctx) -> Result<()> {
+pub fn run(host: &mut Interp, _cond: (), body: &Shared<Stmt>, cx: &mut Ctx) -> Result<()> {
     let jump = host.emit_jump_if_false();   // cond's code is already emitted
     body.eval(host, cx)?;                   // emits the body at this point
     host.patch_to_here(jump);               // now its length is known

@@ -220,7 +220,7 @@ token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 
 reserved from IDENT { "let" }
 
-rule program = SOI stmt* EOI;
+rule program = SOI body:stmt* EOI -> program;
 
 rule stmt
   = "let" name:IDENT "=" value:expr ";" -> let
@@ -236,7 +236,12 @@ rule primary
   ;
 ```
 
-Two things in there are worth explaining before you go further.
+Three things in there are worth explaining before you go further.
+
+**The entry rule carries `-> program`.** A rule with no label has no node of its
+own and stands in for its single child, which `stmt*` is not — it is any number
+of them. Labelling it gives it a node, and gives you a handler that receives the
+whole program as a list. See [Alternatives](#alternatives) for the general rule.
 
 **There is no `expr` rule.** You did not forget it. `use operators::core` supplies
 `expr`, along with precedence, associativity, and short-circuit behaviour. What
@@ -840,7 +845,7 @@ Run in a terminal it asks two questions; run in a script it takes the defaults.
 Either way the same flags work:
 
 ```console
-$ nh init mylang --style basic --with loops,functions --compiler
+$ nh init mylang --style basic --with loops,functions
 ```
 
 **`--style`** is syntax. `c` gives braces and semicolons, `basic` gives a
@@ -853,7 +858,9 @@ equality.
 `continue`), `functions` (definitions, calls, parameters, `return`, recursion),
 or `all` / `none`.
 
-**`--compiler`** picks the other shape — see below.
+**`--interpreter`** picks the other shape — see below. The default is a bytecode
+compiler, which is faster and can suspend; `--interpreter` scaffolds a
+tree-walker instead.
 
 ### The styles share their handlers
 
@@ -862,7 +869,7 @@ than it looks. `WHILE cond ... WEND` and `while cond { }` bind the same names to
 the same shapes, so both scaffold the *same* `handlers/stmt_while.rs`:
 
 ```rust
-pub fn run(host: &mut Interp, cond: &Rc<Expr>, body: &Rc<Block>, cx: &mut Ctx)
+pub fn run(host: &mut Interp, cond: &Shared<Expr>, body: &Shared<Block>, cx: &mut Ctx)
 ```
 
 Change your mind about syntax later and you rewrite the grammar, not the
@@ -972,7 +979,7 @@ Without `lazy` a body would already be emitted before the handler could put a
 jump in front of it:
 
 ```rust
-pub fn run(host: &mut Interp, _cond: (), body: &Rc<Stmt>, cx: &mut Ctx) -> Result<()> {
+pub fn run(host: &mut Interp, _cond: (), body: &Shared<Stmt>, cx: &mut Ctx) -> Result<()> {
     let jump = host.emit_jump_if_false();   // cond's code is already emitted
     body.eval(host, cx)?;                   // emits the body here
     host.patch_to_here(jump);               // now its length is known
@@ -1266,7 +1273,7 @@ you. Here is what each binding turns into:
 | `key:IDENT` | `&str` | The token's text |
 | `key:IDENT`, folding token | `&Name` | Text plus `.key()` |
 | `value:expr` | `Self::Out` | The sub-rule, **already evaluated** |
-| `lazy body:block` | `&Rc<Block>` | The sub-rule, **not** evaluated |
+| `lazy body:block` | `&Shared<Block>` | The sub-rule, **not** evaluated |
 | `x:y?` | `Option<..>` | |
 | `x:y*` | `&[..]` or `Vec<Self::Out>` | |
 
@@ -1441,7 +1448,7 @@ rule stmt = "if" cond:expr "then" lazy body:stmt -> iff;
 ```
 
 ```rust
-pub fn run(host: &mut Interp, cond: Value, body: &Rc<Stmt>, cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, cond: Value, body: &Shared<Stmt>, cx: &mut Ctx) -> Result<Value> {
     if !host.truthy(&cond) {
         return Ok(cond);
     }
@@ -1460,7 +1467,7 @@ and `||` already use it. Hand-writing the test here is how `if 0 then ..` and
 to defer.
 
 **It works on repetitions**, which is what a loop needs. `lazy body:line*` gives
-`&[Rc<Line>]`, and the handler runs the whole list once per iteration:
+`&[Shared<Line>]`, and the handler runs the whole list once per iteration:
 
 ```rust
 while /* the loop condition */ {
@@ -1500,7 +1507,7 @@ That is what makes subroutines and functions possible:
 
 ```rust
 // handlers/stmt_define.rs — SUB name ... END SUB
-pub fn run(host: &mut Interp, name: &Name, body: &[Rc<Line>], cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, name: &Name, body: &[Shared<Line>], cx: &mut Ctx) -> Result<Value> {
     host.subs.insert(name.key().to_string(), body.to_vec());
     Ok(Value::Nothing)
 }
@@ -1589,7 +1596,7 @@ rule line    = label:NUMBER? body:stmt EOL*  -> line;
 ```
 
 ```rust
-pub fn run(host: &mut Interp, lines: &[Rc<Line>], cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, lines: &[Shared<Line>], cx: &mut Ctx) -> Result<Value> {
     let labels = jump_table(lines, cx)?;      // reads `line.label`, runs nothing
     let mut pc = 0;
     while pc < lines.len() {

@@ -9,7 +9,8 @@ $ cargo run -p vm-c
 $ cargo run -p vm-basic
 ```
 
-Both print `18 -6 true 8 1 0 1 2`, from 49 instructions.
+Both print `18 -6 true 8 1 0 1 2` — the same values from the same count of
+instructions, which `tests/agree.rs` pins.
 
 ## What is generated
 
@@ -53,9 +54,23 @@ the loop — which means the handler has to know where the top *is* before the
 condition is emitted. An eager `cond` would already be behind us. `if` needs it
 only for the body, to put a jump in front.
 
-## The test that matters
+## The tests that matter
 
 `tests/agree.rs` checks the two produce the same output, the same register
 frame, and the same instructions **in the same order**. Two grammars sharing no
 syntax, making the same lowering decisions, because the decisions were never
 theirs to make.
+
+Agreement is easy to keep by accident once one twin stops growing, so two tests
+guard against that directly:
+
+* `the_pair_covers_the_whole_language` reads both grammar files and fails,
+  naming the feature, when a construct exists in one and not the other. It
+  anchors on the text that *defines* each construct — an earlier version matched
+  bare keywords, and a keyword left behind in a `reserved from` list was enough
+  to satisfy it while the languages had already diverged.
+* `the_twins_agree_on_a_program_that_uses_everything` runs one program through
+  both using recursion, `else`, arrays, indexed assignment, strings, `len`,
+  `while`, bitwise operators and short-circuit — comparing instruction for
+  instruction, and asserting the answers, so "equal" cannot quietly mean
+  "equally wrong".

@@ -21,7 +21,7 @@ nh — NailHammer grammar toolkit
 USAGE:
     nh init    [dir] [--name <name>] [--ext <ext>] [--style c|basic]
                [--with loops,functions] [--interpreter] [--force]
-    nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
+    nh check   <file.nh> [--quiet] [--deny-warnings] [--lints] [--json]
     nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>]
                [--target <vm> [--host <ty>]] [--prune [--force]]
     nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
