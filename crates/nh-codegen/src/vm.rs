@@ -164,14 +164,11 @@ pub fn operators_impl(
          // imports so that wiring it in is one `pub mod` line the generator\n\
          // already wrote -- nothing here needs a name the author has to guess.\n\
          //\n\
-         // If this file defines `impl ShortCircuit`, your crate must say\n\
-         //\n\
-         //     nh_handlers!(Interp, without short_circuit);\n\
-         //\n\
-         // because the macro writes its own `ShortCircuit` otherwise, using\n\
-         // `truthy` -- a question a compiler cannot answer, since its `Out` is\n\
-         // a register rather than a value. Two impls of one trait is a\n\
-         // conflicting-implementations error naming both.\n\
+         // The `nh_handlers!` invocation is at the bottom of this file rather\n\
+         // than in your crate. Which form it takes is not a choice: a compiler\n\
+         // targeting a VM always needs `without short_circuit`, because the\n\
+         // macro would otherwise write a `ShortCircuit` asking `truthy` -- a\n\
+         // question a host whose `Out` is a register cannot answer.\n\
          \n\
          use nh_runtime::{{Ctx, Result, Shared}};\n\
          use nh_vm::{{Cmp, Op, Reg}};\n\
@@ -235,8 +232,17 @@ pub fn operators_impl(
             );
         }
         let _ = writeln!(out, "}}");
-
     }
+
+    // The invocation, so it is not something to know. `without short_circuit`
+    // exactly when this file provided one -- a decision that always goes the
+    // same way, and therefore not the author's to make.
+    let _ = writeln!(
+        out,
+        "\n// Wires every handler module to its trait method.\n\
+         nh_handlers!({host}{});",
+        if lazy.is_empty() { "" } else { ", without short_circuit" }
+    );
 
     Ok(out)
 }

@@ -5,6 +5,10 @@
 
 pub mod ast;
 pub mod diagnostics;
+// `macro_use` so `nh_handlers!` is in textual scope for the
+// modules declared after this one. `macro_export` publishes it to
+// other crates; inside this one, scoping is textual.
+#[macro_use]
 pub mod dispatch;
 pub mod place;
 pub mod run;

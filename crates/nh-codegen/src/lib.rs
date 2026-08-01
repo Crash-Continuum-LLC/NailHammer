@@ -180,7 +180,11 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
         path: "generated/mod.rs".into(),
         contents: format!(
             "{HEADER}\n\
-             pub mod ast;\npub mod diagnostics;\npub mod dispatch;\n\
+             pub mod ast;\npub mod diagnostics;\n\
+             // `macro_use` so `nh_handlers!` is in textual scope for the\n\
+             // modules declared after this one. `macro_export` publishes it to\n\
+             // other crates; inside this one, scoping is textual.\n\
+             #[macro_use]\npub mod dispatch;\n\
              pub mod place;\npub mod run;\npub mod views;\n{vm_module}\n\
              pub use diagnostics::{{render_parse_error, syntax_errors}};\n\
              pub use dispatch::{{Eval, Handlers}};\n\

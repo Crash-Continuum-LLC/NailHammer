@@ -9,14 +9,11 @@
 // imports so that wiring it in is one `pub mod` line the generator
 // already wrote -- nothing here needs a name the author has to guess.
 //
-// If this file defines `impl ShortCircuit`, your crate must say
-//
-//     nh_handlers!(Interp, without short_circuit);
-//
-// because the macro writes its own `ShortCircuit` otherwise, using
-// `truthy` -- a question a compiler cannot answer, since its `Out` is
-// a register rather than a value. Two impls of one trait is a
-// conflicting-implementations error naming both.
+// The `nh_handlers!` invocation is at the bottom of this file rather
+// than in your crate. Which form it takes is not a choice: a compiler
+// targeting a VM always needs `without short_circuit`, because the
+// macro would otherwise write a `ShortCircuit` asking `truthy` -- a
+// question a host whose `Out` is a register cannot answer.
 
 use nh_runtime::{Ctx, Result, Shared};
 use nh_vm::{Cmp, Op, Reg};
@@ -142,3 +139,6 @@ impl ShortCircuit for crate::Interp {
         Ok(lhs)
     }
 }
+
+// Wires every handler module to its trait method.
+nh_handlers!(crate::Interp, without short_circuit);

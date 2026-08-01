@@ -149,10 +149,9 @@ impl generated::dispatch::Semantics for Interp {
 // generator wired into `generated/mod.rs` itself, so there is no `include!` and
 // no imports to guess.
 
-// `without short_circuit` because the generated module already implements it,
-// as a jump -- the macro's version would ask `truthy`, which a compiler that
-// emits instructions cannot answer. The generated file says so at the top.
-nh_handlers!(Interp, without short_circuit);
+// No `nh_handlers!` here. Which form it takes is not a choice -- a compiler
+// targeting a VM always needs `without short_circuit` -- so the generator makes
+// the call rather than asking the author to know that.
 
 // ---------------------------------------------------------------------------
 // Driving it
