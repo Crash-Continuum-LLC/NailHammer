@@ -299,10 +299,10 @@ pub trait Handlers: Operators + Sized {
     /// * `index` — the value of the `expr` rule, already evaluated
     fn primary_elem(&mut self, name: &str, index: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
 
-    /// `primary_call` — from `rule primary = name:IDENT "(" args:exprs ")" -> call`.
+    /// `primary_call` — from `rule primary = name:IDENT "(" args:exprs? ")" -> call`.
     /// * `name` — the text of the `IDENT` token
-    /// * `args` — the value of the `exprs` rule, already evaluated
-    fn primary_call(&mut self, name: &str, args: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
+    /// * `args` — the value of the `exprs` rule, already evaluated (optional in the grammar)
+    fn primary_call(&mut self, name: &str, args: Option<Self::Out>, cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `primary_var` — from `rule primary = name:IDENT -> var place`.
     /// * `name` — the text of the `IDENT` token
@@ -673,7 +673,7 @@ impl Eval for PrimaryElem {
     }
 }
 
-/// Evaluates `primary`, from `name:IDENT "(" args:exprs ")" -> call`.
+/// Evaluates `primary`, from `name:IDENT "(" args:exprs? ")" -> call`.
 pub fn eval_primary_call<H: Handlers>(host: &mut H, node: &PrimaryCall, cx: &mut Ctx) -> Result<H::Out> {
     // Entering the node's span is what makes `cx.err(..)` inside the
     // handler locate itself with no span bookkeeping (DESIGN.md §7).
@@ -689,7 +689,7 @@ fn eval_primary_call_inner<H: Handlers>(
     cx: &mut Ctx,
 ) -> Result<H::Out> {
     let name = &node.name;
-    let args = eval_exprs(host, &node.args, cx)?;
+    let args = match &node.args { Some(n) => Some(eval_exprs(host, n, cx)?), None => None };
     host.primary_call(name, args, cx)
 }
 
@@ -1106,7 +1106,7 @@ macro_rules! nh_handlers {
             fn primary_call(
                 &mut self,
                 name: &str,
-                args: <Self as $crate::generated::dispatch::Semantics>::Out,
+                args: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::primary_call::run(self, name, args, cx)
@@ -1260,7 +1260,7 @@ macro_rules! nh_handlers {
             fn primary_call(
                 &mut self,
                 name: &str,
-                args: <Self as $crate::generated::dispatch::Semantics>::Out,
+                args: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::primary_call::run(self, name, args, cx)

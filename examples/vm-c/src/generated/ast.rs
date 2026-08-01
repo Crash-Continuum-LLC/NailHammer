@@ -133,11 +133,11 @@ pub struct PrimaryElem {
     pub span: Span,
 }
 
-/// From `rule primary = name:IDENT "(" args:exprs ")" -> call`.
+/// From `rule primary = name:IDENT "(" args:exprs? ")" -> call`.
 #[derive(Clone, Debug)]
 pub struct PrimaryCall {
     pub name: String,
-    pub args: Shared<Exprs>,
+    pub args: Option<Shared<Exprs>>,
     pub span: Span,
 }
 
@@ -410,12 +410,12 @@ pub fn build_primary_elem(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<P
     }))
 }
 
-/// Builds `PrimaryCall` from `name:IDENT "(" args:exprs ")" -> call`.
+/// Builds `PrimaryCall` from `name:IDENT "(" args:exprs? ")" -> call`.
 pub fn build_primary_call(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<PrimaryCall>> {
     let view = PrimaryCallView::from_pair(pair, file);
     Ok(Shared::new(PrimaryCall {
         name: view.name().text().to_string(),
-        args: build_exprs(view.args().into_pair(), file)?,
+        args: match view.args() { Some(n) => Some(build_exprs(n.into_pair(), file)?), None => None },
         span: view.span(),
     }))
 }

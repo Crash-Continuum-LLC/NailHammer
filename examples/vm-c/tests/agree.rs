@@ -345,3 +345,83 @@ fn functions_survive_the_wire() {
     assert!(matches!(m.resume(), nh_vm::Step::Done));
     assert_eq!(m.output, ["81"]);
 }
+
+// ---------------------------------------------------------------------------
+// Locals — the bug here was found by asking, not by a test
+// ---------------------------------------------------------------------------
+//
+// A variable first assigned inside a function used to become a *global*, shared
+// by every frame. It worked in the obvious test and failed in the mirror image:
+// `t + f(n-1)` was right and `f(n-1) + t` was wrong, because reading `t` into a
+// register before the recursive call happened to save it. These pin the shape of
+// that bug rather than the one example of it.
+
+#[test]
+fn a_local_is_per_frame_whichever_side_of_the_operator_it_is_on() {
+    let body = "fn f(n) { if (n < 1) { return 0; } t = n;";
+    assert_eq!(run_c(&format!("{body} return t + f(n - 1); }} print f(4);")), ["10"]);
+    assert_eq!(run_c(&format!("{body} return f(n - 1) + t; }} print f(4);")), ["10"]);
+}
+
+#[test]
+fn two_functions_may_use_the_same_local_name() {
+    let src = "fn a(x) { t = x + 1; return t; } fn b(y) { t = y * 100; return t; } \
+               print a(1); print b(2); print a(1);";
+    assert_eq!(run_c(src), ["2", "200", "2"]);
+}
+
+#[test]
+fn several_locals_survive_recursion_together() {
+    let src = "fn f(n) { if (n < 1) { return 0; } a = n; b = n; return f(n - 1) + a + b; } \
+               print f(3);";
+    assert_eq!(run_c(src), ["12"]);
+}
+
+/// A local shadows a global rather than writing through to it. That is a
+/// language decision this grammar makes, not an accident — and it is the reason
+/// `store_var` is the only place that decides where a name lives.
+#[test]
+fn a_local_shadows_a_global_of_the_same_name() {
+    assert_eq!(run_c("g = 1; fn f() { g = 2; return g; } print f(); print g;"), ["2", "1"]);
+    // Reading still reaches the global when nothing local shadows it.
+    assert_eq!(run_c("g = 7; fn f() { return g; } print f();"), ["7"]);
+}
+
+#[test]
+fn functions_compose_and_recurse_mutually() {
+    assert_eq!(run_c("fn a(n){return n+1;} fn b(n){return a(n)*2;} print b(3);"), ["8"]);
+    let mutual = "fn ev(n){ if(n<1){return 1;} return od(n-1);} \
+                  fn od(n){ if(n<1){return 0;} return ev(n-1);} print ev(4);";
+    assert_eq!(run_c(mutual), ["1"]);
+}
+
+/// Arrays are references, so one passed to a function is the caller's array.
+#[test]
+fn an_array_passed_to_a_function_is_the_same_array() {
+    assert_eq!(run_c("fn m(a){ a[0]=42; return 0; } q=[1]; m(q); print q[0];"), ["42"]);
+}
+
+#[test]
+fn a_call_with_no_arguments_works() {
+    assert_eq!(run_c("fn f() { return 7; } print f();"), ["7"]);
+}
+
+#[test]
+fn control_flow_nests_inside_a_function() {
+    let src = "fn s(n){ t=0; i=0; while(i<n){ t=t+i; i=i+1; } return t; } print s(5);";
+    assert_eq!(run_c(src), ["10"]);
+    let nested = "fn f(n){ if(n>0){ if(n>5){ return 2; } return 1; } return 0; } \
+                  print f(9); print f(1); print f(0);";
+    assert_eq!(run_c(nested), ["2", "1", "0"]);
+}
+
+#[test]
+fn recursion_is_bounded_rather_than_taking_the_process_down() {
+    assert_eq!(run_c("fn f(n){ if(n<1){return 0;} return 1+f(n-1); } print f(400);"), ["400"]);
+
+    let p = vm_c::compile("fn f(n){ return 1+f(n+1); } print f(0);").expect("compiles");
+    match vm_c::run(&p) {
+        Err(e) => assert!(e.contains("call stack exceeded"), "{e}"),
+        Ok(o) => panic!("expected a failure, got {o:?}"),
+    }
+}

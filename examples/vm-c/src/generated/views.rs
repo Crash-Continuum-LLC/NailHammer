@@ -487,7 +487,7 @@ impl<'i> PrimaryElemView<'i> {
 /// From this alternative of `rule primary`:
 ///
 /// ```text
-/// name:IDENT "(" args:exprs ")" -> call
+/// name:IDENT "(" args:exprs? ")" -> call
 /// ```
 #[derive(Clone, Debug)]
 pub struct PrimaryCallView<'i> {
@@ -520,14 +520,14 @@ impl<'i> PrimaryCallView<'i> {
     }
 
     /// `args` — the `exprs` rule.
+    /// Optional in the grammar (`?`), so this may be `None`.
     ///
     /// Dispatch turns this into the handler parameter
-    /// `args: Self::Out`:
-    /// the value of the `exprs` rule, already evaluated
-    pub fn args(&self) -> Node<'i, Rule> {
-        self.node.tagged("args").expect(
-            "the grammar guarantees `args` is present; regenerate if it changed",
-        )
+    /// `args: Option<Self::Out>`:
+    /// the value of the `exprs` rule, already evaluated (optional in the
+    /// grammar)
+    pub fn args(&self) -> Option<Node<'i, Rule>> {
+        self.node.tagged("args")
     }
 }
 

@@ -59,7 +59,7 @@ rule primary
   = value:NUMBER                      -> num
   | text:STRING                       -> str
   | name:IDENT "[" index:expr "]"     -> elem place
-  | name:IDENT "(" args:exprs ")"     -> call
+  | name:IDENT "(" args:exprs? ")"    -> call
   | name:IDENT                        -> var place
   | "[" first:expr rest:more_elem* "]" -> list
   | "(" inner:expr ")"                -> pass

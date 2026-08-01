@@ -30,7 +30,7 @@ primary = { primary_num | primary_str | primary_elem | primary_call | primary_va
 primary_num = { #value = NUMBER_ }
 primary_str = { #text = STRING }
 primary_elem = { #name = IDENT ~ "[" ~ #index = expr ~ "]" }
-primary_call = { #name = IDENT ~ "(" ~ #args = exprs ~ ")" }
+primary_call = { #name = IDENT ~ "(" ~ (#args = exprs)? ~ ")" }
 primary_var = { #name = IDENT }
 primary_list = { "[" ~ #first = expr ~ (#rest = more_elem)* ~ "]" }
 more_elem = { "," ~ #value = expr }

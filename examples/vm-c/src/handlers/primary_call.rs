@@ -9,9 +9,13 @@ use nh_vm::{Emitter, Op, Reg};
 
 use crate::Interp;
 
-pub fn run(host: &mut Interp, name: &str, args: Reg, _cx: &mut Ctx) -> Result<Reg> {
-    let base = args;
-    let argc = host.argc;
+pub fn run(host: &mut Interp, name: &str, args: Option<Reg>, _cx: &mut Ctx) -> Result<Reg> {
+    // `f()` has no argument list at all, so there is no base register and
+    // nothing to count. `argc` on the host is only meaningful when `exprs` ran.
+    let (base, argc) = match args {
+        Some(base) => (base, host.argc),
+        None => (host.alloc(), 0),
+    };
     let dst = host.reuse(&[base]);
     host.emit(Op::Call {
         dst,

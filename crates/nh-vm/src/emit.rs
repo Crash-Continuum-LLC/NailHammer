@@ -48,12 +48,22 @@ pub struct Emit<X> {
     high: Reg,
     /// Variable name to global slot, in first-seen order.
     slots: HashMap<String, Slot>,
-    /// Parameters of the function being compiled, and the registers holding
-    /// them. Empty at the top level, where every name is a global.
+    /// Named registers of the function being compiled: its parameters, then
+    /// any variable first assigned inside the body. Empty at the top level,
+    /// where every name is a global.
     ///
-    /// A `Vec` rather than a map: a parameter list is short, and order is what
-    /// decides which register a name landed in.
+    /// A `Vec` rather than a map: the list is short, and order is what decides
+    /// which register a name landed in.
     locals: Vec<(String, Reg)>,
+    /// Where scratch begins. Registers below it belong to named locals for the
+    /// whole body; everything above is temporaries.
+    locals_end: Reg,
+    /// Whether a function body is being compiled.
+    ///
+    /// Needed as well as `locals`, because a function with no parameters and no
+    /// variables yet still has to make its *next* assignment a local rather
+    /// than a global.
+    in_fn: bool,
     /// Functions defined so far.
     fns: HashMap<String, crate::program::FnDef>,
 }
@@ -66,6 +76,8 @@ impl<X> Default for Emit<X> {
             high: 0,
             slots: HashMap::new(),
             locals: Vec::new(),
+            locals_end: 0,
+            in_fn: false,
             fns: HashMap::new(),
         }
     }
@@ -134,7 +146,7 @@ pub trait Emitter {
     /// temporaries contiguous.
     fn free(&mut self, r: Reg) {
         let s = self.emit_state();
-        let floor = s.locals.len() as Reg;
+        let floor = s.locals_end;
         if r >= floor && s.next == r + 1 {
             s.next -= 1;
         }
@@ -158,7 +170,7 @@ pub trait Emitter {
     /// overwritten between the test and the recursion.
     fn reset_regs(&mut self) {
         let s = self.emit_state();
-        s.next = s.locals.len() as Reg;
+        s.next = s.locals_end;
     }
 
     fn frame_size(&self) -> usize {
@@ -209,16 +221,37 @@ pub trait Emitter {
         dst
     }
 
-    /// Writes a variable, wherever it lives.
+    /// Writes a variable, wherever it lives — creating a local if it is new and
+    /// a function is being compiled.
     ///
-    /// Generated assignment calls this rather than storing to a slot directly,
-    /// so *where a name lives* is decided in one place. Without it, `x = 1`
-    /// inside a function would store to a global of the same name and the
-    /// parameter would never change.
+    /// This is the one place that decides *where a name lives*, which is what
+    /// makes it correct. An earlier version only treated **parameters** as
+    /// local, so a temporary assigned inside a body became a global shared by
+    /// every frame: `f(n-1) + t` returned the wrong answer while `t + f(n-1)`
+    /// returned the right one, because reading `t` into a register before the
+    /// recursive call happened to save it. A bug that depends on which side of
+    /// a `+` you write is not one anybody should have to find.
     fn store_var(&mut self, name: &str, src: Reg) {
         if let Some(r) = self.local_of(name) {
             if r != src {
                 self.emit(Op::Move { dst: r, src });
+            }
+            return;
+        }
+        if self.emit_state_ref().in_fn {
+            // A new name inside a body takes the next named register, which is
+            // per frame — so recursion gets its own copy.
+            let dst = {
+                let s = self.emit_state();
+                let dst = s.locals_end;
+                s.locals.push((name.to_string(), dst));
+                s.locals_end += 1;
+                s.next = s.next.max(s.locals_end);
+                s.high = s.high.max(s.next);
+                dst
+            };
+            if dst != src {
+                self.emit(Op::Move { dst, src });
             }
             return;
         }
@@ -239,7 +272,9 @@ pub trait Emitter {
             .enumerate()
             .map(|(i, n)| (n.clone(), i as Reg))
             .collect();
-        s.next = params.len() as Reg;
+        s.locals_end = params.len() as Reg;
+        s.in_fn = true;
+        s.next = s.locals_end;
         s.high = s.high.max(s.next);
         self.here()
     }
@@ -254,6 +289,8 @@ pub trait Emitter {
         let frame = self.frame_size();
         let s = self.emit_state();
         s.locals.clear();
+        s.locals_end = 0;
+        s.in_fn = false;
         s.next = 0;
         s.fns.insert(
             name.to_string(),
