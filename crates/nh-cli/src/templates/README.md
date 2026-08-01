@@ -105,9 +105,11 @@ it either way.
 
 ## Things that bite people
 
-**Anchor your entry rule.** `rule program = SOI stmt* EOI;` — implicit skipping
-happens *between* elements, never before the first, so without `SOI` a program
-starting with a blank line will not parse.
+**Anchor your entry rule.** `rule program = SOI stmts:stmt* EOI -> doc;` —
+implicit skipping happens *between* elements, never before the first, so without
+`SOI` a program starting with a blank line will not parse. The `-> doc` matters
+too: a rule with no label stands in for its single child, and `stmt*` is any
+number of them, so `nh check` rejects it.
 
 **Leave `grammar-extras` on.** Without it every node tag is silently ignored:
 the grammar compiles, parsing succeeds, and every accessor returns nothing with

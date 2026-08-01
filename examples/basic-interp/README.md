@@ -4,7 +4,7 @@
 `FUNCTION`/`RETURN`, `GOTO`, and `EXIT`/`CONTINUE`.
 
 ```console
-$ cargo run -p basic-interp -- sample.bas
+$ cargo run -p basic-interp -- examples/basic-interp/sample.bas
 times table
 
 1	1	1

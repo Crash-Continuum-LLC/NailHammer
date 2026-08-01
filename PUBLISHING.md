@@ -64,6 +64,7 @@ chain this document used to carry is no longer something anyone has to follow:
 ```
 nh-runtime → nh-syntax → nh-operators → nh-lower → nh-analysis
            → nh-codegen → nh-build → nh-cli
+nh-vm      (depends on none of them; a generated language depends on it)
 ```
 
 Three things that are not obvious until they bite:

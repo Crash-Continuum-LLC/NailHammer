@@ -268,10 +268,25 @@ fn check(args: &[String]) -> ExitCode {
         return usage_error("`nh check` needs a file".into());
     };
 
+    // An editor asked for JSON gets JSON for *every* outcome, including the
+    // ones that stop the pipeline. Reporting these as text on stderr meant a
+    // grammar with a real error put nothing in the Problems panel — the one
+    // case the panel exists for — while a grammar with only lint warnings
+    // filled it.
+    let json = parsed.has("--json");
+    let fail = |e: &Errors, sm: &SourceMap| -> ExitCode {
+        if json {
+            println!("{}", json::diagnostics(sm, &e.0));
+            ExitCode::FAILURE
+        } else {
+            report(e, sm)
+        }
+    };
+
     let mut sm = SourceMap::new();
     let (ast, table) = match load(&path, &mut sm) {
         Ok(v) => v,
-        Err(e) => return report(&e, &sm),
+        Err(e) => return fail(&e, &sm),
     };
 
     // Lowering is where undefined references and unguardable tokens surface, so
@@ -280,7 +295,7 @@ fn check(args: &[String]) -> ExitCode {
     // dropped before.
     let lowering = match nh_lower::lower(&ast, &table) {
         Ok(l) => l,
-        Err(e) => return report(&e, &sm),
+        Err(e) => return fail(&e, &sm),
     };
 
     // Determinism analysis. Warnings are printed either way; `--deny-warnings`
@@ -298,7 +313,7 @@ fn check(args: &[String]) -> ExitCode {
         .count();
     let warnings = diagnostics.len() - errors;
 
-    if parsed.has("--json") {
+    if json {
         // Only the array reaches stdout, so a caller need not strip anything.
         println!("{}", json::diagnostics(&sm, &diagnostics));
         return if errors > 0 {

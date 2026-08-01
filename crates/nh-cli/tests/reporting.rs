@@ -190,3 +190,57 @@ fn the_tightest_tier_prints_as_one() {
     assert_eq!(numbered("^"), 1, "tightest is 1");
     assert!(numbered("+") > numbered("*"), "looser prints higher");
 }
+
+/// `--json` covers every outcome, not only the ones that got as far as the
+/// lints.
+///
+/// An editor asks for JSON and parses stdout. Errors from resolving or lowering
+/// stopped the pipeline *before* the `--json` branch and were rendered to
+/// stderr as text, so a grammar with a real error put **nothing** in the
+/// Problems panel — while a grammar with only warnings filled it. The one case
+/// the panel exists for was the one case it could not show.
+#[test]
+fn a_grammar_error_reaches_json_too() {
+    let g = grammar(
+        "jsonerr",
+        "grammar J;\nuse operators::none;\nrule program = SOI body:missing_thing EOI -> prog;\n",
+    );
+    let out = nh()
+        .args(["check", g.to_str().unwrap(), "--json"])
+        .output()
+        .expect("running nh check");
+
+    assert!(!out.status.success(), "an undefined reference is an error");
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        s.starts_with('[') && s.trim_end().ends_with(']'),
+        "stdout must be the JSON array and nothing else:\n{s}"
+    );
+    assert!(s.contains("\"severity\":\"error\""), "{s}");
+    assert!(s.contains("missing_thing"), "{s}");
+    // The location is the point of the exercise — a diagnostic an editor
+    // cannot place is one it cannot show.
+    assert!(s.contains("\"line\":3"), "{s}");
+}
+
+/// The same for a diagnostic raised while lowering rather than resolving, since
+/// those travel a different path out.
+#[test]
+fn a_lowering_error_reaches_json_too() {
+    let g = grammar(
+        "jsonlower",
+        "grammar K;\nuse operators::none;\nskip WS = \" \";\n\
+         token ALPHA = @ \"a\"..\"z\";\ntoken ID = @ ALPHA+;\n\
+         rule program = SOI body:many EOI -> prog;\n\
+         rule many = stmt*;\nrule stmt = v:ID -> s;\n",
+    );
+    let out = nh()
+        .args(["check", g.to_str().unwrap(), "--json"])
+        .output()
+        .expect("running nh check");
+
+    assert!(!out.status.success());
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("\"severity\":\"error\""), "{s}");
+    assert!(s.contains("produces 0 or more nodes"), "{s}");
+}
