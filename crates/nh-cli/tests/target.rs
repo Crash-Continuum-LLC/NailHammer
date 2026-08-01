@@ -72,7 +72,7 @@ fn a_supported_grammar_generates_its_operator_implementation() {
     // A module, not an orphan to `include!`: it brings its own imports and the
     // generator wired it into mod.rs, so the author writes no glue at all.
     assert!(generated.contains("use nh_vm::{Cmp, Op, Reg};"), "{generated}");
-    assert!(generated.contains("use super::dispatch::{CompareOp, Operators};"), "{generated}");
+    assert!(generated.contains("use super::dispatch::{CompareOp, Eval, Operators, ShortCircuit};"), "{generated}");
     let modrs = std::fs::read_to_string(dir.join("src/generated/mod.rs")).unwrap();
     assert!(modrs.contains("pub mod vm_operators;"), "{modrs}");
 
@@ -139,8 +139,8 @@ fn roles_the_target_cannot_execute_stop_the_build() {
     assert!(!out.status.success(), "an unexecutable role must fail the build");
 
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("`rem` role"), "names the role: {err}");
-    assert!(err.contains("`%`"), "names a spelling the author typed: {err}");
+    assert!(err.contains("`assign` role"), "names the role: {err}");
+    assert!(err.contains("`=`"), "names a spelling the author typed: {err}");
     assert!(err.contains("nh-vm cannot execute"), "names the target: {err}");
 
     // And it must not leave a half-written file behind for a later build to

@@ -69,20 +69,23 @@ fn a_comparison_tier_becomes_one_instruction() {
 /// plugin that fails to load later or generated code that will not compile.
 #[test]
 fn a_role_the_vm_cannot_execute_is_reported_not_emitted() {
+    // `,` and `=` are the honest remaining gaps: sequencing and assignment are
+    // language constructs rather than machine operations, and nh-vm has no
+    // instruction for either.
     let t = table(
         "grammar T;\nprecedence {\n  left \"+\";\n  \
-         right \"**\" -> pow;\n  left \"%\" -> rem;\n  atom a;\n}\n",
+         left \",\" -> comma;\n  right \"=\" -> assign;\n  atom a;\n}\n",
     );
 
     let missing = operators_impl(&t, &Target::nh_vm(), "Compiler")
-        .expect_err("nh-vm has no Pow or Rem");
+        .expect_err("nh-vm has no Assign or Comma");
 
     let roles: Vec<&str> = missing.iter().map(|u| u.role.as_str()).collect();
-    assert_eq!(roles, ["pow", "rem"], "sorted and deduplicated: {missing:?}");
+    assert_eq!(roles, ["assign", "comma"], "sorted and deduplicated: {missing:?}");
 
     // Named by something the author typed.
-    assert_eq!(missing[0].spelling, "**");
-    assert_eq!(missing[1].spelling, "%");
+    assert_eq!(missing[0].spelling, "=");
+    assert_eq!(missing[1].spelling, ",");
 }
 
 /// The report must name a role once even when several spellings bind it, or a
@@ -91,12 +94,12 @@ fn a_role_the_vm_cannot_execute_is_reported_not_emitted() {
 fn one_report_per_role_not_per_spelling() {
     let t = table(
         "grammar T;\nprecedence {\n  \
-         right \"**\" | \"^^\" -> pow;\n  atom a;\n}\n",
+         left \",\" | \";\" -> comma;\n  atom a;\n}\n",
     );
 
-    let missing = operators_impl(&t, &Target::nh_vm(), "Compiler").expect_err("nh-vm has no Pow");
+    let missing = operators_impl(&t, &Target::nh_vm(), "Compiler").expect_err("nh-vm has no Comma");
     assert_eq!(missing.len(), 1, "{missing:?}");
-    assert_eq!(missing[0].role, "pow");
+    assert_eq!(missing[0].role, "comma");
 }
 
 /// A grammar with no operators at all generates an empty impl rather than

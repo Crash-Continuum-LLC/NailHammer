@@ -149,24 +149,22 @@ impl generated::dispatch::Semantics for Interp {
 // generator wired into `generated/mod.rs` itself, so there is no `include!` and
 // no imports to guess.
 
-// Wires every handler module to the trait. `without short_circuit` because this
-// grammar declares no lazy operators -- there is no `&&` to write.
-nh_handlers!(Interp);
+// `without short_circuit` because the generated module already implements it,
+// as a jump -- the macro's version would ask `truthy`, which a compiler that
+// emits instructions cannot answer. The generated file says so at the top.
+nh_handlers!(Interp, without short_circuit);
 
 // ---------------------------------------------------------------------------
 // Driving it
 // ---------------------------------------------------------------------------
 
-/// A compiled program: the code, and how much state it needs to run.
-pub struct Program {
-    pub code: Vec<Op<NoExt>>,
-    pub frame: usize,
-    pub globals: usize,
-}
+/// Re-exported: a compiled program is a VM concept, not a language one, so
+/// both twins use the same type rather than each defining it.
+pub use nh_vm::Program;
 
 /// Source in, bytecode out. No VM is involved yet — that is the point of the
 /// split, and it is what lets a plugin compile without an execution engine.
-pub fn compile(source: &str) -> std::result::Result<Program, String> {
+pub fn compile(source: &str) -> std::result::Result<Program<NoExt>, String> {
     let mut sources = nh_runtime::SourceMap::new();
     let file = sources.add("<input>", source);
     let mut cx = nh_runtime::Ctx::new(sources);
@@ -183,13 +181,14 @@ pub fn compile(source: &str) -> std::result::Result<Program, String> {
         frame: host.frame_size(),
         globals: host.globals_needed(),
         code: host.code,
+        fns: Default::default(),
     })
 }
 
 /// Runs it and gives back whatever it printed.
-pub fn run(p: &Program) -> std::result::Result<Vec<String>, String> {
+pub fn run(p: &Program<NoExt>) -> std::result::Result<Vec<String>, String> {
     let globals = nh_vm::DefaultStore::new(p.globals);
-    let mut m = nh_vm::Machine::new(&p.code, &globals, p.frame);
+    let mut m = nh_vm::Machine::new(p, &globals);
     match m.resume() {
         nh_vm::Step::Done => Ok(m.output),
         nh_vm::Step::Failed(e) => Err(e),

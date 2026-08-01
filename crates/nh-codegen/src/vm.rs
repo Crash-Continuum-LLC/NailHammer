@@ -41,6 +41,14 @@ pub enum Shape {
     /// `Op::Compare { dst, cmp, a, b }` — one instruction, discriminant as an
     /// operand, rather than six near-identical opcodes.
     Compare,
+    /// No instruction at all: the operand *is* the answer. Unary `+`.
+    Identity,
+    /// A lazy role, lowered to a jump around the right operand.
+    ///
+    /// The payload names the jump that **skips** the right operand — so `&&`
+    /// skips when the left is false and `||` when it is true. Everything else
+    /// about the two is identical, which is why one shape covers both.
+    ShortCircuit(&'static str),
 }
 
 /// A VM's instruction set, as far as operators are concerned.
@@ -73,6 +81,18 @@ impl Target {
         ops.insert("bit_and", Shape::Binary("And"));
         ops.insert("bit_or", Shape::Binary("Or"));
         ops.insert("bit_xor", Shape::Binary("Xor"));
+        ops.insert("rem", Shape::Binary("Rem"));
+        ops.insert("pow", Shape::Binary("Pow"));
+        ops.insert("shl", Shape::Binary("Shl"));
+        ops.insert("shr", Shape::Binary("Shr"));
+        ops.insert("shift", Shape::Compare); // grouped `<< >>` in c_style
+        ops.insert("bit_not", Shape::Unary("BitNot"));
+        ops.insert("pos", Shape::Identity);
+        // Lazy roles. Not an instruction but a *sequence with a patch point*,
+        // which is why they need their own shape: short-circuiting is control
+        // flow to a compiler, not an operation.
+        ops.insert("and_then", Shape::ShortCircuit("JumpIfFalse"));
+        ops.insert("or_else", Shape::ShortCircuit("JumpIfTrue"));
         ops.insert("compare", Shape::Compare);
         Target { name: "nh-vm", ops }
     }
@@ -143,11 +163,21 @@ pub fn operators_impl(
          // This is a module, not a file to `include!`. It brings its own\n\
          // imports so that wiring it in is one `pub mod` line the generator\n\
          // already wrote -- nothing here needs a name the author has to guess.\n\
+         //\n\
+         // If this file defines `impl ShortCircuit`, your crate must say\n\
+         //\n\
+         //     nh_handlers!(Interp, without short_circuit);\n\
+         //\n\
+         // because the macro writes its own `ShortCircuit` otherwise, using\n\
+         // `truthy` -- a question a compiler cannot answer, since its `Out` is\n\
+         // a register rather than a value. Two impls of one trait is a\n\
+         // conflicting-implementations error naming both.\n\
          \n\
-         use nh_runtime::Result;\n\
+         use nh_runtime::{{Ctx, Result, Shared}};\n\
          use nh_vm::{{Cmp, Op, Reg}};\n\
          \n\
-         use super::dispatch::{{CompareOp, Operators}};\n\
+         use super::ast::Expr;\n\
+         use super::dispatch::{{CompareOp, Eval, Operators, ShortCircuit}};\n\
          \n\
          impl Operators for {host} {{"
     );
@@ -157,10 +187,57 @@ pub fn operators_impl(
         if !done.insert((e.role.clone(), e.tier.fixity)) {
             continue;
         }
+        if matches!(target.ops[e.role.as_str()], Shape::ShortCircuit(_)) {
+            continue; // a different trait; emitted below
+        }
         emit_role(&mut out, e, &ops, target);
     }
-
     let _ = writeln!(out, "}}");
+
+    // `&&` and `||` live on `ShortCircuit`, not `Operators`, because their
+    // meaning depends on the *shape* of the host rather than on the language:
+    // an interpreter gets them written by `nh_handlers!`, and a compiler emits
+    // a jump. Only the second is generated here.
+    let lazy: Vec<&Emitted<'_>> = ops
+        .iter()
+        .filter(|e| matches!(target.ops.get(e.role.as_str()), Some(Shape::ShortCircuit(_))))
+        .collect();
+
+    if !lazy.is_empty() {
+        let _ = writeln!(out, "\nimpl ShortCircuit for {host} {{");
+        let mut seen = BTreeSet::new();
+        for e in &lazy {
+            if !seen.insert(e.role.clone()) {
+                continue;
+            }
+            let Some(Shape::ShortCircuit(skip)) = target.ops.get(e.role.as_str()) else {
+                continue;
+            };
+            let m = ident(&e.role);
+            let _ = writeln!(
+                out,
+                "\n    /// `{}` — lazy in its right operand, so it is a jump.\n\
+                \x20   ///\n\
+                \x20   /// The left operand is already in a register. `{skip}` skips the right\n\
+                \x20   /// one, and both arms have to leave the answer in the *same* place or\n\
+                \x20   /// the code after the label could not name it -- hence the `Move`.\n\
+                \x20   fn {m}(&mut self, lhs: Reg, rhs: Shared<Expr>, cx: &mut Ctx) -> Result<Reg> {{\n\
+                \x20       let skip = self.emit(Op::{skip} {{ src: lhs, target: usize::MAX }});\n\
+                \x20       let r = rhs.eval(self, cx)?;\n\
+                \x20       if r != lhs {{\n\
+                \x20           self.emit(Op::Move {{ dst: lhs, src: r }});\n\
+                \x20           self.free(r);\n\
+                \x20       }}\n\
+                \x20       self.patch_to_here(skip);\n\
+                \x20       Ok(lhs)\n\
+                \x20   }}",
+                e.op.literal
+            );
+        }
+        let _ = writeln!(out, "}}");
+
+    }
+
     Ok(out)
 }
 
@@ -230,6 +307,20 @@ fn emit_role(out: &mut String, e: &Emitted<'_>, all: &[Emitted<'_>], target: &Ta
                 \x20   }}"
             );
         }
+        // Unary `+`: the operand is the answer, so there is nothing to emit.
+        // Generating a `Move` would be an instruction that does nothing, in
+        // every program, forever.
+        (Shape::Identity, Fixity::Prefix | Fixity::Postfix) => {
+            let _ = writeln!(
+                out,
+                "\n    /// `{}` — the operand is the answer; no instruction is emitted.\n\
+                \x20   fn {m}(&mut self, operand: Reg) -> Result<Reg> {{\n\
+                \x20       Ok(operand)\n\
+                \x20   }}",
+                e.op.literal
+            );
+        }
+
         // A shape that does not fit the fixity it was bound at. `nh-operators`
         // already rejects one role at two fixities, so reaching here means the
         // target table disagrees with the grammar about what kind of thing a

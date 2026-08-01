@@ -34,9 +34,11 @@ primary_var = { #name = IDENT }
 nh_cont_IDENT = _{ "_" | ALPHA | DIGIT }
 nh_reserved_IDENT = @{ ("print" | "while" | "if") ~ !nh_cont_IDENT }
 nh_op_bang_eq = @{ "!=" }
+nh_op_amp_amp = @{ "&&" }
 nh_op_lt_eq = @{ "<=" }
 nh_op_eq_eq = @{ "==" }
 nh_op_gt_eq = @{ ">=" }
+nh_op_pipe_pipe = @{ "||" }
 nh_op_amp = @{ "&" }
 nh_op_star = @{ "*" }
 nh_op_plus = @{ "+" }
@@ -46,7 +48,7 @@ nh_op_lt = @{ "<" }
 nh_op_gt = @{ ">" }
 nh_op_caret = @{ "^" }
 nh_op_pipe = @{ "|" }
-nh_bin_op = _{ nh_op_bang_eq | nh_op_lt_eq | nh_op_eq_eq | nh_op_gt_eq | nh_op_amp | nh_op_star | nh_op_plus | nh_op_minus | nh_op_slash | nh_op_lt | nh_op_gt | nh_op_caret | nh_op_pipe }
+nh_bin_op = _{ nh_op_bang_eq | nh_op_amp_amp | nh_op_lt_eq | nh_op_eq_eq | nh_op_gt_eq | nh_op_pipe_pipe | nh_op_amp | nh_op_star | nh_op_plus | nh_op_minus | nh_op_slash | nh_op_lt | nh_op_gt | nh_op_caret | nh_op_pipe }
 nh_op_bang = @{ "!" }
 nh_pre_op = _{ nh_op_bang | nh_op_minus }
 nh_kw_print = @{ "print" ~ !nh_cont_IDENT }

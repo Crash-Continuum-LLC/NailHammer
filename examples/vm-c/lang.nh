@@ -20,6 +20,8 @@ reserved from IDENT { "print" "if" "while" }
 // The operator table is the language's own; the instructions it lowers to are
 // the machine's. That split is the whole point of the target.
 precedence {
+    left   "||" -> or_else;
+    left   "&&" -> and_then;
     left   "|" -> bit_or;
     left   "^" -> bit_xor;
     left   "&" -> bit_and;

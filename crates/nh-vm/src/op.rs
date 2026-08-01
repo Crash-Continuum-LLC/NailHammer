@@ -31,15 +31,20 @@ pub enum Op<X> {
     Sub { dst: Reg, a: Reg, b: Reg },
     Mul { dst: Reg, a: Reg, b: Reg },
     Div { dst: Reg, a: Reg, b: Reg },
+    Rem { dst: Reg, a: Reg, b: Reg },
+    Pow { dst: Reg, a: Reg, b: Reg },
     Neg { dst: Reg, a: Reg },
     Compare { dst: Reg, cmp: Cmp, a: Reg, b: Reg },
     Not { dst: Reg, a: Reg },
+    BitNot { dst: Reg, a: Reg },
 
     // Bitwise, on the integer part of a number — which is what a BASIC does,
     // and what makes `AND` and `&` the same instruction rather than two.
     And { dst: Reg, a: Reg, b: Reg },
     Or { dst: Reg, a: Reg, b: Reg },
     Xor { dst: Reg, a: Reg, b: Reg },
+    Shl { dst: Reg, a: Reg, b: Reg },
+    Shr { dst: Reg, a: Reg, b: Reg },
 
     // ---- mutable shared, and the only thing that synchronises -------------
     //
@@ -71,6 +76,19 @@ pub enum Op<X> {
     /// driver decides how to wait. It is the one part of the existing design
     /// that was already built for a VM it does not own.
     Await { dst: Reg, src: Reg },
+
+    // ---- calls -------------------------------------------------------------
+    //
+    // Arguments live in `base .. base + argc` -- contiguous, because the
+    // allocator hands out registers in stack discipline, so a call finds its
+    // arguments already in place with nobody arranging them. The callee's
+    // parameters are slots `0..argc` of its own frame, which makes the calling
+    // convention a copy with no names in it.
+    /// `key` is looked up at run time; `shown` is what to say in an error.
+    Call { dst: Reg, base: Reg, argc: usize, key: String, shown: String },
+    Return { src: Reg },
+    /// Falling off the end of a function returns nothing in particular.
+    ReturnUnit,
 
     /// A language's own command.
     Ext(X),

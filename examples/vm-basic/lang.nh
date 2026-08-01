@@ -18,10 +18,12 @@ token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT = @ ALPHA (ALPHA | DIGIT)*;
 token EOL = @ "\n";
 
-reserved from IDENT { "PRINT" "LET" "IF" "THEN" "END" "WHILE" "WEND" "NOT" "AND" "OR" "XOR" }
+reserved from IDENT { "PRINT" "LET" "IF" "THEN" "END" "WHILE" "WEND" "NOT" "AND" "OR" "XOR" "ANDALSO" "ORELSE" }
 
 // Word operators, and the same roles the C twin binds.
 precedence {
+    left   word "ORELSE" -> or_else;
+    left   word "ANDALSO" -> and_then;
     left   word "OR" -> bit_or;
     left   word "XOR" -> bit_xor;
     left   word "AND" -> bit_and;

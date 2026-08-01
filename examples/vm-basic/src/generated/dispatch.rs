@@ -91,12 +91,64 @@ impl CompareOp {
     }
 }
 
+/// Operators that are **lazy in their right operand**.
+///
+/// Separate from [`Operators`] because their meaning is the one thing
+/// that genuinely differs between an interpreter and a compiler:
+/// short-circuiting is a *decision* to one and *control flow* to the
+/// other.
+///
+/// **You almost certainly do not implement this.** `nh_handlers!` writes
+/// the interpreter's version from your [`Values`] impl. Write it yourself
+/// only if you are emitting code rather than producing values, and then
+/// say so:
+///
+/// ```ignore
+/// nh_handlers!(Interp, without short_circuit);
+/// ```
+pub trait ShortCircuit: Semantics {
+
+    /// `ORELSE` — **lazy in its right operand**.
+    ///
+    /// `rhs` is unevaluated. Running it is what evaluates it; not
+    /// running it is what makes this short-circuit.
+    ///
+    /// An interpreter gets this written for it by `nh_handlers!`. A
+    /// compiler writes it, emitting a jump — short-circuiting is
+    /// control flow to it, not a decision.
+    fn or_else(
+        &mut self,
+        lhs: Self::Out,
+        rhs: Shared<Expr>,
+        cx: &mut Ctx,
+    ) -> Result<Self::Out>
+    where
+        Self: Handlers + Sized;
+
+    /// `ANDALSO` — **lazy in its right operand**.
+    ///
+    /// `rhs` is unevaluated. Running it is what evaluates it; not
+    /// running it is what makes this short-circuit.
+    ///
+    /// An interpreter gets this written for it by `nh_handlers!`. A
+    /// compiler writes it, emitting a jump — short-circuiting is
+    /// control flow to it, not a decision.
+    fn and_then(
+        &mut self,
+        lhs: Self::Out,
+        rhs: Shared<Expr>,
+        cx: &mut Ctx,
+    ) -> Result<Self::Out>
+    where
+        Self: Handlers + Sized;
+}
+
 /// Operator semantics.
 ///
 /// Every method is defaulted to an `unsupported` error, so a language
 /// implements only the operators it actually has and gets the rest of the
 /// table's parsing, precedence, and short-circuiting for free (§6.4).
-pub trait Operators: Semantics {
+pub trait Operators: ShortCircuit {
 
     /// `OR`
     fn bit_or(&mut self, lhs: Self::Out, rhs: Self::Out) -> Result<Self::Out> {
@@ -551,20 +603,22 @@ impl Eval for PrimaryVar {
 pub fn op_info(rule: Rule) -> Option<OpInfo> {
     let info = |precedence, fixity, assoc| Some(OpInfo { precedence, fixity, assoc });
     match rule {
-        Rule::nh_op_and => info(3, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_eq => info(4, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_gt => info(4, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_gt_eq => info(4, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_lt => info(4, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_lt_eq => info(4, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_lt_gt => info(4, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_minus => info(5, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_not => info(8, Fixity::Prefix, Assoc::Right),
-        Rule::nh_op_or => info(1, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_plus => info(5, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_slash => info(6, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_star => info(6, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_xor => info(2, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_and => info(5, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_andalso => info(2, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_eq => info(6, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_gt => info(6, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_gt_eq => info(6, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_lt => info(6, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_lt_eq => info(6, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_lt_gt => info(6, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_minus => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_not => info(10, Fixity::Prefix, Assoc::Right),
+        Rule::nh_op_or => info(3, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_orelse => info(1, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_plus => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_slash => info(8, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_star => info(8, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_xor => info(4, Fixity::Infix, Assoc::Left),
         _ => None,
     }
 }
@@ -581,8 +635,8 @@ pub fn prefix_info(rule: Rule) -> Option<OpInfo> {
         assoc: Assoc::Right,
     });
     match rule {
-        Rule::nh_op_minus => info(7),
-        Rule::nh_op_not => info(8),
+        Rule::nh_op_minus => info(9),
+        Rule::nh_op_not => info(10),
         _ => None,
     }
 }
@@ -613,6 +667,14 @@ pub fn eval_expr<H: Handlers>(
             "`{op:?}` is not a postfix operator"
         ))),
         Expr::Infix { lhs, op, rhs, .. } => match op {
+            &Rule::nh_op_orelse => {
+                let left = eval_expr(host, lhs, cx)?;
+                host.or_else(left, rhs.clone(), cx)
+            }
+            &Rule::nh_op_andalso => {
+                let left = eval_expr(host, lhs, cx)?;
+                host.and_then(left, rhs.clone(), cx)
+            }
             &Rule::nh_op_or => {
                 let left = eval_expr(host, lhs, cx)?;
                 let right = eval_expr(host, rhs, cx)?;
@@ -700,9 +762,127 @@ impl Eval for Expr {
 /// Each method body does nothing but call into `$crate::handlers::<alternative>::run`,
 /// so every handler is its own small file and the trait's exhaustiveness
 /// still guarantees none is missing.
+///
+/// It also writes your `ShortCircuit` impl — the standard
+/// short-circuit bodies, built on the `truthy` you gave to
+/// [`Values`]. That is not a choice anybody makes, so you are not
+/// asked to make it.
+///
+/// A host that emits code rather than producing values has no
+/// `truthy` to build them on. It says so, and writes its own:
+///
+/// ```ignore
+/// nh_handlers!(Compiler, without short_circuit);
+/// ```
 #[macro_export]
 macro_rules! nh_handlers {
     ($host:ty) => {
+        impl $crate::generated::dispatch::Handlers for $host {
+            fn program(
+                &mut self,
+                body: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::program::run(self, body, cx)
+            }
+            fn line_code(
+                &mut self,
+                body: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::line_code::run(self, body, cx)
+            }
+            fn line_blank(
+                &mut self,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::line_blank::run(self, cx)
+            }
+            fn stmt_print(
+                &mut self,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_print::run(self, value, cx)
+            }
+            fn stmt_iff(
+                &mut self,
+                cond: <Self as $crate::generated::dispatch::Semantics>::Out,
+                body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_iff::run(self, cond, body, cx)
+            }
+            fn stmt_whilst(
+                &mut self,
+                cond: &::nh_runtime::Shared<$crate::generated::ast::Expr>,
+                body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_whilst::run(self, cond, body, cx)
+            }
+            fn stmt_assign(
+                &mut self,
+                name: &str,
+                value: <Self as $crate::generated::dispatch::Semantics>::Out,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_assign::run(self, name, value, cx)
+            }
+            fn block(
+                &mut self,
+                body: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::block::run(self, body, cx)
+            }
+            fn primary_num(
+                &mut self,
+                value: &str,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_num::run(self, value, cx)
+            }
+            fn primary_var(
+                &mut self,
+                name: &str,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::primary_var::run(self, name, cx)
+            }
+        }
+        impl $crate::generated::dispatch::ShortCircuit for $host {
+            fn or_else(
+                &mut self,
+                lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
+                rhs: ::nh_runtime::Shared<$crate::generated::ast::Expr>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<
+                <Self as $crate::generated::dispatch::Semantics>::Out,
+            > {
+                use $crate::generated::dispatch::{Eval, Values};
+                if self.truthy(&lhs) {
+                    return Ok(lhs);
+                }
+                rhs.eval(self, cx)
+            }
+            fn and_then(
+                &mut self,
+                lhs: <Self as $crate::generated::dispatch::Semantics>::Out,
+                rhs: ::nh_runtime::Shared<$crate::generated::ast::Expr>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<
+                <Self as $crate::generated::dispatch::Semantics>::Out,
+            > {
+                use $crate::generated::dispatch::{Eval, Values};
+                if !self.truthy(&lhs) {
+                    return Ok(lhs);
+                }
+                rhs.eval(self, cx)
+            }
+        }
+    };
+    ($host:ty, without short_circuit) => {
         impl $crate::generated::dispatch::Handlers for $host {
             fn program(
                 &mut self,

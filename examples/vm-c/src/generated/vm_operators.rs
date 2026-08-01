@@ -8,11 +8,21 @@
 // This is a module, not a file to `include!`. It brings its own
 // imports so that wiring it in is one `pub mod` line the generator
 // already wrote -- nothing here needs a name the author has to guess.
+//
+// If this file defines `impl ShortCircuit`, your crate must say
+//
+//     nh_handlers!(Interp, without short_circuit);
+//
+// because the macro writes its own `ShortCircuit` otherwise, using
+// `truthy` -- a question a compiler cannot answer, since its `Out` is
+// a register rather than a value. Two impls of one trait is a
+// conflicting-implementations error naming both.
 
-use nh_runtime::Result;
+use nh_runtime::{Ctx, Result, Shared};
 use nh_vm::{Cmp, Op, Reg};
 
-use super::dispatch::{CompareOp, Operators};
+use super::ast::Expr;
+use super::dispatch::{CompareOp, Eval, Operators, ShortCircuit};
 
 impl Operators for crate::Interp {
 
@@ -95,5 +105,40 @@ impl Operators for crate::Interp {
         let dst = self.reuse(&[operand]);
         self.emit(Op::Not { dst, a: operand });
         Ok(dst)
+    }
+}
+
+impl ShortCircuit for crate::Interp {
+
+    /// `||` — lazy in its right operand, so it is a jump.
+    ///
+    /// The left operand is already in a register. `JumpIfTrue` skips the right
+    /// one, and both arms have to leave the answer in the *same* place or
+    /// the code after the label could not name it -- hence the `Move`.
+    fn or_else(&mut self, lhs: Reg, rhs: Shared<Expr>, cx: &mut Ctx) -> Result<Reg> {
+        let skip = self.emit(Op::JumpIfTrue { src: lhs, target: usize::MAX });
+        let r = rhs.eval(self, cx)?;
+        if r != lhs {
+            self.emit(Op::Move { dst: lhs, src: r });
+            self.free(r);
+        }
+        self.patch_to_here(skip);
+        Ok(lhs)
+    }
+
+    /// `&&` — lazy in its right operand, so it is a jump.
+    ///
+    /// The left operand is already in a register. `JumpIfFalse` skips the right
+    /// one, and both arms have to leave the answer in the *same* place or
+    /// the code after the label could not name it -- hence the `Move`.
+    fn and_then(&mut self, lhs: Reg, rhs: Shared<Expr>, cx: &mut Ctx) -> Result<Reg> {
+        let skip = self.emit(Op::JumpIfFalse { src: lhs, target: usize::MAX });
+        let r = rhs.eval(self, cx)?;
+        if r != lhs {
+            self.emit(Op::Move { dst: lhs, src: r });
+            self.free(r);
+        }
+        self.patch_to_here(skip);
+        Ok(lhs)
     }
 }

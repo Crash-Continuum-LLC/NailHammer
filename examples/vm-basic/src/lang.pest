@@ -36,7 +36,9 @@ primary_var = { #name = IDENT }
 // ---------------------------------------------------------------------------
 
 nh_cont_IDENT = _{ ALPHA | DIGIT }
-nh_reserved_IDENT = @{ (^"PRINT" | ^"WHILE" | ^"THEN" | ^"WEND" | ^"AND" | ^"END" | ^"LET" | ^"NOT" | ^"XOR" | ^"IF" | ^"OR") ~ !nh_cont_IDENT }
+nh_reserved_IDENT = @{ (^"ANDALSO" | ^"ORELSE" | ^"PRINT" | ^"WHILE" | ^"THEN" | ^"WEND" | ^"AND" | ^"END" | ^"LET" | ^"NOT" | ^"XOR" | ^"IF" | ^"OR") ~ !nh_cont_IDENT }
+nh_op_andalso = @{ ^"ANDALSO" ~ !nh_cont_IDENT }
+nh_op_orelse = @{ ^"ORELSE" ~ !nh_cont_IDENT }
 nh_op_and = @{ ^"AND" ~ !nh_cont_IDENT }
 nh_op_xor = @{ ^"XOR" ~ !nh_cont_IDENT }
 nh_op_lt_eq = @{ "<=" }
@@ -50,7 +52,7 @@ nh_op_slash = @{ "/" }
 nh_op_lt = @{ "<" }
 nh_op_eq = @{ "=" }
 nh_op_gt = @{ ">" }
-nh_bin_op = _{ nh_op_and | nh_op_xor | nh_op_lt_eq | nh_op_lt_gt | nh_op_gt_eq | nh_op_or | nh_op_star | nh_op_plus | nh_op_minus | nh_op_slash | nh_op_lt | nh_op_eq | nh_op_gt }
+nh_bin_op = _{ nh_op_andalso | nh_op_orelse | nh_op_and | nh_op_xor | nh_op_lt_eq | nh_op_lt_gt | nh_op_gt_eq | nh_op_or | nh_op_star | nh_op_plus | nh_op_minus | nh_op_slash | nh_op_lt | nh_op_eq | nh_op_gt }
 nh_op_not = @{ ^"NOT" ~ !nh_cont_IDENT }
 nh_pre_op = _{ nh_op_not | nh_op_minus }
 nh_kw_print = @{ ^"PRINT" ~ !nh_cont_IDENT }

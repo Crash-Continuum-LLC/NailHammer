@@ -100,3 +100,36 @@ fn a_word_operator_and_a_symbol_reach_one_opcode() {
     assert_eq!(and_of(&b.code), 1, "`AND` emitted exactly one And");
     assert_eq!(format!("{:?}", c.code), format!("{:?}", b.code));
 }
+
+/// `&&` must not evaluate its right operand when the left is false.
+///
+/// Checked by *counting instructions executed*, not by output: an
+/// implementation that evaluates both and then picks produces the same answer
+/// and is not short-circuiting. Division by zero on the right is the probe —
+/// it fails loudly if it runs.
+#[test]
+fn short_circuit_does_not_evaluate_the_right_operand() {
+    // `0 && (1/0)` — if `&&` were strict, this would fail with a division error.
+    let p = vm_c::compile("print 0 && (1 / 0);").expect("compiles");
+    let out = vm_c::run(&p).expect("must not divide by zero");
+    assert_eq!(out, ["0"], "left operand is the answer, right never ran");
+
+    // And the mirror: `1 || (1/0)`.
+    let p = vm_c::compile("print 1 || (1 / 0);").expect("compiles");
+    assert_eq!(vm_c::run(&p).expect("must not divide"), ["1"]);
+
+    // When it *does* need the right operand, it evaluates it.
+    let p = vm_c::compile("print 1 && 7;").expect("compiles");
+    assert_eq!(vm_c::run(&p).expect("runs"), ["7"]);
+}
+
+/// The BASIC twin's `ANDALSO` is the same instruction sequence as the C twin's
+/// `&&` — different spelling, one role, one lowering.
+#[test]
+fn the_twins_short_circuit_identically() {
+    let c = vm_c::compile("print 0 && (1 / 0);").expect("C compiles");
+    let b = vm_basic::compile("PRINT 0 ANDALSO (1 / 0)\n").expect("BASIC compiles");
+
+    assert_eq!(format!("{:?}", c.code), format!("{:?}", b.code));
+    assert_eq!(vm_c::run(&c).unwrap(), vm_basic::run(&b).unwrap());
+}

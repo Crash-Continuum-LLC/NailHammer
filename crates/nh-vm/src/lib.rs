@@ -13,18 +13,22 @@
 //! at the repository root, particularly §7.
 //!
 //! ```
-//! use nh_vm::{Machine, NoExt, Op, Step, Value, LocalStore};
+//! use nh_vm::{LocalStore, Machine, NoExt, Op, Program, Step, Value};
 //!
-//! let code: Vec<Op<NoExt>> = vec![
-//!     Op::LoadK { dst: 0, value: Value::Num(2.0) },
-//!     Op::LoadK { dst: 1, value: Value::Num(3.0) },
-//!     Op::Add { dst: 2, a: 0, b: 1 },
-//!     Op::Print { src: 2 },
-//!     Op::Halt,
-//! ];
+//! let program = Program::<NoExt> {
+//!     code: vec![
+//!         Op::LoadK { dst: 0, value: Value::Num(2.0) },
+//!         Op::LoadK { dst: 1, value: Value::Num(3.0) },
+//!         Op::Add { dst: 2, a: 0, b: 1 },
+//!         Op::Print { src: 2 },
+//!         Op::Halt,
+//!     ],
+//!     frame: 3,
+//!     ..Program::default()
+//! };
 //!
 //! let globals = LocalStore::new(0);
-//! let mut m = Machine::new(&code, &globals, 3);
+//! let mut m = Machine::new(&program, &globals);
 //! assert!(matches!(m.resume(), Step::Done));
 //! assert_eq!(m.output, ["5"]);
 //! ```
@@ -38,10 +42,12 @@
 
 pub mod machine;
 pub mod op;
+pub mod program;
 pub mod store;
 pub mod value;
 
 pub use machine::{Machine, Step};
+pub use program::{FnDef, Program};
 pub use op::{Cmp, ExtCx, Extension, Flow, NoExt, Op, Reg};
 pub use store::{
     AtomicNumStore, BankLockStore, DefaultStore, HybridStore, LocalStore, MutexStore, RwLockStore,

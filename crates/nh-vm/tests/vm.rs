@@ -7,7 +7,16 @@
 use std::sync::Arc;
 use std::thread;
 
-use nh_vm::{Cmp, ExtCx, Extension, Flow, LocalStore, Machine, NoExt, Op, RwLockStore, SharedStore, Step, Value};
+use nh_vm::{
+    Cmp, ExtCx, Extension, Flow, LocalStore, Machine, NoExt, Op, Program, RwLockStore, SharedStore,
+    Step, Value,
+};
+
+/// Most tests here care about instructions, not about the shape a program is
+/// delivered in.
+fn program<X>(code: Vec<Op<X>>, frame: usize) -> Program<X> {
+    Program { code, frame, ..Program::default() }
+}
 
 // ---------------------------------------------------------------------------
 // §7.3 — a language with no extensions pays nothing
@@ -26,7 +35,8 @@ fn a_language_without_extensions_runs() {
         Op::Halt,
     ];
     let globals = LocalStore::new(0);
-    let mut m = Machine::new(&code, &globals, 3);
+    let prog = program(code, 3);
+    let mut m = Machine::new(&prog, &globals);
 
     assert!(matches!(m.resume(), Step::Done));
     assert_eq!(m.output, ["42"]);
@@ -73,7 +83,8 @@ fn a_language_can_add_its_own_commands() {
         Op::Halt,
     ];
     let globals = LocalStore::new(0);
-    let mut m = Machine::new(&code, &globals, 4);
+    let prog = program(code, 4);
+    let mut m = Machine::new(&prog, &globals);
 
     assert!(matches!(m.resume(), Step::Done));
     assert_eq!(m.output, ["HAMMER"], "0-based, so index 4 is the fifth character");
@@ -109,7 +120,8 @@ fn two_programs_share_globals_across_threads() {
                     Op::StoreGlobal { slot: 0, src: 2 },
                     Op::Halt,
                 ];
-                let mut m = Machine::new(&code, &*globals, 3);
+                let prog = program(code, 3);
+    let mut m = Machine::new(&prog, &*globals);
                 assert!(matches!(m.resume(), Step::Done));
             }
         }));
@@ -173,7 +185,8 @@ fn a_program_suspends_and_resumes() {
         Op::Halt,
     ];
     let globals = LocalStore::new(0);
-    let mut m = Machine::new(&code, &globals, 4);
+    let prog = program(code, 4);
+    let mut m = Machine::new(&prog, &globals);
 
     match m.resume() {
         Step::Awaiting(v) => assert_eq!(v, Value::Num(7.0), "handed out what it was waiting on"),
@@ -205,7 +218,8 @@ fn the_vm_owns_truthiness() {
         Op::Halt,
     ];
     let globals = LocalStore::new(0);
-    let mut m = Machine::new(&code, &globals, 2);
+    let prog = program(code, 2);
+    let mut m = Machine::new(&prog, &globals);
 
     assert!(matches!(m.resume(), Step::Done));
     assert_eq!(m.output, ["empty is false"]);
@@ -224,7 +238,8 @@ fn comparison_and_control_flow() {
         Op::Halt,
     ];
     let globals = LocalStore::new(0);
-    let mut m = Machine::new(&code, &globals, 4);
+    let prog = program(code, 4);
+    let mut m = Machine::new(&prog, &globals);
 
     assert!(matches!(m.resume(), Step::Done));
     assert_eq!(m.output, ["yes"]);
@@ -239,7 +254,8 @@ fn a_failure_stops_the_machine_with_a_reason() {
         Op::Halt,
     ];
     let globals = LocalStore::new(0);
-    let mut m = Machine::new(&code, &globals, 3);
+    let prog = program(code, 3);
+    let mut m = Machine::new(&prog, &globals);
 
     match m.resume() {
         Step::Failed(e) => assert!(e.contains("division by zero"), "{e}"),
@@ -359,4 +375,160 @@ fn the_hybrid_store_is_safe_under_concurrent_flips() {
     for r in readers {
         r.join().expect("a reader panicked — the fast path is not safe");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Calls — the gap that made the VM less capable than the scaffold it replaces
+// ---------------------------------------------------------------------------
+
+use std::collections::HashMap;
+use nh_vm::FnDef;
+
+/// `fn double(n) = n + n`, called twice.
+///
+/// The calling convention is a copy with no names in it: arguments sit in
+/// `base .. base + argc` and become the callee's slots `0..argc`.
+#[test]
+fn a_function_is_called_and_returns() {
+    // 0: LoadK r0, 21      <- argument
+    // 1: Call r0 <- double(base=0, argc=1)
+    // 2: Print r0
+    // 3: Halt
+    // 4: double:  Add r1 <- r0 + r0
+    // 5:          Return r1
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::Num(21.0) },
+        Op::Call { dst: 0, base: 0, argc: 1, key: "double".into(), shown: "double".into() },
+        Op::Print { src: 0 },
+        Op::Halt,
+        Op::Add { dst: 1, a: 0, b: 0 },
+        Op::Return { src: 1 },
+    ];
+    let mut fns = HashMap::new();
+    fns.insert("double".to_string(), FnDef { addr: 4, arity: 1, frame: 2 });
+
+    let prog = Program { code, fns, frame: 2, globals: 0 };
+    let globals = LocalStore::new(0);
+    let mut m = Machine::new(&prog, &globals);
+
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["42"]);
+}
+
+/// Recursion, which is the reason functions are looked up **by name at run
+/// time** rather than patched at compile time: a body can call itself before
+/// the compiler has finished emitting it.
+#[test]
+fn a_function_can_call_itself() {
+    // fact(n) = if n < 2 { 1 } else { n * fact(n - 1) }
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::Num(5.0) },
+        Op::Call { dst: 0, base: 0, argc: 1, key: "fact".into(), shown: "fact".into() },
+        Op::Print { src: 0 },
+        Op::Halt,
+        // fact: r0 = n
+        Op::LoadK { dst: 1, value: Value::Num(2.0) },          // 4
+        Op::Compare { dst: 1, cmp: Cmp::Lt, a: 0, b: 1 },      // 5
+        Op::JumpIfFalse { src: 1, target: 9 },                 // 6
+        Op::LoadK { dst: 1, value: Value::Num(1.0) },          // 7
+        Op::Return { src: 1 },                                 // 8
+        Op::LoadK { dst: 1, value: Value::Num(1.0) },          // 9
+        Op::Sub { dst: 1, a: 0, b: 1 },                        // 10  n - 1
+        Op::Call { dst: 1, base: 1, argc: 1, key: "fact".into(), shown: "fact".into() }, // 11
+        Op::Mul { dst: 1, a: 0, b: 1 },                        // 12  n * fact(n-1)
+        Op::Return { src: 1 },                                 // 13
+    ];
+    let mut fns = HashMap::new();
+    fns.insert("fact".to_string(), FnDef { addr: 4, arity: 1, frame: 3 });
+
+    let prog = Program { code, fns, frame: 2, globals: 0 };
+    let globals = LocalStore::new(0);
+    let mut m = Machine::new(&prog, &globals);
+
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["120"], "5! = 120");
+}
+
+/// Runaway recursion must fail the *program*, not the process. A host running
+/// several languages cannot have one of them take the native stack down.
+#[test]
+fn infinite_recursion_fails_the_program_not_the_host() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::Call { dst: 0, base: 0, argc: 0, key: "loop".into(), shown: "loop".into() },
+        Op::Halt,
+        Op::Call { dst: 0, base: 0, argc: 0, key: "loop".into(), shown: "loop".into() },
+        Op::Return { src: 0 },
+    ];
+    let mut fns = HashMap::new();
+    fns.insert("loop".to_string(), FnDef { addr: 2, arity: 0, frame: 1 });
+
+    let prog = Program { code, fns, frame: 1, globals: 0 };
+    let globals = LocalStore::new(0);
+    let mut m = Machine::new(&prog, &globals);
+
+    match m.resume() {
+        Step::Failed(e) => assert!(e.contains("call stack exceeded"), "{e}"),
+        other => panic!("expected a failure, got {other:?}"),
+    }
+}
+
+#[test]
+fn calling_something_undefined_names_it() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::Call { dst: 0, base: 0, argc: 0, key: "nope".into(), shown: "NOPE".into() },
+        Op::Halt,
+    ];
+    let prog = Program { code, frame: 1, ..Program::default() };
+    let globals = LocalStore::new(0);
+    let mut m = Machine::new(&prog, &globals);
+
+    match m.resume() {
+        // `shown` rather than `key`: a case-folding language stores `nope` and
+        // the user wrote `NOPE`, and the message is for the user.
+        Step::Failed(e) => assert!(e.contains("`NOPE`"), "{e}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_wrong_number_of_arguments_is_reported() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::Call { dst: 0, base: 0, argc: 3, key: "f".into(), shown: "f".into() },
+        Op::Halt,
+        Op::ReturnUnit,
+    ];
+    let mut fns = HashMap::new();
+    fns.insert("f".to_string(), FnDef { addr: 2, arity: 1, frame: 1 });
+
+    let prog = Program { code, fns, frame: 4, globals: 0 };
+    let globals = LocalStore::new(0);
+    let mut m = Machine::new(&prog, &globals);
+
+    match m.resume() {
+        Step::Failed(e) => assert!(e.contains("takes 1 argument(s), got 3"), "{e}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// `+` concatenates when either side is a string — a VM decision, so every
+/// language on it gets the same answer.
+#[test]
+fn add_concatenates_strings() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::str("nail") },
+        Op::LoadK { dst: 1, value: Value::str("hammer") },
+        Op::Add { dst: 2, a: 0, b: 1 },
+        Op::Print { src: 2 },
+        Op::LoadK { dst: 0, value: Value::str("v") },
+        Op::LoadK { dst: 1, value: Value::Num(2.0) },
+        Op::Add { dst: 2, a: 0, b: 1 },
+        Op::Print { src: 2 },
+        Op::Halt,
+    ];
+    let prog = program(code, 3);
+    let globals = LocalStore::new(0);
+    let mut m = Machine::new(&prog, &globals);
+
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["nailhammer", "v2"]);
 }
