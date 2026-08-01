@@ -162,21 +162,6 @@ pub enum Cardinality {
     Many,
 }
 
-impl Cardinality {
-    /// Combines an enclosing context with an inner one.
-    ///
-    /// `Many` dominates: a binding inside a repetition can occur repeatedly no
-    /// matter what else encloses it. `Optional` beats `One` for the same
-    /// reason — a binding in one branch of a choice may simply not be there.
-    fn combine(self, inner: Cardinality) -> Cardinality {
-        match (self, inner) {
-            (Cardinality::Many, _) | (_, Cardinality::Many) => Cardinality::Many,
-            (Cardinality::Optional, _) | (_, Cardinality::Optional) => Cardinality::Optional,
-            _ => Cardinality::One,
-        }
-    }
-}
-
 /// How many pest pairs an expression produces.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct Nodes {
@@ -1253,9 +1238,7 @@ impl<'a> Ctx<'a> {
         label: String,
         pest_rule: String,
     ) {
-        let mut bindings = Vec::new();
-        collect_bindings(&alt.body, Cardinality::One, self.res, &mut bindings);
-        merge_repeated_bindings(&alt.body, &mut bindings);
+        let bindings = collect_bindings(&alt.body, self.res);
         self.check_lazy(rule, &bindings, alt);
         self.collected_alternatives.push(LoweredAlternative {
             rule: rule.name.value.clone(),
@@ -1401,52 +1384,41 @@ impl<'a> Ctx<'a> {
     }
 }
 
-/// Walks an alternative body collecting bindings with their cardinality.
+/// Every distinct binding in an alternative, in grammar order.
 ///
-/// Cardinality is inherited from the enclosing structure: a binding under `*`
-/// is `Many` however deeply nested, and a binding inside a multi-branch choice
-/// is `Optional` because the other branch may match instead.
-fn collect_bindings(e: &Expr, ctx: Cardinality, res: &Resolution, out: &mut Vec<Binding>) {
+/// Cardinality comes from [`binding_occurrences`] over the whole body rather
+/// than from the enclosing structure at each occurrence. Those are the same
+/// answer for a name bound once, and only the first is right for a name bound
+/// twice — see [`merge_repeated_bindings`].
+fn collect_bindings(body: &Expr, res: &Resolution) -> Vec<Binding> {
+    let mut out = Vec::new();
+    walk_bindings(body, res, &mut out);
+    merge_repeated_bindings(body, &mut out);
+    out
+}
+
+/// Pushes one entry per binding *occurrence*, cardinality not yet known.
+fn walk_bindings(e: &Expr, res: &Resolution, out: &mut Vec<Binding>) {
     match &e.kind {
         ExprKind::Bind { name, inner, lazy } => {
-            // The repetition may be *inside* the binding: `args:arg_list?`
-            // tags an optional node, so the accessor must be optional even
-            // though nothing encloses the binding.
             out.push(Binding {
                 name: name.value.clone(),
-                cardinality: ctx.combine(own_cardinality(inner)),
+                // Placeholder: every entry's cardinality is replaced once all
+                // the occurrences are known.
+                cardinality: Cardinality::One,
                 token: bound_token(inner, res),
                 rule_ref: bound_rule(inner, res),
                 lazy: *lazy,
             });
-            // A binding inside a binding is still reachable, but its
-            // cardinality is bounded by the outer one.
-            collect_bindings(inner, ctx, res, out);
+            // A binding inside a binding is still reachable.
+            walk_bindings(inner, res, out);
         }
-        ExprKind::Seq(parts) => {
+        ExprKind::Seq(parts) | ExprKind::Choice(parts) => {
             for p in parts {
-                collect_bindings(p, ctx, res, out);
+                walk_bindings(p, res, out);
             }
         }
-        ExprKind::Choice(parts) => {
-            let inner = if parts.len() > 1 {
-                ctx.combine(Cardinality::Optional)
-            } else {
-                ctx
-            };
-            for p in parts {
-                collect_bindings(p, inner, res, out);
-            }
-        }
-        ExprKind::Repeat { inner, kind } => {
-            let c = match kind {
-                RepeatKind::Optional => ctx.combine(Cardinality::Optional),
-                RepeatKind::ZeroOrMore | RepeatKind::OneOrMore => {
-                    ctx.combine(Cardinality::Many)
-                }
-            };
-            collect_bindings(inner, c, res, out);
-        }
+        ExprKind::Repeat { inner, .. } => walk_bindings(inner, res, out),
         // A lookahead consumes nothing, so nothing inside it can be bound to a
         // node that survives into the tree.
         ExprKind::Lookahead { .. } => {}
@@ -1550,17 +1522,6 @@ fn own_nodes(inner: &Expr) -> Nodes {
             RepeatKind::OneOrMore => Nodes { min: 1, max: None },
         },
         _ => Nodes::exactly(1),
-    }
-}
-
-/// The cardinality implied by a bound expression's own outermost repetition.
-fn own_cardinality(e: &Expr) -> Cardinality {
-    match &e.kind {
-        ExprKind::Repeat { kind, .. } => match kind {
-            RepeatKind::Optional => Cardinality::Optional,
-            RepeatKind::ZeroOrMore | RepeatKind::OneOrMore => Cardinality::Many,
-        },
-        _ => Cardinality::One,
     }
 }
 
