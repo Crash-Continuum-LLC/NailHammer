@@ -20,6 +20,7 @@ reserved from IDENT { "print" "if" "while" }
 // The operator table is the language's own; the instructions it lowers to are
 // the machine's. That split is the whole point of the target.
 precedence {
+    right  "=" -> assign;
     left   "||" -> or_else;
     left   "&&" -> and_then;
     left   "|" -> bit_or;
@@ -39,7 +40,7 @@ rule stmt
   = "print" value:expr ";"                             -> print
   | "if" "(" cond:expr ")" lazy body:block             -> iff
   | "while" "(" lazy cond:expr ")" lazy body:block     -> whilst
-  | name:IDENT "=" value:expr ";"                      -> assign
+  | value:expr ";"                                     -> eval
   ;
 
 // `lazy` above hands these over *unemitted*, so a handler can put a jump in

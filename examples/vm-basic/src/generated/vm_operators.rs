@@ -9,17 +9,17 @@
 // imports so that wiring it in is one `pub mod` line the generator
 // already wrote -- nothing here needs a name the author has to guess.
 //
-// The `nh_handlers!` invocation is at the bottom of this file rather
-// than in your crate. Which form it takes is not a choice: a compiler
-// targeting a VM always needs `without short_circuit`, because the
-// macro would otherwise write a `ShortCircuit` asking `truthy` -- a
-// question a host whose `Out` is a register cannot answer.
+// The `nh_handlers!` invocation is at the bottom rather than in your
+// crate. Which form it takes is not a choice: a compiler targeting a
+// VM always needs `without short_circuit`, because the macro would
+// otherwise write a `ShortCircuit` asking `truthy` -- a question a
+// host whose `Out` is a register cannot answer.
 
 use nh_runtime::{Ctx, Result, Shared};
 use nh_vm::{Cmp, Op, Reg};
 
-use super::ast::Expr;
 use super::dispatch::{CompareOp, Eval, Operators, ShortCircuit};
+use super::ast::Expr;
 
 impl Operators for crate::Interp {
 
@@ -142,3 +142,4 @@ impl ShortCircuit for crate::Interp {
 
 // Wires every handler module to its trait method.
 nh_handlers!(crate::Interp, without short_circuit);
+

@@ -184,21 +184,21 @@ impl<'i> StmtWhilstView<'i> {
     }
 }
 
-/// One matched `stmt_assign`.
+/// One matched `stmt_eval`.
 ///
 /// From this alternative of `rule stmt`:
 ///
 /// ```text
-/// name:IDENT "=" value:expr ";" -> assign
+/// value:expr ";" -> eval
 /// ```
 #[derive(Clone, Debug)]
-pub struct StmtAssignView<'i> {
+pub struct StmtEvalView<'i> {
     node: Node<'i, Rule>,
 }
 
-impl<'i> View<'i, Rule> for StmtAssignView<'i> {
+impl<'i> View<'i, Rule> for StmtEvalView<'i> {
     fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
-        StmtAssignView { node: Node::new(pair, file) }
+        StmtEvalView { node: Node::new(pair, file) }
     }
 
     fn node(&self) -> &Node<'i, Rule> {
@@ -208,18 +208,7 @@ impl<'i> View<'i, Rule> for StmtAssignView<'i> {
 
 // Accessors are inherent, so a binding named `text` or `span` shadows
 // the `View` method of that name rather than colliding with it.
-impl<'i> StmtAssignView<'i> {
-
-    /// `name` — the `IDENT` token.
-    ///
-    /// Dispatch turns this into the handler parameter
-    /// `name: &str`:
-    /// the text of the `IDENT` token
-    pub fn name(&self) -> Node<'i, Rule> {
-        self.node.tagged("name").expect(
-            "the grammar guarantees `name` is present; regenerate if it changed",
-        )
-    }
+impl<'i> StmtEvalView<'i> {
 
     /// `value` — the `expr` rule.
     ///

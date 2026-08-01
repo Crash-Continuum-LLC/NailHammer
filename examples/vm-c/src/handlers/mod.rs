@@ -10,7 +10,7 @@ pub mod block;
 pub mod primary_num;
 pub mod primary_var;
 pub mod program;
-pub mod stmt_assign;
+pub mod stmt_eval;
 pub mod stmt_iff;
 pub mod stmt_print;
 pub mod stmt_whilst;

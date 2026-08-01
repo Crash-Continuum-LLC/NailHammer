@@ -16,11 +16,11 @@ expr = { nh_pre_op* ~ atom ~ (nh_bin_op ~ nh_pre_op* ~ atom)* }
 
 // Rules
 program = { SOI ~ (#body = stmt)+ ~ EOI }
-stmt = { stmt_print | stmt_iff | stmt_whilst | stmt_assign }
+stmt = { stmt_print | stmt_iff | stmt_whilst | stmt_eval }
 stmt_print = { nh_kw_print ~ #value = expr ~ ";" }
 stmt_iff = { nh_kw_if ~ "(" ~ #cond = expr ~ ")" ~ #body = block }
 stmt_whilst = { nh_kw_while ~ "(" ~ #cond = expr ~ ")" ~ #body = block }
-stmt_assign = { #name = IDENT ~ "=" ~ #value = expr ~ ";" }
+stmt_eval = { #value = expr ~ ";" }
 block = { "{" ~ (#body = stmt)+ ~ "}" }
 atom = { primary }
 primary = { primary_num | primary_var | "(" ~ #inner = expr ~ ")" }
@@ -45,10 +45,11 @@ nh_op_plus = @{ "+" }
 nh_op_minus = @{ "-" }
 nh_op_slash = @{ "/" }
 nh_op_lt = @{ "<" }
+nh_op_eq = @{ "=" }
 nh_op_gt = @{ ">" }
 nh_op_caret = @{ "^" }
 nh_op_pipe = @{ "|" }
-nh_bin_op = _{ nh_op_bang_eq | nh_op_amp_amp | nh_op_lt_eq | nh_op_eq_eq | nh_op_gt_eq | nh_op_pipe_pipe | nh_op_amp | nh_op_star | nh_op_plus | nh_op_minus | nh_op_slash | nh_op_lt | nh_op_gt | nh_op_caret | nh_op_pipe }
+nh_bin_op = _{ nh_op_bang_eq | nh_op_amp_amp | nh_op_lt_eq | nh_op_eq_eq | nh_op_gt_eq | nh_op_pipe_pipe | nh_op_amp | nh_op_star | nh_op_plus | nh_op_minus | nh_op_slash | nh_op_lt | nh_op_eq | nh_op_gt | nh_op_caret | nh_op_pipe }
 nh_op_bang = @{ "!" }
 nh_pre_op = _{ nh_op_bang | nh_op_minus }
 nh_kw_print = @{ "print" ~ !nh_cont_IDENT }

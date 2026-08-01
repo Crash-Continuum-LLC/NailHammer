@@ -37,7 +37,7 @@ pub enum Stmt {
     Print(Shared<StmtPrint>),
     Iff(Shared<StmtIff>),
     Whilst(Shared<StmtWhilst>),
-    Assign(Shared<StmtAssign>),
+    Eval(Shared<StmtEval>),
 }
 
 /// From `rule stmt = "print" value:expr ";" -> print`.
@@ -63,10 +63,9 @@ pub struct StmtWhilst {
     pub span: Span,
 }
 
-/// From `rule stmt = name:IDENT "=" value:expr ";" -> assign`.
+/// From `rule stmt = value:expr ";" -> eval`.
 #[derive(Clone, Debug)]
-pub struct StmtAssign {
-    pub name: String,
+pub struct StmtEval {
     pub value: Shared<Expr>,
     pub span: Span,
 }
@@ -200,8 +199,8 @@ pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Stmt>> {
             Rule::stmt_whilst => {
                 return Ok(Shared::new(Stmt::Whilst(build_stmt_whilst(pair, file)?)))
             }
-            Rule::stmt_assign => {
-                return Ok(Shared::new(Stmt::Assign(build_stmt_assign(pair, file)?)))
+            Rule::stmt_eval => {
+                return Ok(Shared::new(Stmt::Eval(build_stmt_eval(pair, file)?)))
             }
             // A wrapper rule: the node is one level down.
             _ => pair = only_child(pair).map_err(|e| e.at(span))?,
@@ -238,11 +237,10 @@ pub fn build_stmt_whilst(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<St
     }))
 }
 
-/// Builds `StmtAssign` from `name:IDENT "=" value:expr ";" -> assign`.
-pub fn build_stmt_assign(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtAssign>> {
-    let view = StmtAssignView::from_pair(pair, file);
-    Ok(Shared::new(StmtAssign {
-        name: view.name().text().to_string(),
+/// Builds `StmtEval` from `value:expr ";" -> eval`.
+pub fn build_stmt_eval(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtEval>> {
+    let view = StmtEvalView::from_pair(pair, file);
+    Ok(Shared::new(StmtEval {
         value: build_expr(view.value().into_pair(), file)?,
         span: view.span(),
     }))

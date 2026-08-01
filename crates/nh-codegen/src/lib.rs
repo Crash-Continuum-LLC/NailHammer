@@ -162,7 +162,7 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
     let mut vm_module = "";
     if let Some(name) = &opts.target {
         if let Some(vm) = vm::target_by_name(name) {
-            match vm::operators_impl(table, &vm, &opts.host_type) {
+            match vm::operators_impl(table, lowered, &vm, &opts.host_type) {
                 Ok(contents) => {
                     vm_module = "pub mod vm_operators;\n";
                     files.push(GeneratedFile {

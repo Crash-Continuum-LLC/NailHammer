@@ -133,3 +133,41 @@ fn the_twins_short_circuit_identically() {
     assert_eq!(format!("{:?}", c.code), format!("{:?}", b.code));
     assert_eq!(vm_c::run(&c).unwrap(), vm_basic::run(&b).unwrap());
 }
+
+// ---------------------------------------------------------------------------
+// Assignment as an expression — C only, and that is the point
+// ---------------------------------------------------------------------------
+//
+// The twins have genuinely diverged here. C binds `=` as an operator, so `x = 1`
+// is an expression that yields a value; BASIC keeps `LET` as a statement and
+// uses `=` for comparison, which is what a BASIC does. They still agree on
+// everything in the shared subset, which is what `the_two_syntaxes_*` cover.
+
+/// `=` is lazy in its **left** operand: the target arrives as a `Place`, not a
+/// value, so nothing evaluated the variable before storing to it.
+#[test]
+fn assignment_stores_and_yields_the_value() {
+    let out = vm_c::run(&vm_c::compile("x = 10; print x;").expect("compiles")).expect("runs");
+    assert_eq!(out, ["10"]);
+
+    // It yields, so it can be printed directly.
+    let out = vm_c::run(&vm_c::compile("print x = 7;").expect("compiles")).expect("runs");
+    assert_eq!(out, ["7"]);
+}
+
+/// Right-associative, so `a = b = 4` assigns 4 to both rather than assigning
+/// the result of a comparison.
+#[test]
+fn assignment_chains_right_to_left() {
+    let p = vm_c::compile("a = b = 4; print a; print b;").expect("compiles");
+    assert_eq!(vm_c::run(&p).expect("runs"), ["4", "4"]);
+}
+
+/// The store goes to a slot, and reading the same name reaches the same slot —
+/// which is what makes assignment and variable reference agree.
+#[test]
+fn assignment_and_reference_reach_one_slot() {
+    let p = vm_c::compile("x = 1; x = x + 41; print x;").expect("compiles");
+    assert_eq!(vm_c::run(&p).expect("runs"), ["42"]);
+    assert_eq!(p.globals, 1, "one variable, one slot");
+}

@@ -209,6 +209,25 @@ pub trait Operators: ShortCircuit {
         let _ = operand;
         Err(Error::unsupported("not"))
     }
+
+    /// Stores `value` at `place`.
+    ///
+    /// `place` arrives with its parts already evaluated, so a subscript
+    /// with a side effect ran exactly once before this was called.
+    fn assign(
+        &mut self,
+        place: Place<'_, Self::Out>,
+        value: Self::Out,
+    ) -> Result<Self::Out> {
+        let _ = (place, value);
+        Err(Error::unsupported("assignment"))
+    }
+
+    /// Reads the current value at `place`, for compound assignment.
+    fn place_read(&mut self, place: &Place<'_, Self::Out>) -> Result<Self::Out> {
+        let _ = place;
+        Err(Error::unsupported("reading an assignment target"))
+    }
 }
 
 /// One **required** method per labelled alternative.
@@ -237,10 +256,9 @@ pub trait Handlers: Operators + Sized {
     /// * `body` — the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
     fn stmt_whilst(&mut self, cond: &Shared<Expr>, body: &Shared<Block>, cx: &mut Ctx) -> Result<Self::Out>;
 
-    /// `stmt_assign` — from `rule stmt = name:IDENT "=" value:expr ";" -> assign`.
-    /// * `name` — the text of the `IDENT` token
+    /// `stmt_eval` — from `rule stmt = value:expr ";" -> eval`.
     /// * `value` — the value of the `expr` rule, already evaluated
-    fn stmt_assign(&mut self, name: &str, value: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
+    fn stmt_eval(&mut self, value: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
 
     /// `block` — from `rule block = "{" body:stmt+ "}" -> block`.
     /// * `body` — the value of the `stmt` rule, already evaluated (repeated in the grammar; items that failed and were already reported are omitted)
@@ -309,7 +327,7 @@ pub fn eval_stmt<H: Handlers>(host: &mut H, node: &Stmt, cx: &mut Ctx) -> Result
         Stmt::Print(n) => eval_stmt_print(host, n, cx),
         Stmt::Iff(n) => eval_stmt_iff(host, n, cx),
         Stmt::Whilst(n) => eval_stmt_whilst(host, n, cx),
-        Stmt::Assign(n) => eval_stmt_assign(host, n, cx),
+        Stmt::Eval(n) => eval_stmt_eval(host, n, cx),
     }
 }
 
@@ -396,29 +414,28 @@ impl Eval for StmtWhilst {
     }
 }
 
-/// Evaluates `stmt`, from `name:IDENT "=" value:expr ";" -> assign`.
-pub fn eval_stmt_assign<H: Handlers>(host: &mut H, node: &StmtAssign, cx: &mut Ctx) -> Result<H::Out> {
+/// Evaluates `stmt`, from `value:expr ";" -> eval`.
+pub fn eval_stmt_eval<H: Handlers>(host: &mut H, node: &StmtEval, cx: &mut Ctx) -> Result<H::Out> {
     // Entering the node's span is what makes `cx.err(..)` inside the
     // handler locate itself with no span bookkeeping (DESIGN.md §7).
     cx.enter(node.span);
-    let result = eval_stmt_assign_inner(host, node, cx);
+    let result = eval_stmt_eval_inner(host, node, cx);
     cx.leave();
     result
 }
 
-fn eval_stmt_assign_inner<H: Handlers>(
+fn eval_stmt_eval_inner<H: Handlers>(
     host: &mut H,
-    node: &StmtAssign,
+    node: &StmtEval,
     cx: &mut Ctx,
 ) -> Result<H::Out> {
-    let name = &node.name;
     let value = eval_expr(host, &node.value, cx)?;
-    host.stmt_assign(name, value, cx)
+    host.stmt_eval(value, cx)
 }
 
-impl Eval for StmtAssign {
+impl Eval for StmtEval {
     fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
-        eval_stmt_assign(host, self, cx)
+        eval_stmt_eval(host, self, cx)
     }
 }
 
@@ -533,22 +550,23 @@ impl Eval for PrimaryVar {
 pub fn op_info(rule: Rule) -> Option<OpInfo> {
     let info = |precedence, fixity, assoc| Some(OpInfo { precedence, fixity, assoc });
     match rule {
-        Rule::nh_op_amp => info(5, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_amp_amp => info(2, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_bang => info(10, Fixity::Prefix, Assoc::Right),
-        Rule::nh_op_bang_eq => info(6, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_caret => info(4, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_eq_eq => info(6, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_gt => info(6, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_gt_eq => info(6, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_lt => info(6, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_lt_eq => info(6, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_minus => info(7, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_pipe => info(3, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_pipe_pipe => info(1, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_plus => info(7, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_slash => info(8, Fixity::Infix, Assoc::Left),
-        Rule::nh_op_star => info(8, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_amp => info(6, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_amp_amp => info(3, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_bang => info(11, Fixity::Prefix, Assoc::Right),
+        Rule::nh_op_bang_eq => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_caret => info(5, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_eq => info(1, Fixity::Infix, Assoc::Right),
+        Rule::nh_op_eq_eq => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_gt => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_gt_eq => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_lt => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_lt_eq => info(7, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_minus => info(8, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_pipe => info(4, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_pipe_pipe => info(2, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_plus => info(8, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_slash => info(9, Fixity::Infix, Assoc::Left),
+        Rule::nh_op_star => info(9, Fixity::Infix, Assoc::Left),
         _ => None,
     }
 }
@@ -565,8 +583,8 @@ pub fn prefix_info(rule: Rule) -> Option<OpInfo> {
         assoc: Assoc::Right,
     });
     match rule {
-        Rule::nh_op_minus => info(9),
-        Rule::nh_op_bang => info(10),
+        Rule::nh_op_minus => info(10),
+        Rule::nh_op_bang => info(11),
         _ => None,
     }
 }
@@ -597,6 +615,13 @@ pub fn eval_expr<H: Handlers>(
             "`{op:?}` is not a postfix operator"
         ))),
         Expr::Infix { lhs, op, rhs, .. } => match op {
+            &Rule::nh_op_eq => {
+                // The target is RESOLVED, not evaluated as a value, and
+                // its parts are computed exactly once.
+                let place = resolve_place(host, lhs, cx)?;
+                let right = eval_expr(host, rhs, cx)?;
+                host.assign(place, right)
+            }
             &Rule::nh_op_pipe_pipe => {
                 let left = eval_expr(host, lhs, cx)?;
                 host.or_else(left, rhs.clone(), cx)
@@ -738,13 +763,12 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_whilst::run(self, cond, body, cx)
             }
-            fn stmt_assign(
+            fn stmt_eval(
                 &mut self,
-                name: &str,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_assign::run(self, name, value, cx)
+                $crate::handlers::stmt_eval::run(self, value, cx)
             }
             fn block(
                 &mut self,
@@ -831,13 +855,12 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_whilst::run(self, cond, body, cx)
             }
-            fn stmt_assign(
+            fn stmt_eval(
                 &mut self,
-                name: &str,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_assign::run(self, name, value, cx)
+                $crate::handlers::stmt_eval::run(self, value, cx)
             }
             fn block(
                 &mut self,

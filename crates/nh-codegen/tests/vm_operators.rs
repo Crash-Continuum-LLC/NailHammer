@@ -7,22 +7,40 @@
 use nh_codegen::vm::{operators_impl, Target};
 use nh_syntax::SourceMap;
 
-fn table(source: &str) -> nh_operators::OperatorTable {
+/// Wraps a `precedence` block in the smallest grammar that lowers.
+///
+/// Tests here are about operators, so everything else is boilerplate — and it
+/// has to be *real* boilerplate: assignment is generated from the lowered
+/// alternatives rather than from the operator table, so a fake atom rule that
+/// satisfied a table-only test does not survive lowering.
+fn compiled(precedence: &str) -> (nh_operators::OperatorTable, nh_lower::Lowered) {
+    let source = format!(
+        "grammar T;\nuse operators::none;\n\
+         skip WS = \" \";\n\
+         token DIGIT = @ \"0\"..\"9\";\ntoken NUMBER = @ DIGIT+;\n\
+         token ALPHA = @ \"a\"..\"z\";\ntoken IDENT = @ ALPHA+;\n\
+         {precedence}\n\
+         rule program = SOI body:expr EOI -> program;\n\
+         rule atom = primary;\n\
+         rule primary = value:NUMBER -> num | name:IDENT -> var place;\n"
+    );
     let mut sm = SourceMap::new();
-    let ast = nh_syntax::parse_source(&mut sm, "<test>", source)
+    let ast = nh_syntax::parse_source(&mut sm, "<test>", &source)
         .unwrap_or_else(|e| panic!("{}", e.render(&sm)));
-    nh_operators::resolve(&ast, &mut sm).unwrap_or_else(|e| panic!("{}", e.render(&sm)))
+    let table = nh_operators::resolve(&ast, &mut sm).unwrap_or_else(|e| panic!("{}", e.render(&sm)));
+    let lowered = nh_lower::lower(&ast, &table).unwrap_or_else(|e| panic!("{}", e.render(&sm)));
+    (table, lowered)
 }
 
 /// The whole point: arithmetic needs no hand-written implementation.
 #[test]
 fn arithmetic_generates_its_own_implementation() {
-    let t = table(
-        "grammar T;\nprecedence {\n  left \"+\" | \"-\";\n  \
-         left \"*\" | \"/\";\n  prefix \"-\";\n  atom a;\n}\n",
+    let (t, l) = compiled(
+        "precedence {\n  left \"+\" | \"-\";\n  \
+         left \"*\" | \"/\";\n  prefix \"-\";\n  atom atom;\n}",
     );
 
-    let src = operators_impl(&t, &Target::nh_vm(), "Compiler").expect("all roles are executable");
+    let src = operators_impl(&t, &l, &Target::nh_vm(), "Compiler").expect("all roles are executable");
 
     // One method per role, each emitting one instruction.
     assert!(src.contains("fn add(&mut self, lhs: Reg, rhs: Reg)"), "{src}");
@@ -45,13 +63,13 @@ fn arithmetic_generates_its_own_implementation() {
 /// one instruction taking an operand. The shape survives the whole pipeline.
 #[test]
 fn a_comparison_tier_becomes_one_instruction() {
-    let t = table(
-        "grammar T;\nprecedence {\n  \
+    let (t, l) = compiled(
+        "precedence {\n  \
          left \"==\" | \"!=\" | \"<\" | \"<=\" | \">\" | \">=\" -> compare;\n  \
-         atom a;\n}\n",
+         atom atom;\n}",
     );
 
-    let src = operators_impl(&t, &Target::nh_vm(), "Compiler").expect("compare is executable");
+    let src = operators_impl(&t, &l, &Target::nh_vm(), "Compiler").expect("compare is executable");
 
     assert!(src.contains("fn compare(&mut self, lhs: Reg, op: CompareOp, rhs: Reg)"), "{src}");
     assert!(src.contains("CompareOp::Lt => Cmp::Lt,"), "{src}");
@@ -69,35 +87,31 @@ fn a_comparison_tier_becomes_one_instruction() {
 /// plugin that fails to load later or generated code that will not compile.
 #[test]
 fn a_role_the_vm_cannot_execute_is_reported_not_emitted() {
-    // `,` and `=` are the honest remaining gaps: sequencing and assignment are
-    // language constructs rather than machine operations, and nh-vm has no
-    // instruction for either.
-    let t = table(
-        "grammar T;\nprecedence {\n  left \"+\";\n  \
-         left \",\" -> comma;\n  right \"=\" -> assign;\n  atom a;\n}\n",
+    // `,` is the honest remaining gap: sequencing is a language construct
+    // rather than a machine operation, and nh-vm has no instruction for it.
+    let (t, l) = compiled(
+        "precedence {\n  left \"+\";\n  \
+         left \",\" -> comma;\n  right \"=\" -> assign;\n  atom atom;\n}",
     );
 
-    let missing = operators_impl(&t, &Target::nh_vm(), "Compiler")
-        .expect_err("nh-vm has no Assign or Comma");
+    let missing = operators_impl(&t, &l, &Target::nh_vm(), "Compiler")
+        .expect_err("nh-vm has no Comma");
 
     let roles: Vec<&str> = missing.iter().map(|u| u.role.as_str()).collect();
-    assert_eq!(roles, ["assign", "comma"], "sorted and deduplicated: {missing:?}");
-
-    // Named by something the author typed.
-    assert_eq!(missing[0].spelling, "=");
-    assert_eq!(missing[1].spelling, ",");
+    assert_eq!(roles, ["comma"], "sorted and deduplicated: {missing:?}");
+    assert_eq!(missing[0].spelling, ",", "named by something the author typed");
 }
 
 /// The report must name a role once even when several spellings bind it, or a
 /// wide tier produces a wall of duplicates.
 #[test]
 fn one_report_per_role_not_per_spelling() {
-    let t = table(
-        "grammar T;\nprecedence {\n  \
-         left \",\" | \";\" -> comma;\n  atom a;\n}\n",
+    let (t, l) = compiled(
+        "precedence {\n  \
+         left \",\" | \";\" -> comma;\n  atom atom;\n}",
     );
 
-    let missing = operators_impl(&t, &Target::nh_vm(), "Compiler").expect_err("nh-vm has no Comma");
+    let missing = operators_impl(&t, &l, &Target::nh_vm(), "Compiler").expect_err("nh-vm has no Comma");
     assert_eq!(missing.len(), 1, "{missing:?}");
     assert_eq!(missing[0].role, "comma");
 }
@@ -106,8 +120,30 @@ fn one_report_per_role_not_per_spelling() {
 /// failing — the same way `use operators::none` produces no driver.
 #[test]
 fn no_operators_is_not_an_error() {
-    let t = table("grammar T;\nuse operators::none;\n");
-    let src = operators_impl(&t, &Target::nh_vm(), "Compiler").expect("nothing to support");
+    let (t, l) = compiled("precedence { atom atom; }");
+    let src = operators_impl(&t, &l, &Target::nh_vm(), "Compiler").expect("nothing to support");
     assert!(src.contains("impl Operators for Compiler {"), "{src}");
     assert!(!src.contains("fn add"), "{src}");
+}
+
+/// Assignment is generated from the grammar's `place` alternatives, not from
+/// the operator — because a store depends on what is being stored *to*.
+#[test]
+fn assignment_lowers_to_a_store_by_slot() {
+    let (t, l) = compiled("precedence {\n  right \"=\" -> assign;\n  left \"+\";\natom atom;\n}");
+
+    let src = operators_impl(&t, &l, &Target::nh_vm(), "Compiler").expect("assign is executable");
+
+    // The variant is named after the `place`-marked alternative, so it tracks
+    // the grammar rather than a fixed list.
+    assert!(src.contains("Place::PrimaryVar { name, .. }"), "{src}");
+    assert!(src.contains("let slot = self.slot_of(name);"), "{src}");
+    assert!(src.contains("self.emit(Op::StoreGlobal { slot, src: value });"), "{src}");
+
+    // `a = b = 1` chains, so the store yields the value.
+    assert!(src.contains("Ok(value)"), "{src}");
+
+    // Compound assignment needs to read the target first.
+    assert!(src.contains("fn place_read"), "{src}");
+    assert!(src.contains("self.emit(Op::LoadGlobal { dst, slot });"), "{src}");
 }
