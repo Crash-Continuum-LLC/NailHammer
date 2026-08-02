@@ -55,8 +55,8 @@ which bindings exist.
 $ nh build pebble.nh -o src/pebble.pest --rust src --target nh-vm
 ```
 
-and NailHammer writes `src/generated/vm_operators.rs` — the **whole**
-`Operators` implementation. Against a machine that owns execution, `add` means
+with `nh-vm = "0.4"` in your `Cargo.toml`, and NailHammer writes
+`src/generated/vm_operators.rs` — the **whole** `Operators` implementation. Against a machine that owns execution, `add` means
 `Op::Add` in every language, so the body is a consequence rather than a
 decision. Search a `--target nh-vm` project for `fn add` and there isn't one.
 

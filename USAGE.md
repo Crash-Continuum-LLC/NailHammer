@@ -1086,6 +1086,17 @@ implementation — and wires it into `generated/mod.rs` itself. There is nothing
 to `include!` and nothing to import: search your crate for `fn add` afterwards
 and there will not be one.
 
+**Add the machine to your `Cargo.toml`.** The generated file opens with
+`use nh_vm::{Cmp, Emitter, Op, Reg};`, so the crate has to be a dependency:
+
+```toml
+[dependencies]
+nh-vm = "0.4"
+```
+
+`nh init` does not add it, because targeting a VM is a decision you make after
+scaffolding rather than during it.
+
 What stays yours is what only you could have said: which operators exist, how
 they are spelled, their precedence and associativity — all already in the `.nh`
 table — and the handlers that lower your statements.
