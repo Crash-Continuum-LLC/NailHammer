@@ -1211,3 +1211,44 @@ fn every_element_of_a_repeated_binding_is_tagged() {
         "all three elements should be direct children carrying the tag"
     );
 }
+
+/// A preset installs `atom atom;`, so it obliges the grammar to define that
+/// rule — and the obligation does not depend on `expr` being used anywhere.
+///
+/// This surprises people because the grammar never writes the word `atom`. The
+/// diagnostic points at the `use` line for that reason, and says which preset
+/// put the entry there.
+#[test]
+fn a_preset_says_where_the_atom_requirement_came_from() {
+    let out = lower_err(
+        "grammar A;\n\
+         use operators::core;\n\
+         skip WS = \" \";\n\
+         token ALPHA = @ \"a\"..\"z\";\n\
+         token ID = @ ALPHA+;\n\
+         rule program = SOI body:stmt* EOI -> program;\n\
+         rule stmt = v:ID \";\" -> s;\n",
+    );
+    assert!(out.contains("names `atom`, which is not defined"), "{out}");
+    assert!(out.contains("`use operators::core` supplies `atom atom;`"), "{out}");
+    // The remedies, because "define it" is not the only one.
+    assert!(out.contains("`atom NAME;`"), "{out}");
+    assert!(out.contains("use operators::none"), "{out}");
+    // And it points at the `use`, since that is what created the obligation.
+    assert!(out.contains("use operators::core;"), "{out}");
+}
+
+/// A hand-written table names its own atom, so the author *did* write the name
+/// and does not need telling where it came from.
+#[test]
+fn a_hand_written_table_gets_the_plain_help() {
+    let out = lower_err(
+        "grammar A;\n\
+         use operators::none;\n\
+         precedence { left \"+\" -> add; atom primary; }\n\
+         rule program = SOI body:expr EOI -> program;\n",
+    );
+    assert!(out.contains("names `primary`, which is not defined"), "{out}");
+    assert!(out.contains("add `rule primary = ...;`"), "{out}");
+    assert!(!out.contains("supplies"), "no preset to blame:\n{out}");
+}

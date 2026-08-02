@@ -687,10 +687,31 @@ impl<'a> Ctx<'a> {
                 .first()
                 .map(|b| b.span)
                 .or_else(|| self.ast.uses.first().map(|u| u.span));
+            // Where the requirement came from changes what the reader needs to
+            // hear. With no `precedence` block the name came from a preset, so
+            // the grammar never mentions `atom` and "the table names `atom`"
+            // reads as though it is quoting something the author wrote.
+            let from_preset = self.ast.precedence.is_empty();
             let d = Diagnostic::error(format!(
                 "the operator table's `atom` names `{atom}`, which is not defined"
             ))
-            .help(format!("add `rule {atom} = ...;` for the operator driver to fold over"));
+            .help(if from_preset {
+                let preset = self
+                    .ast
+                    .uses
+                    .first()
+                    .map(|u| format!("`use operators::{}`", u.preset.value))
+                    .unwrap_or_else(|| "the preset".to_string());
+                format!(
+                    "{preset} supplies `atom {atom};`, so the grammar has to \
+                     define `rule {atom} = ...;` — what operators are built \
+                     from. Name a different rule with `atom NAME;` in a \
+                     `precedence override` block, or drop the table entirely \
+                     with `use operators::none`"
+                )
+            } else {
+                format!("add `rule {atom} = ...;` for the operator driver to fold over")
+            });
             self.diagnostics.push(match span {
                 Some(s) => d.at(s),
                 None => d,

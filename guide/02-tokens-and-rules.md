@@ -118,6 +118,12 @@ this file and there never will be. `use operators::core` supplies it, and what
 it wants from you is the opposite end — the rule that says what an expression is
 built *out of*.
 
+That trade is worth stating plainly, because it is the one obligation a preset
+puts on you: **`use operators::<preset>` installs a table ending in `atom
+atom;`, so your grammar must define `rule atom`.** It applies even to a grammar
+that never writes `expr` at all — the table comes from the `use`, not from being
+referenced, which is why the error points at that line rather than at a rule.
+
 That is the next chapter.
 
 ---

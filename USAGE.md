@@ -542,6 +542,14 @@ precedence override {
 }
 ```
 
+> **A preset commits you to one rule: `atom`.** Every preset's table ends with
+> `atom atom;`, so a grammar that says `use operators::c_style` must define
+> `rule atom = ...;` — and it must do so **even if it never mentions `expr`**,
+> because the table is installed by the `use`, not by being referenced. The
+> diagnostic points at the `use` line for that reason. Name a different rule
+> with `atom NAME;` in a `precedence override` block, or take no table at all
+> with `use operators::none`.
+
 Or write one from scratch, which is what a language unlike C needs:
 
 ```nh
