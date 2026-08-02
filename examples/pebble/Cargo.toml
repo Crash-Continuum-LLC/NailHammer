@@ -1,0 +1,20 @@
+[package]
+name = "pebble"
+description = "The language built step by step in guide/"
+version = "0.1.0"
+# Not published: a worked example, read and rebuilt by CI. See calc-interp.
+publish = false
+edition = "2021"
+
+[lib]
+name = "pebble"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pebble"
+path = "src/main.rs"
+
+[dependencies]
+nh-runtime = { path = "../../crates/nh-runtime" }
+pest = "2.8"
+pest_derive = { version = "2.8", features = ["grammar-extras"] }

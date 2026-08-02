@@ -211,9 +211,11 @@ short-circuit operators. NailHammer generates its own driver.
 
 ---
 
-## 3. The `.nh` language (sketch)
+## 3. The `.nh` language
 
-Illustrative, not final. The point is which constructs must exist.
+Every construct the language must carry, in one file. This one parses — the
+character classes are written out because `.nh` has no `digit` or `alpha`
+builtin, which is itself one of the decisions below.
 
 ```nh
 grammar Calc;
@@ -229,10 +231,14 @@ precedence override {
 skip  WHITESPACE = " " | "\t" | "\r" | "\n";
 skip  COMMENT    = "//" (!"\n" ANY)*;
 
-token NUMBER = @ digit+ ("." digit+)?;
-token IDENT  = @ (alpha | "_") (alnum | "_")*;
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 
 reserved from IDENT { "let" "if" "else" "while" "fn" "return" }
+
+rule program = SOI body:stmt* EOI -> program;
 
 rule atom
   = value:NUMBER                          -> num
@@ -245,6 +251,8 @@ rule stmt
   | "if" cond:expr body:block             -> if_stmt
   | value:expr ";"                        -> expr_stmt
   ;
+
+rule block = "{" body:stmt* "}" -> block;
 
 recover stmt sync ";" | "}";
 expect "(" in atom as "opening parenthesis";
@@ -561,7 +569,7 @@ So the traversal moved into generated dispatch, where it is written once:
 | `key:IDENT` | `&str` |
 | `key:IDENT`, case-folding token | `Ident<'_, Rule>` — keeps `.key()` |
 | `value:expr` | `Self::Out`, already evaluated |
-| `lazy body:block` | `&Rc<Block>` — owned, so it may be kept |
+| `lazy body:block` | `&Shared<Block>` — owned, so it may be kept |
 | `x:y?` / `x:y*` | `Option<..>` / `Vec<..>` |
 
 Views still exist and are still generated — they are how dispatch does the
@@ -722,6 +730,8 @@ exponentiation rather than XOR, `NOT` binds **looser** than comparison (so
 `NOT A = B` means `NOT (A = B)` — the opposite of C's `!`), and classic
 `AND`/`OR` are bitwise and **non**-short-circuiting.
 
+The table alone — the grammar's tokens and its `primary` rule are omitted:
+
 ```nh
 grammar Basic;
 use operators::none;
@@ -854,7 +864,7 @@ unevaluated node, or as a `Place` (an assignable location), rather than `Out`:
 
 ```rust
 fn bit_and(&mut self, l: Out, r: Out)      -> Result<Out>;
-fn and_then(&mut self, l: Out, r: Rc<Expr>, cx: &mut Ctx) -> Result<Out> {
+fn and_then(&mut self, l: Out, r: Shared<Expr>, cx: &mut Ctx) -> Result<Out> {
     if !self.truthy(&l) { return Ok(l) }
     r.eval(self, cx)
 }   // ^ default impl — you write nothing
@@ -863,7 +873,7 @@ fn assign(&mut self, p: Place<'_, Out>, r: Out) -> Result<Out>;  // no sane defa
 ```
 
 > Written at M3 as `Thunk<Out>` with `r.force()`. The type became `Deferred`,
-> then `Rc<Expr>` when the AST became owned (§9). The *shape* — a lazy operand
+> then `Shared<Expr>` when the AST became owned (§9). The *shape* — a lazy operand
 > is a node the handler chooses whether to run — never changed.
 
 `and_then`, `or_else`, `coalesce`, and `ternary` ship with correct defaults built
@@ -885,7 +895,7 @@ rule stmt = "if" cond:expr "then" lazy body:stmt -> iff;
 ```
 
 ```rust
-pub fn run(host: &mut Interp, cond: Value, body: &Rc<Stmt>, cx: &mut Ctx)
+pub fn run(host: &mut Interp, cond: Value, body: &Shared<Stmt>, cx: &mut Ctx)
     -> Result<Value>
 {
     if !host.truthy(&cond) { return Ok(cond) }
@@ -903,7 +913,7 @@ disagreed. `a_conditional_uses_the_languages_own_truthiness` holds the line.
 nothing to defer, and accepting it would suggest it did something.
 
 It composes with cardinality, and that is what makes **loops** expressible:
-`lazy body:line*` is a `&[Rc<Line>]` the handler runs once per iteration.
+`lazy body:line*` is a `&[Shared<Line>]` the handler runs once per iteration.
 `examples/basic-interp`'s `FOR`/`NEXT` is written that way, and the property
 worth testing is the empty range — `FOR i = 10 TO 1` must run its body *zero*
 times, which no eager parameter can express.
@@ -932,7 +942,7 @@ exactly the untyped positional destructuring this design exists to remove.
 They leave the operator table entirely and live in the grammar as a suffix chain:
 
 ```nh
-rule atom = primary suffix*;
+rule atom = base:primary suffixes:suffix* -> access;
 
 rule suffix
   = "(" args:expr_list ")"   -> call
@@ -942,22 +952,24 @@ rule suffix
   ;
 ```
 
-Each becomes an ordinary handler file with named accessors:
+Each becomes an ordinary handler file, its bindings arriving as parameters:
 
 ```rust
-// handlers/call.rs
-pub fn run(s: &mut Interp, v: CallView, cx: &mut Ctx) -> Result<Value> {
-    let callee = cx.eval(v.callee())?;
-    let args: Vec<_> = v.args().map(|a| cx.eval(a)).collect::<Result<_>>()?;
-    s.invoke(callee, args)
+// handlers/suffix_call.rs
+pub fn run(host: &mut Interp, args: Option<Value>, cx: &mut Ctx) -> Result<Value> {
+    host.invoke(args, cx)
 }
 ```
 
+> Written when handlers took a `View` and called `cx.eval(v.args())`
+> themselves. Bindings became parameters at M2 and the walk moved into the
+> generated evaluator, so there is nothing left in the handler to eval.
+
 Three arguments for this, in ascending order of importance:
 
-1. **Precedence still works with no table involvement.** `atom = primary suffix*`
-   binds tighter than any prefix or infix operator by construction, so `-a.b` is
-   `-(a.b)` and `f(x)[0].y` chains correctly.
+1. **Precedence still works with no table involvement.** A chain of suffixes on
+   a primary binds tighter than any prefix or infix operator by construction, so
+   `-a.b` is `-(a.b)` and `f(x)[0].y` chains correctly.
 2. **The driver gets simpler** — the fold handles prefix and infix only.
 3. **These aren't boilerplate.** The operator system exists to absorb work nobody
    should have to think about. Call semantics (arity, closures, varargs, method
@@ -1182,8 +1194,11 @@ expensive than carrying it from the start.
      `reserved from` would both guard the literal *and* forbid it as an
      identifier. Only the first is wanted. The first draft reserved the
      keywords and immediately rejected `rule atom = primary;`, a line in nearly
-     every grammar here. **A guard-without-reserving form is a missing
-     feature**, and all 29 keywords are hand-guarded in the meantime.
+     every grammar here. **This is what `guard from` exists for**, and it was
+     added because of this finding: it appends the identifier-boundary
+     lookahead without reserving the word, so a contextual keyword stays usable
+     as a name. `examples/selfhost/nh.nh` uses it, replacing a block of
+     hand-written guard tokens.
    * **The M0 keyword bug reappears one level up.** Written as
      `rule kw_x = "x" !IDENT_TAIL`, the guard silently fails — a rule is
      non-atomic, so pest inserts whitespace and the lookahead tests the wrong
@@ -1204,7 +1219,7 @@ expensive than carrying it from the start.
 9. **M9 — the second host shape. ✅ Done.** `Values` split out of `Semantics`,
    so a host whose `Out` is not a value need not answer questions about one;
    short-circuiting written by `nh_handlers!` from the one thing that *is*
-   language-specific. `nh init --compiler` scaffolds a register machine with
+   language-specific. `nh init` scaffolds a register machine with
    slot-allocated locals, and an end-to-end test asserts both shapes print the
    same thing across every style and feature combination. See §10.
 10. **M10 — `nh trace`. ✅ Done.** What a program routes to, and with what,
@@ -1342,12 +1357,12 @@ types become finite, sharing is free, and a `lazy` binding is storable — where
 `Box` plus a separate handle type would have split the model in two.
 
 ```rust
-pub enum Stmt { Loop(Rc<StmtLoop>), While(Rc<StmtWhile>), .. }
+pub enum Stmt { Loop(Shared<StmtLoop>), While(Shared<StmtWhile>), .. }
 
 pub struct StmtLoop {
     pub var: Name,              // owned: keeps .text() and .key()
-    pub from: Rc<Expr>,
-    pub body: Vec<Rc<Line>>,    // the `lazy` body — 'static, storable
+    pub from: Shared<Expr>,
+    pub body: Vec<Shared<Line>>, // the `lazy` body — 'static, storable
     pub span: Span,
 }
 ```
@@ -1781,11 +1796,16 @@ Two things fell out of building it:
 `CalcParser`, so `generate` derives it rather than asking — the same rule, one
 level down.
 
-### `nh init --compiler`
+### Two host shapes from one scaffold
 
 The scaffold shipped one shape, which made "one grammar, two shapes" something
-you had to take on trust. `--compiler` writes the same grammar with handlers that
-emit and its own `ShortCircuit`.
+you had to take on trust. It now writes a compiler by default — the same
+grammar with handlers that emit, and its own `ShortCircuit` — and
+`nh init --interpreter` writes the tree-walking shape.
+
+> Originally the other way round: the interpreter was the default and
+> `--compiler` the opt-in. The flag is gone, not renamed, because a scaffold
+> that can suspend is the one worth defaulting to.
 
 It began as a stack machine — `type Out = ()` — which is where the section below
 picks up; it is a register machine now. `examples/bytecode` keeps the stack
@@ -2269,7 +2289,7 @@ retire.** Recorded so the first surprise isn't a discovery:
 16. ~~**`Thunk` and `&mut self` together.**~~ *Retired at M3, then dissolved at
     M7.* `Deferred` borrowed the tree rather than the host, so forcing it inside
     a method already holding `&mut self` was two disjoint borrows. The owned AST
-    removed the question entirely: an operand is an `Rc<Expr>` and borrows
+    removed the question entirely: an operand is a `Shared<Expr>` and borrows
     nothing.
 
 17. ~~**Tag survival through silent rules.**~~ *Retired.*

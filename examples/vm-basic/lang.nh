@@ -1,0 +1,72 @@
+// The same language as `examples/vm-c`, wearing BASIC's syntax.
+//
+// Read the two grammars side by side. The syntax differs completely — word
+// operators, line-oriented statements, `THEN`/`END IF` instead of braces — and
+// the **roles are identical**. `AND` here binds `bit_and`, exactly as `&` does
+// there, so both reach `Op::And` and neither language implements it.
+grammar BasicLang;
+
+use operators::none;
+
+keywords case-insensitive;
+
+skip WHITESPACE = " " | "\t" | "\r";
+
+token DIGIT = @ "0".."9";
+token ALPHA = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token IDENT = @ ALPHA (ALPHA | DIGIT)*;
+token STRING = @ "\"" (!"\"" ANY)* "\"";
+token EOL = @ "\n";
+
+reserved from IDENT { "PRINT" "LET" "IF" "THEN" "ELSE" "END" "WHILE" "WEND" "NOT" "AND" "OR" "XOR" "ANDALSO" "ORELSE" "FUNCTION" "RETURN" "AWAIT" "LEN" }
+
+// Word operators, and the same roles the C twin binds.
+precedence {
+    left   word "ORELSE" -> or_else;
+    left   word "ANDALSO" -> and_then;
+    left   word "OR" -> bit_or;
+    left   word "XOR" -> bit_xor;
+    left   word "AND" -> bit_and;
+    left   "=" | "<>" | "<" | "<=" | ">" | ">=" -> compare;
+    left   "+" | "-";
+    left   "*" | "/";
+    prefix "-";
+    prefix word "NOT" -> not;
+    prefix word "AWAIT" -> await;
+    prefix word "LEN" -> len;
+    atom   atom;
+}
+
+rule program = SOI body:line+ EOI -> program;
+rule line = body:stmt EOL+ -> code | EOL -> blank;
+
+rule stmt
+  = "PRINT" value:expr                                         -> print
+  | "IF" cond:expr "THEN" lazy body:block "ELSE" lazy alt:block "END" "IF" -> ifelse
+  | "IF" cond:expr "THEN" lazy body:block "END" "IF"           -> iff
+  | "WHILE" lazy cond:expr lazy body:block "WEND"              -> whilst
+  | "LET" name:IDENT "[" index:expr "]" "=" value:expr         -> setelem
+  | "LET" name:IDENT "=" value:expr                            -> assign
+  | "FUNCTION" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block "END" "FUNCTION" -> define
+  | "RETURN" value:expr                                        -> ret
+  ;
+
+// Same shape as the C twin's, for the same reason: `lazy` is what lets a
+// handler emit a jump in front of a body it has not emitted yet.
+rule block = EOL+ body:line+ -> block;
+
+rule atom = primary;
+
+rule primary
+  = value:NUMBER                       -> num
+  | text:STRING                        -> str
+  | name:IDENT "[" index:expr "]"      -> elem place
+  | name:IDENT "(" args:exprs? ")"     -> call
+  | name:IDENT                         -> var place
+  | "[" first:expr rest:more_elem* "]" -> list
+  | "(" inner:expr ")"                 -> pass
+  ;
+
+rule more_elem = "," value:expr -> next;
+rule exprs = first:expr rest:more_elem* -> some;

@@ -101,8 +101,8 @@ stmt_iff  → handlers/stmt_iff.rs
   cond: Self::Out   ⟵ evaluated first, by:
     Operators::compare
       · `>` — left-associative, precedence 3
-  then: &Rc<Block>   ⟵ lazy: the node, unevaluated
-  otherwise: Option<&Rc<ElseTail>>   ⟵ absent here
+  then: &Shared<Block>   ⟵ lazy: the node, unevaluated
+  otherwise: Option<&Shared<ElseTail>>   ⟵ absent here
 ```
 
 * **which handler** gets each construct, and the file to open;

@@ -873,3 +873,382 @@ fn a_pass_alternative_names_the_rule_it_yields() {
         .collect();
     assert_eq!(transparent, vec![Some("expr")], "{vs:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Transparent alternatives
+//
+// An alternative with no label — or `-> pass` — has no node of its own, so
+// something else has to be the node it stands for. That works only when the
+// body produces exactly one pest pair belonging to a rule.
+//
+// Getting this wrong used to be found *late*, and in two different places:
+// generated Rust that would not compile, or a parse that failed at run time.
+// These pin both to `nh check`.
+// ---------------------------------------------------------------------------
+
+/// The prelude every case below shares: two tokens and an operator-free table.
+const T: &str = "grammar T;\n\
+                 use operators::none;\n\
+                 skip WS = \" \" | \"\\t\";\n\
+                 token EOL = @ \"\\n\";\n\
+                 token ALPHA = @ \"a\"..\"z\";\n\
+                 token ID = @ ALPHA+;\n";
+
+fn transparent_err(rules: &str) -> String {
+    lower_err(&format!("{T}{rules}"))
+}
+
+fn transparent_ok(rules: &str) {
+    build_str(&format!("{T}{rules}"));
+}
+
+/// A token is a node too.
+///
+/// This is the bug that started it: counting *rule* references found one
+/// (`stmt`) and called the alternative transparent. `EOL` is a token, and a
+/// token produces a pair — so the wrapper pair reached `build_stmt`, which
+/// looks for its tags among direct children and found none. `nh check` passed,
+/// `nh build` passed, and it failed while parsing.
+#[test]
+fn a_token_counts_as_a_node() {
+    let out = transparent_err(
+        "rule program = SOI lines:line+ EOI -> prog;\n\
+         rule line = body:stmt EOL+ -> pass;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+    assert!(out.contains("`-> pass`"), "{out}");
+    assert!(out.contains("produces 2 or more nodes"), "{out}");
+    assert!(out.contains("give this one a `-> label`"), "{out}");
+}
+
+/// Repetition widens the count rather than being ignored.
+///
+/// The old check walked through `*` and saw one rule reference, so `stmt*`
+/// looked like a single child. It is any number of them.
+#[test]
+fn a_repetition_is_not_one_node() {
+    let out = transparent_err(
+        "rule program = body:many -> prog;\n\
+         rule many = stmt*;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+    assert!(out.contains("no label"), "{out}");
+    assert!(out.contains("produces 0 or more nodes"), "{out}");
+}
+
+/// A fixed count above one is reported exactly, not as "or more".
+#[test]
+fn two_rules_are_two_nodes() {
+    let out = transparent_err(
+        "rule program = body:pair -> prog;\n\
+         rule pair = stmt stmt;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+    assert!(out.contains("produces 2 nodes"), "{out}");
+}
+
+/// An optional child is between none and one, and neither is a node to stand
+/// in for reliably.
+#[test]
+fn an_optional_child_is_not_guaranteed() {
+    let out = transparent_err(
+        "rule program = body:maybe -> prog;\n\
+         rule maybe = stmt?;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+    assert!(out.contains("produces between 0 and 1 nodes"), "{out}");
+}
+
+/// Literals match text without producing a pair, so an alternative of nothing
+/// but literals has no node at all.
+#[test]
+fn literals_alone_produce_no_node() {
+    let out = transparent_err(
+        "rule program = body:word -> prog;\n\
+         rule word = \"yes\" | \"no\";\n",
+    );
+    assert!(out.contains("produces no node"), "{out}");
+}
+
+/// A token has a pair but no builder, so delegating to one has nowhere to go.
+#[test]
+fn a_lone_token_has_no_handler_to_delegate_to() {
+    let out = transparent_err("rule program = ID;\n");
+    assert!(out.contains("produces only the token `ID`"), "{out}");
+    assert!(out.contains("no node of its own"), "{out}");
+}
+
+/// One node, but not always the same rule's — so there is no single type the
+/// wrapper could be.
+#[test]
+fn a_choice_of_different_rules_is_ambiguous() {
+    let out = transparent_err(
+        "rule program = body:either -> prog;\n\
+         rule either = (stmt | decl);\n\
+         rule stmt = v:ID -> s;\n\
+         rule decl = \"let\" v:ID -> d;\n",
+    );
+    assert!(out.contains("may be any of"), "{out}");
+    assert!(out.contains("stmt"), "{out}");
+    assert!(out.contains("decl"), "{out}");
+}
+
+// ---- and the cases that must stay quiet ------------------------------------
+
+/// The plain alias. One rule, one node.
+#[test]
+fn an_alias_to_one_rule_is_fine() {
+    transparent_ok(
+        "rule program = body:atom -> prog;\n\
+         rule atom = primary;\n\
+         rule primary = v:ID -> p;\n",
+    );
+}
+
+/// Literals around a single rule are still a single node — this is the shape
+/// every parenthesised-expression rule has, and rejecting it would have been
+/// the false positive that sank two earlier attempts at this check.
+#[test]
+fn literals_around_one_rule_are_still_one_node() {
+    transparent_ok(
+        "rule program = body:group -> prog;\n\
+         rule group = \"(\" inner:stmt \")\" -> pass;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+}
+
+/// A lookahead consumes nothing, so it cannot contribute a node.
+#[test]
+fn a_lookahead_contributes_no_node() {
+    transparent_ok(
+        "rule program = body:guarded -> prog;\n\
+         rule guarded = !\"x\" inner:stmt -> pass;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+}
+
+/// Repeating something that produces no node still produces no node, so it
+/// does not make an otherwise-single child look unbounded.
+#[test]
+fn repeated_literals_do_not_inflate_the_count() {
+    transparent_ok(
+        "rule program = body:padded -> prog;\n\
+         rule padded = \",\"* inner:stmt \",\"* -> pass;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+}
+
+/// Both branches yield the same rule, so the wrapper stands in for it either
+/// way.
+#[test]
+fn a_choice_yielding_the_same_rule_is_fine() {
+    transparent_ok(
+        "rule program = body:either -> prog;\n\
+         rule either = (\"a\" stmt | \"b\" stmt);\n\
+         rule stmt = v:ID -> s;\n",
+    );
+}
+
+/// A silent rule produces no pair of its own — its body's pairs appear in its
+/// place — so it is seen *through* rather than counted as one node.
+///
+/// Treating it as opaque left the one hole this check was written to close:
+/// the wrapper got no child, generation emitted `pub type Wrapped =
+/// Unresolved;` with a `build_?` it never defined, and the grammar failed in
+/// rustc exactly as before.
+#[test]
+fn a_silent_rule_is_seen_through() {
+    transparent_ok(
+        "rule program = body:wrapped -> prog;\n\
+         rule wrapped = quiet;\n\
+         silent rule quiet = stmt;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+}
+
+/// And seeing through it means its contents are counted, so a silent rule that
+/// yields several nodes is caught like anything else.
+#[test]
+fn a_silent_rule_that_yields_several_nodes_is_caught() {
+    let out = transparent_err(
+        "rule program = body:wrapped -> prog;\n\
+         rule wrapped = quiet;\n\
+         silent rule quiet = stmt stmt;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+    assert!(out.contains("produces 2 nodes"), "{out}");
+}
+
+/// A silent rule that reaches itself has no finite count, so the check stays
+/// quiet rather than recursing forever.
+#[test]
+fn a_recursive_silent_rule_terminates() {
+    transparent_ok(
+        "rule program = body:wrapped -> prog;\n\
+         rule wrapped = quiet;\n\
+         silent rule quiet = \"(\" quiet \")\" | stmt;\n\
+         rule stmt = v:ID -> s;\n",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A binding name used more than once
+//
+// Generation keeps one accessor per name, so the cardinality it gets has to
+// cover *every* occurrence. Keeping the first was right for a choice and wrong
+// for a list.
+// ---------------------------------------------------------------------------
+
+fn card(rules: &str, label: &str, name: &str) -> nh_lower::Cardinality {
+    let l = build_str(&format!(
+        "grammar C;\n\
+         use operators::none;\n\
+         skip WS = \" \" | \"\\t\" | \"\\n\";\n\
+         token ALPHA = @ \"a\"..\"z\";\n\
+         token ID = @ ALPHA+;\n\
+         token NUM = @ \"0\"..\"9\";\n\
+         {rules}"
+    ));
+    binding(&l, label, name).cardinality
+}
+
+/// The head-and-tail list: one binding outside a repetition and the same name
+/// inside it.
+///
+/// This was the bug. The first occurrence is `One`, the second `Many`, and
+/// keeping the first gave an accessor returning a single node — so every item
+/// after the first was silently dropped. No error, no warning, one item where
+/// the grammar asks for a list.
+#[test]
+fn a_name_bound_inside_and_outside_a_repetition_is_a_list() {
+    assert_eq!(
+        card("rule r = items:ID (\",\" items:ID)* -> list;\n", "list", "items"),
+        nh_lower::Cardinality::Many
+    );
+}
+
+/// Two occurrences in sequence are two nodes, repetition or not.
+#[test]
+fn a_name_bound_twice_in_sequence_is_a_list() {
+    assert_eq!(
+        card("rule r = a:ID \",\" a:ID -> pair;\n", "pair", "a"),
+        nh_lower::Cardinality::Many
+    );
+}
+
+/// The case the old dedup was written for still collapses: the branches of a
+/// choice are alternatives, so exactly one of them binds `x`.
+#[test]
+fn a_name_bound_in_both_branches_of_a_choice_is_still_one() {
+    assert_eq!(
+        card("rule r = (\"a\" x:ID | \"b\" x:NUM) -> either;\n", "either", "x"),
+        nh_lower::Cardinality::One
+    );
+}
+
+/// And when only one branch binds it, it may not be there at all.
+#[test]
+fn a_name_bound_in_only_one_branch_is_optional() {
+    assert_eq!(
+        card("rule r = (\"a\" x:ID | \"b\") -> maybe;\n", "maybe", "x"),
+        nh_lower::Cardinality::Optional
+    );
+}
+
+/// A repetition inside the binding is still the binding's own.
+#[test]
+fn a_repetition_inside_the_binding_still_counts() {
+    assert_eq!(
+        card("rule r = items:ID* -> some;\n", "some", "items"),
+        nh_lower::Cardinality::Many
+    );
+    assert_eq!(
+        card("rule r = value:ID? -> maybe;\n", "maybe", "value"),
+        nh_lower::Cardinality::Optional
+    );
+}
+
+/// A name bound once, plainly, is unaffected.
+#[test]
+fn a_name_bound_once_is_one() {
+    assert_eq!(
+        card("rule r = value:ID -> only;\n", "only", "value"),
+        nh_lower::Cardinality::One
+    );
+}
+
+/// And the tags are really all there, so the `Vec` accessor has something to
+/// collect.
+///
+/// The cardinality decides whether generation emits `tagged` or `tagged_all`;
+/// this pins the other half — that the grammar tags every element, so choosing
+/// `tagged_all` actually recovers them. Together they are the difference
+/// between three arguments and one.
+#[test]
+fn every_element_of_a_repeated_binding_is_tagged() {
+    let l = build_str(
+        "grammar C;\n\
+         use operators::none;\n\
+         skip WS = \" \" | \"\\t\" | \"\\n\";\n\
+         token ALPHA = @ \"a\"..\"z\";\n\
+         token ID = @ ALPHA+;\n\
+         rule r = items:ID (\",\" items:ID)* -> list;\n",
+    );
+    let v = vm(&l.pest);
+    let mut pairs = v.parse("r", "a, b, c").expect("`a, b, c` should parse");
+    let node = pairs.next().expect("one `r` pair");
+
+    // **Direct** children, because that is what `tagged_all` scans. If the
+    // `("," items:ID)*` group put its elements one level down, the accessor
+    // would find only the first and the list would silently lose the rest —
+    // which is the bug this whole change is about, one layer lower.
+    let tagged = node
+        .into_inner()
+        .filter(|p| p.as_node_tag() == Some("items"))
+        .count();
+    assert_eq!(
+        tagged, 3,
+        "all three elements should be direct children carrying the tag"
+    );
+}
+
+/// A preset installs `atom atom;`, so it obliges the grammar to define that
+/// rule — and the obligation does not depend on `expr` being used anywhere.
+///
+/// This surprises people because the grammar never writes the word `atom`. The
+/// diagnostic points at the `use` line for that reason, and says which preset
+/// put the entry there.
+#[test]
+fn a_preset_says_where_the_atom_requirement_came_from() {
+    let out = lower_err(
+        "grammar A;\n\
+         use operators::core;\n\
+         skip WS = \" \";\n\
+         token ALPHA = @ \"a\"..\"z\";\n\
+         token ID = @ ALPHA+;\n\
+         rule program = SOI body:stmt* EOI -> program;\n\
+         rule stmt = v:ID \";\" -> s;\n",
+    );
+    assert!(out.contains("names `atom`, which is not defined"), "{out}");
+    assert!(out.contains("`use operators::core` supplies `atom atom;`"), "{out}");
+    // The remedies, because "define it" is not the only one.
+    assert!(out.contains("`atom NAME;`"), "{out}");
+    assert!(out.contains("use operators::none"), "{out}");
+    // And it points at the `use`, since that is what created the obligation.
+    assert!(out.contains("use operators::core;"), "{out}");
+}
+
+/// A hand-written table names its own atom, so the author *did* write the name
+/// and does not need telling where it came from.
+#[test]
+fn a_hand_written_table_gets_the_plain_help() {
+    let out = lower_err(
+        "grammar A;\n\
+         use operators::none;\n\
+         precedence { left \"+\" -> add; atom primary; }\n\
+         rule program = SOI body:expr EOI -> program;\n",
+    );
+    assert!(out.contains("names `primary`, which is not defined"), "{out}");
+    assert!(out.contains("add `rule primary = ...;`"), "{out}");
+    assert!(!out.contains("supplies"), "no preset to blame:\n{out}");
+}

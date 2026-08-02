@@ -44,6 +44,14 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # `Shared<T>` is `Rc` by default and `Arc` under `threadsafe`, so a
+      # handler that spells `Rc` compiles by luck and breaks the moment anyone
+      # turns the feature on. Every worked example named `Rc` directly until it
+      # was checked -- the default build could never have caught it, because
+      # the two are the same type there.
+      - name: The examples survive a thread-safe build
+        run: cargo build --workspace --all-targets --features nh-runtime/threadsafe
+
       # `nh init` scaffolds a project that must compile and run. These are
       # `#[ignore]`d locally because they invoke cargo recursively and are slow.
       - name: Scaffold end-to-end
@@ -78,10 +86,17 @@ jobs:
       - name: Generated output is current
         run: |
           set -euo pipefail
-          for e in config calc-interp basic-interp bytecode; do
+          for e in config calc-interp basic-interp bytecode pebble; do
             g=$(ls examples/$e/*.nh)
             ./target/debug/nh build "$g" \
               -o "examples/$e/src/$(basename "$g" .nh).pest" --rust "examples/$e/src"
+          done
+          # The VM twins additionally generate their operator implementation,
+          # so they must be regenerated with the same --target their build.rs
+          # uses or the check would compare against a file nobody wrote.
+          for e in vm-c vm-basic; do
+            ./target/debug/nh build "examples/$e/lang.nh" \
+              -o "examples/$e/src/lang.pest" --rust "examples/$e/src" --target nh-vm
           done
           ./target/debug/nh build examples/selfhost/nh.nh -o examples/selfhost/nh.pest
           if ! git diff --quiet; then

@@ -326,16 +326,43 @@ fn a_recovered_statement_is_shown_as_going_nowhere() {
 /// A rule with no `-> label` generates no handler — and everything inside it
 /// still routes somewhere.
 ///
-/// `examples/basic.nh` opens `rule program = SOI line+ EOI;`: no label, and
-/// `line+` bound to nothing. Walking only the *bindings* dropped the entire
-/// tree beneath it, so the trace was a bare `program` and nothing else. It also
-/// claimed `→ handlers/program.rs`, a file that does not exist.
+/// The original bug walked only the *bindings*, so an unlabelled rule dropped
+/// the entire tree beneath it: the trace was one bare line, and it claimed a
+/// `→ handlers/<rule>.rs` that does not exist.
+///
+/// This owns its grammar rather than pointing at `examples/basic.nh`, which is
+/// where it started. That grammar's entry rule was itself unlabelled *and
+/// wrong* — `line+` is any number of nodes, and a rule with no label stands in
+/// for exactly one — so the fixture and the bug went away together. Owning the
+/// grammar keeps the regression covered without depending on an example
+/// staying broken.
 #[test]
 fn an_unlabelled_rule_shows_what_is_inside_it() {
+    let dir = std::env::temp_dir()
+        .join("nh-trace-tests")
+        .join(format!("wrapper-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("w.nh");
+    // `wrapper` is legitimately transparent: exactly one node, so it stands in
+    // for `thing` and generates nothing of its own.
+    std::fs::write(
+        &path,
+        "grammar W;\n\
+         use operators::none;\n\
+         skip WS = \" \" | \"\\t\" | \"\\n\";\n\
+         token ALPHA = @ \"a\"..\"z\";\n\
+         token ID    = @ ALPHA+;\n\n\
+         rule program = SOI body:wrapper+ EOI -> program;\n\
+         rule wrapper = thing;\n\
+         rule thing   = name:ID \";\" -> named;\n",
+    )
+    .unwrap();
+
     let out = nh()
         .arg("trace")
-        .arg(repo("examples/basic.nh"))
-        .args(["--source", "PRINT \"hi\"\nX = 3\n"])
+        .arg(&path)
+        .args(["--source", "abc;\ndef;\n"])
         .output()
         .expect("running nh trace");
     assert!(
@@ -346,19 +373,14 @@ fn an_unlabelled_rule_shows_what_is_inside_it() {
     let s = String::from_utf8_lossy(&out.stdout);
 
     assert!(
-        !s.contains("handlers/program.rs"),
-        "`program` has no `-> label`, so there is no handler file for it:\n{s}"
-    );
-    assert!(
-        s.contains("no `-> label`"),
-        "and the trace should say why it routes nowhere:\n{s}"
+        !s.contains("handlers/wrapper.rs"),
+        "`wrapper` has no `-> label`, so there is no handler file for it:\n{s}"
     );
 
-    // The statements underneath are the point, and they were missing entirely.
-    assert!(s.contains("stmt_print"), "{s}");
-    assert!(s.contains("stmt_let"), "{s}");
-    assert!(s.contains("primary_str"), "arguments too:\n{s}");
-    assert!(s.contains("\\\"hi\\\""), "with their text:\n{s}");
+    // What is underneath is the point, and it was missing entirely.
+    assert!(s.contains("handlers/thing.rs"), "{s}");
+    assert!(s.contains("name: &str = \"abc\""), "arguments too:\n{s}");
+    assert!(s.contains("name: &str = \"def\""), "every one of them:\n{s}");
 }
 
 /// It works on the grammars this repository ships, which are not scaffolds.

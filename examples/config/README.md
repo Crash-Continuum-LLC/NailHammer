@@ -5,7 +5,7 @@ implemented across **many small files** with **no positional access** to the
 parse tree.
 
 ```console
-$ cargo run
+$ cargo run -p config-example -- examples/config/sample.conf
 {name: "nailhammer", version: 0.2, stable: false, notes: null, tags: [...], limits: {...}}
 ```
 

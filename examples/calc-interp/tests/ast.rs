@@ -6,9 +6,9 @@ use calc_interp::generated::ast;
 use calc_interp::{CalcParser, Rule};
 use nh_runtime::FileId;
 use pest::Parser;
-use std::rc::Rc;
+use nh_runtime::Shared;
 
-fn build(source: &str) -> Rc<ast::Program> {
+fn build(source: &str) -> Shared<ast::Program> {
     let pair = CalcParser::parse(Rule::program, source)
         .unwrap_or_else(|e| panic!("{source}\n{e}"))
         .next()
@@ -62,7 +62,7 @@ fn a_lazy_body_is_owned() {
     let ast::Stmt::Iff(i) = &*p.stmts[0] else {
         panic!("expected an if: {:?}", p.stmts[0]);
     };
-    let kept: Rc<ast::Stmt> = i.body.clone();
+    let kept: Shared<ast::Stmt> = i.body.clone();
     drop(p);
     assert!(matches!(&*kept, ast::Stmt::Eval(_)));
 }

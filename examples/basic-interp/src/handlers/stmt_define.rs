@@ -8,18 +8,17 @@
 //! could not have been written: the body could not outlive the call that
 //! received it (DESIGN.md §9).
 
-use std::rc::Rc;
 
-use nh_runtime::{Ctx, Name, Result};
+use nh_runtime::{Ctx, Name, Result, Shared};
 
 use crate::generated::ast::Line;
 use crate::{Interp, Value};
 
-pub fn run(host: &mut Interp, name: &Name, body: &[Rc<Line>], cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, name: &Name, body: &[Shared<Line>], cx: &mut Ctx) -> Result<Value> {
     if host.subs.contains_key(name.key()) {
         return cx.err(format!("`SUB {}` is already defined", name.text()));
     }
-    // Cloning a slice of `Rc` copies pointers, not the program.
+    // Cloning a slice of `Shared` copies pointers, not the program.
     host.subs.insert(name.key().to_string(), body.to_vec());
     Ok(Value::Nothing)
 }

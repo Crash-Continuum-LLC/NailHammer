@@ -184,9 +184,35 @@ fn emit_eval(out: &mut String, lowered: &Lowered) {
 
     for rule in &lowered.rules {
         match &rule.shape {
-            // An alias carries no node, so it needs no evaluator: callers
-            // resolve through it to whatever does.
-            RuleShape::Alias { .. } => {}
+            // An alias carries no node of its own, so this forwards to whatever
+            // does. `pub type Atom = Primary;` makes the two the same type, so
+            // there is nothing to convert — only a name to supply.
+            //
+            // It used to emit nothing, on the reasoning that callers resolve
+            // through the alias. Callers *of the tree* do; a binding onto the
+            // alias does not — `body:atom` generates a call to `eval_atom`, and
+            // that call had nothing to reach. Every shipped grammar's only
+            // alias is the operator table's `atom`, which the driver resolves
+            // separately, so nothing caught it.
+            RuleShape::Alias { child: Some(c) } => {
+                let f = ident(&rule.name);
+                let _ = writeln!(
+                    out,
+                    "/// `rule {}` delegates to `{c}`.\n\
+                     pub fn eval_{f}<H: Handlers>(\n\
+                    \x20   host: &mut H,\n\
+                    \x20   node: &{},\n\
+                    \x20   cx: &mut Ctx,\n\
+                     ) -> Result<H::Out> {{\n\
+                    \x20   eval_{}(host, node, cx)\n\
+                     }}\n",
+                    rule.name,
+                    type_name(&rule.name),
+                    ident(c)
+                );
+            }
+            // No child means lowering already reported it, or could not tell.
+            RuleShape::Alias { child: None } => {}
             RuleShape::Single { pest_rule } => {
                 if let Some(alt) = by_alt.get(pest_rule.as_str()) {
                     emit_eval_struct(out, &type_name(&rule.name), &ident(&rule.name), alt);

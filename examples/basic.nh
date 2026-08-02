@@ -48,9 +48,11 @@ precedence {
 }
 
 // Anchored, so a program that opens with a comment or a blank line parses.
-rule program = SOI line+ EOI;
+rule program = SOI body:line+ EOI -> program;
 
-rule line = label:NUMBER? body:stmt EOL -> pass;
+// `-> line` rather than `-> pass`: the label and the EOL are nodes too, so
+// there is no single child for a transparent rule to stand in for.
+rule line = label:NUMBER? body:stmt EOL -> line;
 
 rule stmt
   = "LET"? target:place_expr "=" value:expr -> let
@@ -62,7 +64,7 @@ rule stmt
   | "END"                                   -> end
   ;
 
-rule print_list = expr ((";" | ",") expr)*;
+rule print_list = items:expr ((";" | ",") items:expr)* -> items;
 
 // BASIC subscripts with parentheses, so an assignment target is either a bare
 // name or an array element.

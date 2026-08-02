@@ -29,6 +29,12 @@ not have to write.
 
 ```console
 $ nh init mylang && cd mylang && cargo run
+--- bytecode ---
+  0  LoadK { dst: 0, value: 4.0 }
+  1  StoreGlobal { name: "width", src: 0 }
+  ...
+ 99  Print { src: 3 }
+--- output ---
 28
 22
 5
@@ -45,9 +51,13 @@ $ nh init mylang && cd mylang && cargo run
 120
 ```
 
-That is a working interpreter: variables, arithmetic with real precedence,
+That is a working language: variables, arithmetic with real precedence,
 branches, three kinds of loop with `break`/`continue`, functions with recursion,
-and error recovery. Twenty handler files of a few lines each.
+and error recovery — in handler files of a few lines each.
+
+It compiles to bytecode and runs it, which is why the disassembly comes first.
+`nh init --interpreter` scaffolds a tree-walking interpreter instead; both
+shapes share the same grammar and print the same numbers.
 
 Run it at a prompt and it asks two questions — which syntax, and what to
 include — defaulting to exactly the above. In a script it takes those defaults
@@ -80,6 +90,10 @@ grammar Calc;
 
 use operators::core;          // supplies `expr`, precedence, short-circuiting
 
+skip WHITESPACE = " " | "\t" | "\r" | "\n";
+
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
 token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 
@@ -90,6 +104,13 @@ rule program = SOI stmts:stmt* EOI -> doc;
 rule stmt
   = "let" name:IDENT "=" value:expr ";" -> bind
   | "print" value:expr ";"              -> print
+  ;
+
+// `atom` is what the operator table folds expressions out of.
+rule atom
+  = value:NUMBER       -> num
+  | name:IDENT         -> var place
+  | "(" inner:expr ")" -> pass
   ;
 
 recover stmt sync ";";
@@ -127,13 +148,22 @@ fast as parsing:
 
 ```console
 $ nh trace mylang.nh --source 'if x > 1 { print 2 + 3 * 4; }'
-stmt_iff  → handlers/stmt_iff.rs
-  · "if" cond:expr lazy then:block lazy otherwise:else_tail? -> iff
-  cond: Self::Out   ⟵ evaluated first, by:
-    Operators::compare
-      · `>` — left-associative, precedence 3
-  then: &Rc<Block>   ⟵ lazy: the node, unevaluated
-  otherwise: Option<&Rc<ElseTail>>   ⟵ absent here
+program  → handlers/program.rs
+  · SOI stmts:stmt* EOI -> doc
+  stmts: Vec<Self::Out>   ⟵ evaluated first, by:
+    stmt_iff  → handlers/stmt_iff.rs
+      · "if" cond:expr lazy then:block lazy otherwise:else_tail? -> iff
+      cond: Self::Out   ⟵ evaluated first, by:
+        Operators::compare
+          · `>` — left-associative, precedence 4
+          lhs: Self::Out   ⟵ evaluated first, by:
+            primary_var  → handlers/primary_var.rs
+              · name:IDENT -> var place
+              name: &str = "x"
+          ...
+      then: &Shared<Block>   ⟵ lazy: the node, unevaluated
+        ...
+      otherwise: Option<&Shared<ElseTail>>   ⟵ absent here
 ```
 
 Children hang off the **argument** they produce, `lazy` parameters are marked as
@@ -217,7 +247,12 @@ so, rather than quietly compiling the previous grammar.
 > clone instead, or `cargo install --path crates/nh-cli` to put your working
 > copy on the `PATH`.
 
-Read [USAGE.md](USAGE.md) for the language reference, and
+**New here?** [**guide/**](guide/README.md) is a short book that builds a small
+language from an empty file: tokens, expressions you do not write, handlers,
+control flow, assignment, and error recovery. About an hour, and each chapter
+ends with something that runs.
+
+Then [USAGE.md](USAGE.md) for the language reference, and
 [DESIGN.md](DESIGN.md) for why it is built this way — including a running
 record of what went wrong and what that taught.
 
@@ -244,6 +279,7 @@ See [editors/vscode](editors/vscode).
 |---|---|
 | [`examples/config`](examples/config) | A config-language interpreter. Nine handlers, two or three lines each |
 | [`examples/calc-interp`](examples/calc-interp) | Operators end to end: precedence, short-circuiting, assignment, recovery, `lazy` |
+| [`examples/pebble`](examples/pebble) | The language the [guide](guide/README.md) builds, finished |
 | [`examples/selfhost`](examples/selfhost) | `.nh` describing `.nh`, parsing every grammar in this repo |
 | [`examples/basic-interp`](examples/basic-interp) | Mini BASIC: `PRINT`, `FOR`, `WHILE`, `SUB`, `FUNCTION`, `GOTO`, `EXIT`/`CONTINUE`. Recursion with local frames, stored bodies, jumps, signals, a from-scratch operator table |
 | [`examples/bytecode`](examples/bytecode) | A **bytecode compiler**, not an interpreter. `type Out = ()`, a stack machine, handlers emit instead of compute. Precedence becomes instruction order; `lazy` becomes jump patching |

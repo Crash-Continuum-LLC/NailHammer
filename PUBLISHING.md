@@ -1,7 +1,7 @@
 # Publishing
 
-The eight crates are on crates.io as of 0.2.0. Nothing about a *generated
-project* depends on that — it vendors its runtime and needs no registry — so
+The toolkit crates are on crates.io as of 0.2.0, joined by `nh-vm` at 0.4.0.
+Nothing about a *generated project* depends on that — it vendors its runtime and needs no registry — so
 publishing changed how people get `nh`, not what their projects carry.
 
 ## How people get it today
@@ -64,6 +64,7 @@ chain this document used to carry is no longer something anyone has to follow:
 ```
 nh-runtime → nh-syntax → nh-operators → nh-lower → nh-analysis
            → nh-codegen → nh-build → nh-cli
+nh-vm      (depends on none of them; a `--target nh-vm` language depends on it)
 ```
 
 Three things that are not obvious until they bite:
@@ -81,7 +82,7 @@ just re-running the command.
 **Nothing may reach outside its own package.** `nh-cli` embedded the runtime
 with `include_str!("../../nh-runtime/src/lib.rs")`, which resolves in a checkout
 and nowhere else; packaged for a registry it is a tarball with no siblings.
-Seven crates verified and the eighth failed to compile. The table now lives in
+Every crate but `nh-cli` verified, and `nh-cli` failed to compile. The table now lives in
 `nh-runtime` behind its `vendor` feature. `cargo publish --workspace --dry-run`
 is what surfaces this class of problem, and it is worth running before any
 release that moved files between crates.
@@ -102,9 +103,10 @@ in `.github/workflows/release.yml`.
 
 **Bump `workspace.package.version` first.** A tag whose name disagrees with
 `nh --version` is a small thing that costs real time later, when somebody is
-trying to work out which binary they have. The eight `version = "…"` pins in the
-root `Cargo.toml` move together: the workspace's own, and the seven path
-dependencies that must match it.
+trying to work out which binary they have. The `version = "…"` pins in the root
+`Cargo.toml` move together: the workspace's own, and the path dependencies that
+must match it. Counting them here would only go stale — `grep -c 'version = "'
+Cargo.toml` is the check.
 
 Since 0.2.0 a release is two artefacts, and the bump is what makes both
 possible. The tag builds the binaries; `cargo publish --workspace` puts the same

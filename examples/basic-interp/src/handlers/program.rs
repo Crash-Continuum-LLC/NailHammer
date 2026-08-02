@@ -17,15 +17,13 @@
 //!   come back to one it has already passed.
 
 use std::collections::HashMap;
-use std::rc::Rc;
-
-use nh_runtime::{Ctx, Result};
+use nh_runtime::{Ctx, Result, Shared};
 
 use crate::generated::ast::Line;
 use crate::generated::dispatch::Eval;
 use crate::{Interp, Value};
 
-pub fn run(host: &mut Interp, lines: &[Rc<Line>], cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, lines: &[Shared<Line>], cx: &mut Ctx) -> Result<Value> {
     let labels = jump_table(lines, cx)?;
     let mut pc = 0;
 
@@ -53,7 +51,7 @@ pub fn run(host: &mut Interp, lines: &[Rc<Line>], cx: &mut Ctx) -> Result<Value>
 }
 
 /// Line number → index, built by reading the lines rather than running them.
-fn jump_table(lines: &[Rc<Line>], cx: &mut Ctx) -> Result<HashMap<String, usize>> {
+fn jump_table(lines: &[Shared<Line>], cx: &mut Ctx) -> Result<HashMap<String, usize>> {
     let mut labels = HashMap::new();
     for (i, line) in lines.iter().enumerate() {
         if let Some(label) = &line.label {

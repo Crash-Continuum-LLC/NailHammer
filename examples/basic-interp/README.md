@@ -4,7 +4,7 @@
 `FUNCTION`/`RETURN`, `GOTO`, and `EXIT`/`CONTINUE`.
 
 ```console
-$ cargo run -p basic-interp -- sample.bas
+$ cargo run -p basic-interp -- examples/basic-interp/sample.bas
 times table
 
 1	1	1
@@ -30,7 +30,7 @@ rule stmt
 ```
 
 `lazy` changes `body` from `Vec<Value>` — already run, once, before the handler
-was called — into `&[Rc<Line>]`, which the handler runs itself:
+was called — into `&[Shared<Line>]`, which the handler runs itself:
 
 ```rust
 while (step > 0.0 && i <= limit) || (step < 0.0 && i >= limit) {

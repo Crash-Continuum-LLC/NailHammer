@@ -1,0 +1,26 @@
+[package]
+name = "nh-vm"
+description = "Extensible bytecode VM for NailHammer-generated languages"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+# Nothing. The VM is the thing every generated language runs on, so a dependency
+# here is a dependency every language inherits. See VM-DESIGN.md §8.4.
+[dependencies]
+
+# Benchmark only. A dev-dependency does not propagate, so a language built on
+# nh-vm still inherits nothing -- which is the point being tested: DashMap is
+# measured through the public SharedStore trait, from outside the crate.
+[dev-dependencies]
+dashmap = "6"
+
+[features]
+default = []

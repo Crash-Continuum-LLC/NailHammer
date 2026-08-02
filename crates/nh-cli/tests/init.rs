@@ -358,6 +358,7 @@ fn scaffolded_project_builds_and_runs() {
         SAMPLE_OUTPUT,
         "scaffolded interpreter produced the wrong answers:\n{stdout}"
     );
+
 }
 
 /// `--compiler` scaffolds the other shape, and it produces the **same answers**.
@@ -1268,3 +1269,40 @@ fn no_scaffold_mentions_a_runtime() {
     }
 }
 
+
+/// A new user's first build should be quiet.
+///
+/// The scaffold shipped two parameter-drift warnings of its own: the
+/// compiler-shape `param_list` and `more_param` named their first parameter
+/// `a`, where the grammar binds `first` and `name`. So the very first
+/// `cargo run` printed the tool telling the user off for something the tool
+/// had written.
+///
+/// This runs `nh build` directly rather than reading `cargo`'s output. The
+/// warning comes from `build.rs`, which cargo skips when nothing changed — so
+/// asserting on a cached `cargo run` passes whether the bug is present or not.
+/// The first version of this test did exactly that, and passed with the bug
+/// reintroduced.
+#[test]
+fn the_scaffold_does_not_ship_parameter_drift() {
+    for (name, extra) in [("driftc", &[][..]), ("drifti", &["--interpreter"][..])] {
+        let dir = scaffold_with(name, extra);
+        let src = dir.join("src");
+        let out = nh()
+            .args([
+                "build",
+                dir.join(format!("{name}.nh")).to_str().unwrap(),
+                "-o",
+                src.join(format!("{name}.pest")).to_str().unwrap(),
+                "--rust",
+                src.to_str().unwrap(),
+            ])
+            .output()
+            .expect("running nh build");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !stderr.contains("names its parameters differently"),
+            "the {name} scaffold ships parameter drift:\n{stderr}"
+        );
+    }
+}

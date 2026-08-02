@@ -104,7 +104,8 @@ nh init    [dir] [--name <name>] [--ext <ext>] [--style c|basic]
            [--with loops,functions] [--interpreter] [--force]
 nh check   <file.nh> [--quiet] [--deny-warnings] [--json]
 nh check   --lints
-nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>] [--prune [--force]]
+nh build   <file.nh> [-o <out.pest>] [--rust <src-dir>]
+           [--target <vm> [--host <ty>]] [--prune [--force]]
 nh trace   <file.nh> --source <text> | --input <file> [--rule <r>] [--json]
 nh explain <file.nh> [--source]
 ```
@@ -128,6 +129,12 @@ and nothing else, for editors and other tools.
 **`nh build`** writes the `.pest` next to your `.nh` unless `-o` says otherwise.
 Add `--rust <src-dir>` to also generate the AST, the evaluator, and handler
 stubs.
+
+**`--target`** generates the operator implementation instead of leaving it for
+you. Against a VM that owns execution, `add` means "emit the add instruction" in
+every language — a consequence rather than a decision — so it is generated, and a
+project targeting one writes **no operator code at all**. See
+[Compiling for a VM](#compiling-for-a-vm).
 
 **`nh trace`** shows what a program in *your* language routes to, and with what.
 It takes the program as `--source "text"` or `--input file`, starts at the first
@@ -193,9 +200,14 @@ $ nh check mylang.nh --json
 | `examples/calc-interp/` | Operators end to end, proved by tests |
 | `examples/basic-interp/` | Mini BASIC: loops, subroutines, functions, `GOTO` |
 | `examples/bytecode/` | The same idea compiled instead of interpreted — `type Out = ()`, a stack machine |
+| `examples/pebble/` | The language the [guide](guide/README.md) builds, finished |
 | `examples/selfhost/` | `.nh` describing `.nh` |
 
 ---
+
+> **Building your first language?** [`guide/`](guide/README.md) walks through
+> one from an empty file, in order, with each chapter ending in something that
+> runs. This document is the reference to reach for once you know the shape.
 
 ## Your first grammar
 
@@ -213,7 +225,7 @@ token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 
 reserved from IDENT { "let" }
 
-rule program = SOI stmt* EOI;
+rule program = SOI body:stmt* EOI -> program;
 
 rule stmt
   = "let" name:IDENT "=" value:expr ";" -> let
@@ -229,7 +241,12 @@ rule primary
   ;
 ```
 
-Two things in there are worth explaining before you go further.
+Three things in there are worth explaining before you go further.
+
+**The entry rule carries `-> program`.** A rule with no label has no node of its
+own and stands in for its single child, which `stmt*` is not — it is any number
+of them. Labelling it gives it a node, and gives you a handler that receives the
+whole program as a list. See [Alternatives](#alternatives) for the general rule.
 
 **There is no `expr` rule.** You did not forget it. `use operators::core` supplies
 `expr`, along with precedence, associativity, and short-circuit behaviour. What
@@ -386,6 +403,32 @@ the label does not need to repeat the rule name: `-> let` on `rule stmt` gives
 **`-> pass`** is a transparent passthrough. No handler is generated; the
 alternative evaluates to whatever its single child does.
 
+> **A transparent alternative must produce exactly one node**, because it has
+> none of its own and has to stand in for something. Leaving off a label — or
+> writing `-> pass` — is only legal when the body yields one node, from one
+> rule. Two things count as a node that are easy to miss:
+>
+> * **A token is a node.** `body:stmt EOL+ -> pass` looks like it names one
+>   child, but `EOL` produces a pair too, so the alternative yields two or more.
+> * **A repetition is any number of them.** `rule block = stmt*;` yields none,
+>   one, or many — never reliably one.
+>
+> Both are rejected by `nh check`, which names the count and the rule. The fix
+> is always the same: give the alternative a `-> label` so it gets a node of its
+> own.
+>
+> ```text
+> error: this alternative of `line` has `-> pass`, but produces 2 or more nodes
+>  --> basic.nh:8:13
+>   |
+> 8 | rule line = body:stmt EOL+ -> pass;
+>   |             ^^^^^^^^^^^^^^^^^^^^^^
+> help: an alternative with no label stands in for exactly one rule's node; give this one a `-> label` so it gets a node of its own
+> ```
+>
+> Literals and lookaheads produce nothing, so `"(" inner:expr ")" -> pass` is
+> one node and perfectly fine.
+
 **`place`** marks an alternative as assignable. It is only legal after a label,
 which is what keeps it distinguishable from a rule reference named `place`.
 
@@ -499,6 +542,14 @@ precedence override {
     left   "|>" below "||" lazy(rhs) -> pipe;
 }
 ```
+
+> **A preset commits you to one rule: `atom`.** Every preset's table ends with
+> `atom atom;`, so a grammar that says `use operators::c_style` must define
+> `rule atom = ...;` — and it must do so **even if it never mentions `expr`**,
+> because the table is installed by the `use`, not by being referenced. The
+> diagnostic points at the `use` line for that reason. Name a different rule
+> with `atom NAME;` in a `precedence override` block, or take no table at all
+> with `use operators::none`.
 
 Or write one from scratch, which is what a language unlike C needs:
 
@@ -807,7 +858,7 @@ Run in a terminal it asks two questions; run in a script it takes the defaults.
 Either way the same flags work:
 
 ```console
-$ nh init mylang --style basic --with loops,functions --compiler
+$ nh init mylang --style basic --with loops,functions
 ```
 
 **`--style`** is syntax. `c` gives braces and semicolons, `basic` gives a
@@ -820,7 +871,9 @@ equality.
 `continue`), `functions` (definitions, calls, parameters, `return`, recursion),
 or `all` / `none`.
 
-**`--compiler`** picks the other shape — see below.
+**`--interpreter`** picks the other shape — see below. The default is a bytecode
+compiler, which is faster and can suspend; `--interpreter` scaffolds a
+tree-walker instead.
 
 ### The styles share their handlers
 
@@ -829,7 +882,7 @@ than it looks. `WHILE cond ... WEND` and `while cond { }` bind the same names to
 the same shapes, so both scaffold the *same* `handlers/stmt_while.rs`:
 
 ```rust
-pub fn run(host: &mut Interp, cond: &Rc<Expr>, body: &Rc<Block>, cx: &mut Ctx)
+pub fn run(host: &mut Interp, cond: &Shared<Expr>, body: &Shared<Block>, cx: &mut Ctx)
 ```
 
 Change your mind about syntax later and you rewrite the grammar, not the
@@ -939,7 +992,7 @@ Without `lazy` a body would already be emitted before the handler could put a
 jump in front of it:
 
 ```rust
-pub fn run(host: &mut Interp, _cond: (), body: &Rc<Stmt>, cx: &mut Ctx) -> Result<()> {
+pub fn run(host: &mut Interp, _cond: (), body: &Shared<Stmt>, cx: &mut Ctx) -> Result<()> {
     let jump = host.emit_jump_if_false();   // cond's code is already emitted
     body.eval(host, cx)?;                   // emits the body here
     host.patch_to_here(jump);               // now its length is known
@@ -1010,6 +1063,110 @@ slot. Two things follow, and both are in the scaffold:
 * **Policy belongs on the host, not in a handler.** `stmt_for` never asks whether
   its counter is a slot or a global; `read_var` and `emit_increment` answer that,
   and they live in your `lib.rs`.
+
+## Compiling for a VM
+
+Everything above assumes your language brings its own semantics: you implement
+`Operators`, and `add` means whatever you write. That is right for a standalone
+language and wrong for one compiling to a machine somebody else owns, where the
+answer is fixed and writing it out is busywork.
+
+```console
+$ nh build mylang.nh -o src/mylang.pest --rust src --target nh-vm
+```
+
+or, from a `build.rs`:
+
+```rust
+nh_build::Builder::new("mylang.nh").target("nh-vm").run();
+```
+
+That writes `src/generated/vm_operators.rs` — the whole `Operators`
+implementation — and wires it into `generated/mod.rs` itself. There is nothing
+to `include!` and nothing to import: search your crate for `fn add` afterwards
+and there will not be one.
+
+**Add the machine to your `Cargo.toml`.** The generated file opens with
+`use nh_vm::{Cmp, Emitter, Op, Reg};`, so the crate has to be a dependency:
+
+```toml
+[dependencies]
+nh-vm = "0.4"
+```
+
+`nh init` does not add it, because targeting a VM is a decision you make after
+scaffolding rather than during it.
+
+What stays yours is what only you could have said: which operators exist, how
+they are spelled, their precedence and associativity — all already in the `.nh`
+table — and the handlers that lower your statements.
+
+### When the machine cannot do something
+
+A grammar can bind a role the target has no instruction for. That is not an
+error in your grammar and not a failure of the VM, and it is reported *now*
+rather than as a link error later:
+
+```console
+error: `%` binds the `rem` role, which nh-vm cannot execute
+error: `<<` binds the `shift` role, which nh-vm cannot execute
+2 role(s) have no instruction on `nh-vm`. Remove them from the operator table,
+or extend the VM.
+```
+
+Each is named with a spelling you actually typed. Remove the operator, or add
+the instruction to the machine.
+
+### Control flow needs `lazy`, and loops need it twice
+
+A handler receives its operands **already evaluated** — which for a compiler
+means *already emitted*. That is wrong for control flow, where the point is to
+put a jump in front of something:
+
+```
+| "if" "(" cond:expr ")" lazy body:block             -> iff
+| "while" "(" lazy cond:expr ")" lazy body:block     -> whilst
+```
+
+`if` needs it on the body: the jump that skips the body has to be emitted
+before the body is.
+
+**`while` needs it on both, and the condition is the one people miss.** A loop
+re-tests every iteration, so the condition's code belongs at the top of the
+loop — which means the handler has to know where the top *is* before the
+condition is emitted. An eager `cond` is already behind you, and the loop jumps
+back to the wrong place.
+
+The symptom is a loop that runs once, or forever, with nothing in the grammar
+looking wrong. If a handler needs to emit something *before* an operand, that
+operand is `lazy`.
+
+Defining a function is the same shape — its body is emitted behind a jump, so
+`lazy body:block` again.
+
+### `--host`
+
+The generated implementation is written for `crate::Interp`, which is what the
+scaffold calls its host. If yours is called something else, say so:
+
+```console
+$ nh build mylang.nh --rust src --target nh-vm --host crate::Compiler
+```
+
+### Both flags need `--rust`
+
+They select what is generated *into* the Rust output, so passing either without
+`--rust` is an error rather than a flag that quietly does nothing.
+
+### A worked pair
+
+`examples/vm-c` and `examples/vm-basic` are the same language in two syntaxes —
+braces and `&` against `END IF` and `AND`. They compile to identical bytecode,
+because they bind the same roles, and neither contains a line of operator code.
+Reading the two grammars side by side is the shortest explanation of what a
+target buys.
+
+---
 
 ## Writing handlers
 
@@ -1140,12 +1297,28 @@ you. Here is what each binding turns into:
 | `key:IDENT` | `&str` | The token's text |
 | `key:IDENT`, folding token | `&Name` | Text plus `.key()` |
 | `value:expr` | `Self::Out` | The sub-rule, **already evaluated** |
-| `lazy body:block` | `&Rc<Block>` | The sub-rule, **not** evaluated |
+| `lazy body:block` | `&Shared<Block>` | The sub-rule, **not** evaluated |
 | `x:y?` | `Option<..>` | |
 | `x:y*` | `&[..]` or `Vec<Self::Out>` | |
 
 Parameters appear in grammar order, and each one is documented on its own line
 above the stub. The signature alone tells you what the handler is working with.
+
+**Bind the same name more than once and you get one parameter covering all of
+them.** This is how to write a separated list without a helper rule:
+
+```nh
+rule arg_list = args:expr ("," args:expr)* -> args;
+```
+
+`args` is a single `Vec` holding every element, head included — there is no
+first-and-rest to join. The cardinality comes from all the occurrences together,
+so the outer one being singular does not make the accessor singular.
+
+A choice still collapses, because its branches are alternatives rather than
+additions: `("a" x:ID | "b" x:NUM)` binds `x` exactly once whichever branch
+matches, so `x` stays a single value. Bind it in only one branch and it becomes
+`Option`.
 
 `.key()` exists **only** on folding tokens. Calling it in a case-sensitive
 grammar is a compile error rather than a silent no-op, so a symbol-table lookup
@@ -1299,7 +1472,7 @@ rule stmt = "if" cond:expr "then" lazy body:stmt -> iff;
 ```
 
 ```rust
-pub fn run(host: &mut Interp, cond: Value, body: &Rc<Stmt>, cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, cond: Value, body: &Shared<Stmt>, cx: &mut Ctx) -> Result<Value> {
     if !host.truthy(&cond) {
         return Ok(cond);
     }
@@ -1318,7 +1491,7 @@ and `||` already use it. Hand-writing the test here is how `if 0 then ..` and
 to defer.
 
 **It works on repetitions**, which is what a loop needs. `lazy body:line*` gives
-`&[Rc<Line>]`, and the handler runs the whole list once per iteration:
+`&[Shared<Line>]`, and the handler runs the whole list once per iteration:
 
 ```rust
 while /* the loop condition */ {
@@ -1358,7 +1531,7 @@ That is what makes subroutines and functions possible:
 
 ```rust
 // handlers/stmt_define.rs — SUB name ... END SUB
-pub fn run(host: &mut Interp, name: &Name, body: &[Rc<Line>], cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, name: &Name, body: &[Shared<Line>], cx: &mut Ctx) -> Result<Value> {
     host.subs.insert(name.key().to_string(), body.to_vec());
     Ok(Value::Nothing)
 }
@@ -1447,7 +1620,7 @@ rule line    = label:NUMBER? body:stmt EOL*  -> line;
 ```
 
 ```rust
-pub fn run(host: &mut Interp, lines: &[Rc<Line>], cx: &mut Ctx) -> Result<Value> {
+pub fn run(host: &mut Interp, lines: &[Shared<Line>], cx: &mut Ctx) -> Result<Value> {
     let labels = jump_table(lines, cx)?;      // reads `line.label`, runs nothing
     let mut pc = 0;
     while pc < lines.len() {

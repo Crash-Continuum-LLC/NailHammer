@@ -29,6 +29,7 @@ pub struct Builder {
     pest_out: Option<PathBuf>,
     rust_out: Option<PathBuf>,
     deny_warnings: bool,
+    target: Option<String>,
 }
 
 impl Builder {
@@ -40,6 +41,7 @@ impl Builder {
             pest_out: None,
             rust_out: Some(PathBuf::from("src")),
             deny_warnings: false,
+            target: None,
         }
     }
 
@@ -62,6 +64,18 @@ impl Builder {
     /// Writes generated Rust here instead of `src/`.
     pub fn rust_output(mut self, path: impl Into<PathBuf>) -> Self {
         self.rust_out = Some(path.into());
+        self
+    }
+
+    /// Also generate operator emission for a VM (VM-DESIGN.md §7.2).
+    ///
+    /// With this, the project's `Operators` implementation is generated rather
+    /// than written: `add` means `Op::Add`, in every language, so there is
+    /// nothing for an author to fill in. A role the machine cannot execute
+    /// fails the build naming the role and a spelling that binds it, which is a
+    /// build script's whole job — say it now, not at link time.
+    pub fn target(mut self, name: impl Into<String>) -> Self {
+        self.target = Some(name.into());
         self
     }
 
@@ -155,8 +169,36 @@ impl Builder {
 
         if let Some(rust_out) = &self.rust_out {
             let root = self.root.join(rust_out);
-            let opts = nh_codegen::Options::default();
+            if let Some(name) = &self.target {
+                if nh_codegen::vm::target_by_name(name).is_none() {
+                    return Err(format!(
+                        "unknown target `{name}`; available: {}",
+                        nh_codegen::vm::TARGET_NAMES.join(", ")
+                    ));
+                }
+            }
+            let opts = nh_codegen::Options {
+                target: self.target.clone(),
+                ..nh_codegen::Options::default()
+            };
             let generated = nh_codegen::generate(&ast, &table, &lowered, &opts);
+
+            // Failing here is the right place: a build script that reports
+            // "this VM has no `Pow`" costs a rebuild, where the same mismatch
+            // found at link time costs an afternoon.
+            if !generated.unsupported.is_empty() {
+                let mut m = String::new();
+                for u in &generated.unsupported {
+                    m.push_str(&format!(
+                        "`{}` binds the `{}` role, which the target cannot execute\n",
+                        u.spelling, u.role
+                    ));
+                }
+                return Err(format!(
+                    "{m}\n{} role(s) have no instruction on this target.",
+                    generated.unsupported.len()
+                ));
+            }
 
             for file in &generated.files {
                 let path = root.join(&file.path);

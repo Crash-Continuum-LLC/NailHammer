@@ -114,16 +114,30 @@ fn emit_rule(
         // An alias carries no node of its own. Emitting a wrapper would put it
         // in every signature that mentions the rule, for nothing.
         RuleShape::Alias { child } => {
-            let target = child
-                .as_deref()
-                .map(|c| resolved_type(c, by_name))
-                .unwrap_or_else(|| "Unresolved".to_string());
+            // No child means nothing to delegate to. Lowering rejects almost
+            // every way of getting here, so this is a backstop rather than the
+            // diagnostic — but it has to say something, because what it used to
+            // emit was `pub type X = Unresolved;` and a call to a `build_x` it
+            // never defined. That surfaced as two "cannot find" errors in
+            // generated code, naming neither the rule nor the fix.
+            let Some(child) = child.as_deref() else {
+                let _ = writeln!(
+                    out,
+                    "compile_error!(\n\
+                    \x20   \"`rule {}` has no `-> label` and no single child to \\\n\
+                    \x20    stand in for, so there is no type it could be. Give it a \\\n\
+                    \x20    `-> label` so it gets a node of its own.\"\n\
+                     );\n",
+                    rule.name
+                );
+                return;
+            };
             let _ = writeln!(
                 out,
-                "/// `rule {}` delegates to `{}`, so it is that type.\n\
-                 pub type {name} = {target};\n",
+                "/// `rule {}` delegates to `{child}`, so it is that type.\n\
+                 pub type {name} = {};\n",
                 rule.name,
-                child.as_deref().unwrap_or("?")
+                resolved_type(child, by_name)
             );
         }
 
