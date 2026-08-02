@@ -6,15 +6,19 @@
 // One module per labelled alternative. Each is a small file you own;
 // this list is regenerated so a new alternative wires itself up.
 
+pub mod atom_call;
 pub mod atom_name;
 pub mod atom_number;
 pub mod atom_point;
 pub mod atom_text;
 pub mod block;
+pub mod exprs;
 pub mod program;
 pub mod stmt_branch;
 pub mod stmt_declare;
+pub mod stmt_define;
 pub mod stmt_evaluate;
 pub mod stmt_frame;
+pub mod stmt_give;
 pub mod stmt_loop;
 pub mod stmt_show;

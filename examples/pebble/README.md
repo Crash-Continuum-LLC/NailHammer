@@ -15,15 +15,17 @@ taller than wide
 | (4, 6) |
 | true   |
 +--------+
+120
 ```
 
 ## What is here
 
 | Path | | Chapter |
 |---|---|---|
-| `pebble.nh` | The grammar. The only description of the language | 2–8 |
-| `src/lib.rs` | `Value`, `Interp`, and the operator semantics | 4, 6, 7 |
-| `src/handlers/` | One file per labelled alternative | 4–8 |
+| `pebble.nh` | The grammar. The only description of the language | 2–10 |
+| `src/lib.rs` | `Value`, `Interp`, frames, and the operator semantics | 4, 6, 7, 9 |
+| `src/handlers/` | One file per labelled alternative | 4–10 |
+| `tests/run.rs` | Every test runs a program and checks what it printed | 13 |
 | `src/main.rs` | Where source comes from and where errors go | — |
 | `src/generated/` | Views, dispatch, the owned AST. Never edited | — |
 
@@ -39,13 +41,19 @@ workspace member, so CI regenerates it, compiles it, runs clippy over it, and
 builds it against `nh-runtime/threadsafe`. A snippet in the book that stopped
 matching reality would have to stop matching this first.
 
-## The two features the book adds last
+## Functions
 
-**A type.** `(4, 2)` is a `Value::Point`. Chapter 7 walks through every site it
+`fn`, `return`, recursion, and one frame per call so a recursive `fact` cannot
+overwrite its caller's variables. `return` is a **signal** — an `Err` that is
+not a failure — which is the same mechanism `break` and `continue` would use.
+
+## The two features the book adds after that
+
+**A type.** `(4, 2)` is a `Value::Point`. Chapter 9 walks through every site it
 touches, including the three the compiler does *not* make you visit.
 
 **A block form.** `begin frame … end frame` collects everything shown inside and
-draws a border round it. Chapter 8 uses it to answer why a body that runs
+draws a border round it. Chapter 10 uses it to answer why a body that runs
 exactly once still needs `lazy`: because `frame` wraps its body, and "around" is
 impossible once the body has already run.
 

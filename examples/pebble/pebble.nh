@@ -11,7 +11,7 @@ token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 token TEXT   = @ "\"" (!"\"" ANY)* "\"";
 
-reserved from IDENT { "let" "show" "if" "else" "while" "not" "begin" "end" "frame" }
+reserved from IDENT { "let" "show" "if" "else" "while" "not" "begin" "end" "frame" "fn" "return" }
 
 rule program = SOI body:stmt* EOI -> program;
 
@@ -21,6 +21,9 @@ rule stmt
   | "if" cond:expr lazy then:block
       lazy otherwise:else_tail?                  -> branch
   | "while" lazy cond:expr lazy body:block       -> loop
+  | "fn" name:IDENT "(" (params:IDENT ","?)* ")"
+      lazy body:block                            -> define
+  | "return" value:expr? ";"                     -> give
   | "begin" "frame" lazy body:stmt* "end" "frame" -> frame
   | value:expr ";"                               -> evaluate
   ;
@@ -32,9 +35,12 @@ rule block = "{" body:stmt* "}" -> block;
 rule atom
   = value:NUMBER        -> number
   | text:TEXT           -> text
+  | name:IDENT "(" args:exprs? ")" -> call
   | name:IDENT          -> name place
   | "(" x:expr "," y:expr ")" -> point
   | "(" inner:expr ")"  -> pass
   ;
+
+rule exprs = args:expr ("," args:expr)* -> some;
 
 recover stmt sync ";" | "}";

@@ -19,27 +19,31 @@ expr = { nh_pre_op* ~ atom ~ (nh_bin_op ~ nh_pre_op* ~ atom)* }
 // Rules
 program = { SOI ~ (#body = stmt)* ~ EOI }
 stmt = { nh_ok_stmt | nh_error_stmt }
-nh_ok_stmt = { stmt_declare | stmt_show | stmt_branch | stmt_loop | stmt_frame | stmt_evaluate }
+nh_ok_stmt = { stmt_declare | stmt_show | stmt_branch | stmt_loop | stmt_define | stmt_give | stmt_frame | stmt_evaluate }
 stmt_declare = { nh_kw_let ~ #name = IDENT ~ "=" ~ #value = expr ~ ";" }
 stmt_show = { nh_kw_show ~ #value = expr ~ ";" }
 stmt_branch = { nh_kw_if ~ #cond = expr ~ #then = block ~ (#otherwise = else_tail)? }
 stmt_loop = { nh_kw_while ~ #cond = expr ~ #body = block }
+stmt_define = { nh_kw_fn ~ #name = IDENT ~ "(" ~ (#params = IDENT ~ ","?)* ~ ")" ~ #body = block }
+stmt_give = { nh_kw_return ~ (#value = expr)? ~ ";" }
 stmt_frame = { nh_kw_begin ~ nh_kw_frame ~ (#body = stmt)* ~ nh_kw_end ~ nh_kw_frame }
 stmt_evaluate = { #value = expr ~ ";" }
 else_tail = { nh_kw_else ~ #body = block }
 block = { "{" ~ (#body = stmt)* ~ "}" }
-atom = { atom_number | atom_text | atom_name | atom_point | "(" ~ #inner = expr ~ ")" }
+atom = { atom_number | atom_text | atom_call | atom_name | atom_point | "(" ~ #inner = expr ~ ")" }
 atom_number = { #value = NUMBER_ }
 atom_text = { #text = TEXT }
+atom_call = { #name = IDENT ~ "(" ~ (#args = exprs)? ~ ")" }
 atom_name = { #name = IDENT }
 atom_point = { "(" ~ #x = expr ~ "," ~ #y = expr ~ ")" }
+exprs = { #args = expr ~ ("," ~ #args = expr)* }
 
 // ---------------------------------------------------------------------------
 // Generated support rules
 // ---------------------------------------------------------------------------
 
 nh_cont_IDENT = _{ "_" | ALPHA | DIGIT }
-nh_reserved_IDENT = @{ ("begin" | "frame" | "while" | "else" | "show" | "end" | "let" | "not" | "if") ~ !nh_cont_IDENT }
+nh_reserved_IDENT = @{ ("return" | "begin" | "frame" | "while" | "else" | "show" | "end" | "let" | "not" | "fn" | "if") ~ !nh_cont_IDENT }
 nh_op_bang_eq = @{ "!=" }
 nh_op_amp_amp = @{ "&&" }
 nh_op_lt_eq = @{ "<=" }
@@ -64,5 +68,7 @@ nh_kw_let = @{ "let" ~ !nh_cont_IDENT }
 nh_kw_show = @{ "show" ~ !nh_cont_IDENT }
 nh_kw_if = @{ "if" ~ !nh_cont_IDENT }
 nh_kw_while = @{ "while" ~ !nh_cont_IDENT }
+nh_kw_fn = @{ "fn" ~ !nh_cont_IDENT }
+nh_kw_return = @{ "return" ~ !nh_cont_IDENT }
 nh_kw_begin = @{ "begin" ~ !nh_cont_IDENT }
 nh_kw_frame = @{ "frame" ~ !nh_cont_IDENT }

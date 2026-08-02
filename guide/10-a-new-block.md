@@ -127,7 +127,7 @@ Note the `if result.is_err() { break; }`. A construct that runs statements is
 responsible for what happens when one fails. Frame stops at the first error and
 returns it — but it still draws the border, because the output produced before
 the failure is worth seeing. That is the same reasoning as `main` printing a
-partially-recovered run's output in [chapter 10](10-errors.md).
+partially-recovered run's output in [chapter 12](12-errors.md).
 
 ## 6. It works
 
@@ -182,4 +182,4 @@ after
 
 ---
 
-Next: [Changing what you have](09-changing-what-you-have.md).
+Next: [Changing what you have](11-changing-what-you-have.md).

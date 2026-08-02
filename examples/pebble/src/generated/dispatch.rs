@@ -250,6 +250,16 @@ pub trait Handlers: Operators + Sized {
     /// * `body` — the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
     fn stmt_loop(&mut self, cond: &Shared<Expr>, body: &Shared<Block>, cx: &mut Ctx) -> Result<Self::Out>;
 
+    /// `stmt_define` — from `rule stmt = "fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define`.
+    /// * `name` — the text of the `IDENT` token
+    /// * `params` — the text of the `IDENT` token (repeated in the grammar)
+    /// * `body` — the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
+    fn stmt_define(&mut self, name: &str, params: &[String], body: &Shared<Block>, cx: &mut Ctx) -> Result<Self::Out>;
+
+    /// `stmt_give` — from `rule stmt = "return" value:expr? ";" -> give`.
+    /// * `value` — the value of the `expr` rule, already evaluated (optional in the grammar)
+    fn stmt_give(&mut self, value: Option<Self::Out>, cx: &mut Ctx) -> Result<Self::Out>;
+
     /// `stmt_frame` — from `rule stmt = "begin" "frame" lazy body:stmt* "end" "frame" -> frame`.
     /// * `body` — the `stmt` rule, **unevaluated** — `.eval(host, cx)?` runs it (repeated in the grammar)
     fn stmt_frame(&mut self, body: &[Shared<Stmt>], cx: &mut Ctx) -> Result<Self::Out>;
@@ -270,6 +280,11 @@ pub trait Handlers: Operators + Sized {
     /// * `text` — the text of the `TEXT` token
     fn atom_text(&mut self, text: &str, cx: &mut Ctx) -> Result<Self::Out>;
 
+    /// `atom_call` — from `rule atom = name:IDENT "(" args:exprs? ")" -> call`.
+    /// * `name` — the text of the `IDENT` token
+    /// * `args` — the value of the `exprs` rule, already evaluated (optional in the grammar)
+    fn atom_call(&mut self, name: &str, args: Option<Self::Out>, cx: &mut Ctx) -> Result<Self::Out>;
+
     /// `atom_name` — from `rule atom = name:IDENT -> name place`.
     /// * `name` — the text of the `IDENT` token
     fn atom_name(&mut self, name: &str, cx: &mut Ctx) -> Result<Self::Out>;
@@ -278,6 +293,10 @@ pub trait Handlers: Operators + Sized {
     /// * `x` — the value of the `expr` rule, already evaluated
     /// * `y` — the value of the `expr` rule, already evaluated
     fn atom_point(&mut self, x: Self::Out, y: Self::Out, cx: &mut Ctx) -> Result<Self::Out>;
+
+    /// `exprs` — from `rule exprs = args:expr ("," args:expr)* -> some`.
+    /// * `args` — the value of the `expr` rule, already evaluated (repeated in the grammar; items that failed and were already reported are omitted)
+    fn exprs(&mut self, args: Vec<Self::Out>, cx: &mut Ctx) -> Result<Self::Out>;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +354,8 @@ pub fn eval_stmt<H: Handlers>(host: &mut H, node: &Stmt, cx: &mut Ctx) -> Result
         Stmt::Show(n) => eval_stmt_show(host, n, cx),
         Stmt::Branch(n) => eval_stmt_branch(host, n, cx),
         Stmt::Loop(n) => eval_stmt_loop(host, n, cx),
+        Stmt::Define(n) => eval_stmt_define(host, n, cx),
+        Stmt::Give(n) => eval_stmt_give(host, n, cx),
         Stmt::Frame(n) => eval_stmt_frame(host, n, cx),
         Stmt::Evaluate(n) => eval_stmt_evaluate(host, n, cx),
         // A region the parse recovered from: report once, then
@@ -457,6 +478,58 @@ impl Eval for StmtLoop {
     }
 }
 
+/// Evaluates `stmt`, from `"fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define`.
+pub fn eval_stmt_define<H: Handlers>(host: &mut H, node: &StmtDefine, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_stmt_define_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_stmt_define_inner<H: Handlers>(
+    host: &mut H,
+    node: &StmtDefine,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let name = &node.name;
+    let params = &node.params;
+    let body = &node.body;
+    host.stmt_define(name, params, body, cx)
+}
+
+impl Eval for StmtDefine {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_stmt_define(host, self, cx)
+    }
+}
+
+/// Evaluates `stmt`, from `"return" value:expr? ";" -> give`.
+pub fn eval_stmt_give<H: Handlers>(host: &mut H, node: &StmtGive, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_stmt_give_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_stmt_give_inner<H: Handlers>(
+    host: &mut H,
+    node: &StmtGive,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let value = match &node.value { Some(n) => Some(eval_expr(host, n, cx)?), None => None };
+    host.stmt_give(value, cx)
+}
+
+impl Eval for StmtGive {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_stmt_give(host, self, cx)
+    }
+}
+
 /// Evaluates `stmt`, from `"begin" "frame" lazy body:stmt* "end" "frame" -> frame`.
 pub fn eval_stmt_frame<H: Handlers>(host: &mut H, node: &StmtFrame, cx: &mut Ctx) -> Result<H::Out> {
     // Entering the node's span is what makes `cx.err(..)` inside the
@@ -556,6 +629,7 @@ pub fn eval_atom<H: Handlers>(host: &mut H, node: &Atom, cx: &mut Ctx) -> Result
     match node {
         Atom::Number(n) => eval_atom_number(host, n, cx),
         Atom::Text(n) => eval_atom_text(host, n, cx),
+        Atom::Call(n) => eval_atom_call(host, n, cx),
         Atom::Name(n) => eval_atom_name(host, n, cx),
         Atom::Point(n) => eval_atom_point(host, n, cx),
         Atom::Expr(n) => eval_expr(host, n, cx),
@@ -618,6 +692,32 @@ impl Eval for AtomText {
     }
 }
 
+/// Evaluates `atom`, from `name:IDENT "(" args:exprs? ")" -> call`.
+pub fn eval_atom_call<H: Handlers>(host: &mut H, node: &AtomCall, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_atom_call_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_atom_call_inner<H: Handlers>(
+    host: &mut H,
+    node: &AtomCall,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let name = &node.name;
+    let args = match &node.args { Some(n) => Some(eval_exprs(host, n, cx)?), None => None };
+    host.atom_call(name, args, cx)
+}
+
+impl Eval for AtomCall {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_atom_call(host, self, cx)
+    }
+}
+
 /// Evaluates `atom`, from `name:IDENT -> name place`.
 pub fn eval_atom_name<H: Handlers>(host: &mut H, node: &AtomName, cx: &mut Ctx) -> Result<H::Out> {
     // Entering the node's span is what makes `cx.err(..)` inside the
@@ -666,6 +766,41 @@ fn eval_atom_point_inner<H: Handlers>(
 impl Eval for AtomPoint {
     fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
         eval_atom_point(host, self, cx)
+    }
+}
+
+/// Evaluates `exprs`, from `args:expr ("," args:expr)* -> some`.
+pub fn eval_exprs<H: Handlers>(host: &mut H, node: &Exprs, cx: &mut Ctx) -> Result<H::Out> {
+    // Entering the node's span is what makes `cx.err(..)` inside the
+    // handler locate itself with no span bookkeeping (DESIGN.md §7).
+    cx.enter(node.span);
+    let result = eval_exprs_inner(host, node, cx);
+    cx.leave();
+    result
+}
+
+fn eval_exprs_inner<H: Handlers>(
+    host: &mut H,
+    node: &Exprs,
+    cx: &mut Ctx,
+) -> Result<H::Out> {
+    let args = {
+                let mut v = Vec::new();
+                for n in &node.args {
+                    match eval_expr(host, n, cx) {
+                        Ok(x) => v.push(x),
+                        Err(Error::AlreadyReported) => continue,
+                        Err(e) => return Err(e),
+                    }
+                }
+                v
+            };
+    host.exprs(args, cx)
+}
+
+impl Eval for Exprs {
+    fn eval<H: Handlers>(&self, host: &mut H, cx: &mut Ctx) -> Result<H::Out> {
+        eval_exprs(host, self, cx)
     }
 }
 
@@ -890,6 +1025,22 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_loop::run(self, cond, body, cx)
             }
+            fn stmt_define(
+                &mut self,
+                name: &str,
+                params: &[String],
+                body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_define::run(self, name, params, body, cx)
+            }
+            fn stmt_give(
+                &mut self,
+                value: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_give::run(self, value, cx)
+            }
             fn stmt_frame(
                 &mut self,
                 body: &[::nh_runtime::Shared<$crate::generated::ast::Stmt>],
@@ -925,6 +1076,14 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::atom_text::run(self, text, cx)
             }
+            fn atom_call(
+                &mut self,
+                name: &str,
+                args: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::atom_call::run(self, name, args, cx)
+            }
             fn atom_name(
                 &mut self,
                 name: &str,
@@ -939,6 +1098,13 @@ macro_rules! nh_handlers {
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::atom_point::run(self, x, y, cx)
+            }
+            fn exprs(
+                &mut self,
+                args: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::exprs::run(self, args, cx)
             }
         }
         impl $crate::generated::dispatch::ShortCircuit for $host {
@@ -1013,6 +1179,22 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::stmt_loop::run(self, cond, body, cx)
             }
+            fn stmt_define(
+                &mut self,
+                name: &str,
+                params: &[String],
+                body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_define::run(self, name, params, body, cx)
+            }
+            fn stmt_give(
+                &mut self,
+                value: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::stmt_give::run(self, value, cx)
+            }
             fn stmt_frame(
                 &mut self,
                 body: &[::nh_runtime::Shared<$crate::generated::ast::Stmt>],
@@ -1048,6 +1230,14 @@ macro_rules! nh_handlers {
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::atom_text::run(self, text, cx)
             }
+            fn atom_call(
+                &mut self,
+                name: &str,
+                args: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::atom_call::run(self, name, args, cx)
+            }
             fn atom_name(
                 &mut self,
                 name: &str,
@@ -1062,6 +1252,13 @@ macro_rules! nh_handlers {
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
                 $crate::handlers::atom_point::run(self, x, y, cx)
+            }
+            fn exprs(
+                &mut self,
+                args: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
+                cx: &mut ::nh_runtime::Ctx,
+            ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
+                $crate::handlers::exprs::run(self, args, cx)
             }
         }
     };

@@ -17,19 +17,21 @@ token NUMBER = @ DIGIT+ ("." DIGIT+)?;
 token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
 token TEXT   = @ "\"" (!"\"" ANY)* "\"";
 
-reserved from IDENT { "let" "show" "if" "else" "while" "not"
-                      "begin" "end" "frame" }
+reserved from IDENT { "let" "show" "if" "else" "while" "not" "begin" "end" "frame" "fn" "return" }
 
 rule program = SOI body:stmt* EOI -> program;
 
 rule stmt
-  = "let" name:IDENT "=" value:expr ";"           -> declare
-  | "show" value:expr ";"                         -> show
+  = "let" name:IDENT "=" value:expr ";"          -> declare
+  | "show" value:expr ";"                        -> show
   | "if" cond:expr lazy then:block
-      lazy otherwise:else_tail?                   -> branch
-  | "while" lazy cond:expr lazy body:block        -> loop
+      lazy otherwise:else_tail?                  -> branch
+  | "while" lazy cond:expr lazy body:block       -> loop
+  | "fn" name:IDENT "(" (params:IDENT ","?)* ")"
+      lazy body:block                            -> define
+  | "return" value:expr? ";"                     -> give
   | "begin" "frame" lazy body:stmt* "end" "frame" -> frame
-  | value:expr ";"                                -> evaluate
+  | value:expr ";"                               -> evaluate
   ;
 
 rule else_tail = "else" body:block -> pass;
@@ -37,32 +39,25 @@ rule else_tail = "else" body:block -> pass;
 rule block = "{" body:stmt* "}" -> block;
 
 rule atom
-  = value:NUMBER              -> number
-  | text:TEXT                 -> text
-  | name:IDENT                -> name place
+  = value:NUMBER        -> number
+  | text:TEXT           -> text
+  | name:IDENT "(" args:exprs? ")" -> call
+  | name:IDENT          -> name place
   | "(" x:expr "," y:expr ")" -> point
-  | "(" inner:expr ")"        -> pass
+  | "(" inner:expr ")"  -> pass
   ;
+
+rule exprs = args:expr ("," args:expr)* -> some;
 
 recover stmt sync ";" | "}";
 ```
 
 ## What that generated
 
-Twelve handler files, one per labelled alternative:
+Sixteen handler files, one per labelled alternative — `else_tail` gets none,
+because `-> pass` is transparent.
 
-```
-handlers/program.rs        handlers/stmt_declare.rs   handlers/atom_number.rs
-handlers/block.rs          handlers/stmt_show.rs      handlers/atom_text.rs
-                           handlers/stmt_branch.rs    handlers/atom_name.rs
-                           handlers/stmt_loop.rs      handlers/atom_point.rs
-                           handlers/stmt_frame.rs
-                           handlers/stmt_evaluate.rs
-```
-
-`else_tail` gets none — `-> pass` is transparent.
-
-And their signatures, which are the book's argument in one place:
+Their signatures are the book's argument in one place:
 
 ```rust
 program        (host, body: Vec<Value>,           cx)
@@ -75,20 +70,28 @@ stmt_branch    (host, cond: Value,
                       otherwise: Option<&Shared<ElseTail>>, cx)
 stmt_loop      (host, cond: &Shared<Expr>,
                       body: &Shared<Block>,       cx)
+stmt_define    (host, name: &str, params: &[String],
+                      body: &Shared<Block>,       cx)
+stmt_give      (host, value: Option<Value>,       cx)
 stmt_frame     (host, body: &[Shared<Stmt>],      cx)
 atom_number    (host, value: &str,                cx)
 atom_text      (host, text: &str,                 cx)
 atom_name      (host, name: &str,                 cx)
 atom_point     (host, x: Value, y: Value,         cx)
+atom_call      (host, name: &str, args: Option<Value>, cx)
+exprs          (host, args: Vec<Value>,           cx)
 ```
 
-Every parameter name came from a binding. Every type came from a cardinality or
-a `lazy`. Nothing was written twice, and nothing indexes a parse tree.
+Every parameter name came from a binding. Every type came from a cardinality, a
+`lazy`, or the difference between a name and a value. Nothing was written twice,
+and nothing indexes a parse tree.
 
-Read that list top to bottom and the language is visible in it. `stmt_branch`
-and `stmt_loop` get their bodies unrun because they choose *whether* to run
-them. `stmt_frame` gets a whole slice unrun because it wraps them. Everything
-else gets values, because everything else is arithmetic.
+Read the list top to bottom and the language is visible in it. `stmt_branch` and
+`stmt_loop` get their bodies unrun because they choose *whether* to run them.
+`stmt_frame` gets a slice unrun because it wraps them. `stmt_define` gets one
+unrun because it stores it for later. `params` is `&[String]` while `args` is
+`Vec<Value>`, because a definition binds names and a call binds values.
+Everything else gets values, because everything else is arithmetic.
 
 ## The sample program
 
@@ -124,6 +127,13 @@ begin frame
   show a + b;
   show a == (3, 4);
 end frame
+
+fn fact(n) {
+  if n < 2 { return 1; }
+  return n * fact(n - 1);
+}
+
+show fact(5);
 ```
 
 ```console
@@ -137,6 +147,7 @@ taller than wide
 | (4, 6) |
 | true   |
 +--------+
+120
 ```
 
 ## Running it

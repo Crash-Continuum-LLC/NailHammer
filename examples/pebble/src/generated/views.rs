@@ -244,6 +244,103 @@ impl<'i> StmtLoopView<'i> {
     }
 }
 
+/// One matched `stmt_define`.
+///
+/// From this alternative of `rule stmt`:
+///
+/// ```text
+/// "fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define
+/// ```
+#[derive(Clone, Debug)]
+pub struct StmtDefineView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for StmtDefineView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        StmtDefineView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> StmtDefineView<'i> {
+
+    /// `name` — the `IDENT` token.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `name: &str`:
+    /// the text of the `IDENT` token
+    pub fn name(&self) -> Node<'i, Rule> {
+        self.node.tagged("name").expect(
+            "the grammar guarantees `name` is present; regenerate if it changed",
+        )
+    }
+
+    /// `params` — the `IDENT` token.
+    /// Repeated in the grammar (`*` or `+`), so this may be empty.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `params: &[String]`:
+    /// the text of the `IDENT` token (repeated in the grammar)
+    pub fn params(&self) -> Vec<Node<'i, Rule>> {
+        self.node.tagged_all("params")
+    }
+
+    /// `body` — the `block` rule.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `body: &Shared<Block>`:
+    /// the `block` rule, **unevaluated** — `.eval(host, cx)?` runs it
+    pub fn body(&self) -> Node<'i, Rule> {
+        self.node.tagged("body").expect(
+            "the grammar guarantees `body` is present; regenerate if it changed",
+        )
+    }
+}
+
+/// One matched `stmt_give`.
+///
+/// From this alternative of `rule stmt`:
+///
+/// ```text
+/// "return" value:expr? ";" -> give
+/// ```
+#[derive(Clone, Debug)]
+pub struct StmtGiveView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for StmtGiveView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        StmtGiveView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> StmtGiveView<'i> {
+
+    /// `value` — the `expr` rule.
+    /// Optional in the grammar (`?`), so this may be `None`.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `value: Option<Self::Out>`:
+    /// the value of the `expr` rule, already evaluated (optional in the
+    /// grammar)
+    pub fn value(&self) -> Option<Node<'i, Rule>> {
+        self.node.tagged("value")
+    }
+}
+
 /// One matched `stmt_frame`.
 ///
 /// From this alternative of `rule stmt`:
@@ -434,6 +531,55 @@ impl<'i> AtomTextView<'i> {
     }
 }
 
+/// One matched `atom_call`.
+///
+/// From this alternative of `rule atom`:
+///
+/// ```text
+/// name:IDENT "(" args:exprs? ")" -> call
+/// ```
+#[derive(Clone, Debug)]
+pub struct AtomCallView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for AtomCallView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        AtomCallView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> AtomCallView<'i> {
+
+    /// `name` — the `IDENT` token.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `name: &str`:
+    /// the text of the `IDENT` token
+    pub fn name(&self) -> Node<'i, Rule> {
+        self.node.tagged("name").expect(
+            "the grammar guarantees `name` is present; regenerate if it changed",
+        )
+    }
+
+    /// `args` — the `exprs` rule.
+    /// Optional in the grammar (`?`), so this may be `None`.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `args: Option<Self::Out>`:
+    /// the value of the `exprs` rule, already evaluated (optional in the
+    /// grammar)
+    pub fn args(&self) -> Option<Node<'i, Rule>> {
+        self.node.tagged("args")
+    }
+}
+
 /// One matched `atom_name`.
 ///
 /// From this alternative of `rule atom`:
@@ -518,6 +664,44 @@ impl<'i> AtomPointView<'i> {
         self.node.tagged("y").expect(
             "the grammar guarantees `y` is present; regenerate if it changed",
         )
+    }
+}
+
+/// One matched `exprs`.
+///
+/// From this alternative of `rule exprs`:
+///
+/// ```text
+/// args:expr ("," args:expr)* -> some
+/// ```
+#[derive(Clone, Debug)]
+pub struct ExprsView<'i> {
+    node: Node<'i, Rule>,
+}
+
+impl<'i> View<'i, Rule> for ExprsView<'i> {
+    fn from_pair(pair: Pair<'i, Rule>, file: FileId) -> Self {
+        ExprsView { node: Node::new(pair, file) }
+    }
+
+    fn node(&self) -> &Node<'i, Rule> {
+        &self.node
+    }
+}
+
+// Accessors are inherent, so a binding named `text` or `span` shadows
+// the `View` method of that name rather than colliding with it.
+impl<'i> ExprsView<'i> {
+
+    /// `args` — the `expr` rule.
+    /// Repeated in the grammar (`*` or `+`), so this may be empty.
+    ///
+    /// Dispatch turns this into the handler parameter
+    /// `args: Vec<Self::Out>`:
+    /// the value of the `expr` rule, already evaluated (repeated in the
+    /// grammar; items that failed and were already reported are omitted)
+    pub fn args(&self) -> Vec<Node<'i, Rule>> {
+        self.node.tagged_all("args")
     }
 }
 

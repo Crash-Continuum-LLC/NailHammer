@@ -18,6 +18,8 @@ pub enum Value {
     Text(String),
     Bool(bool),
     Point(f64, f64),
+    /// Only ever an argument list on its way into a call.
+    List(Vec<Value>),
 }
 
 impl std::fmt::Display for Value {
@@ -28,22 +30,111 @@ impl std::fmt::Display for Value {
             Value::Text(s) => write!(f, "{s}"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Point(x, y) => write!(f, "({x}, {y})"),
+            Value::List(items) => {
+                let parts: Vec<String> = items.iter().map(|v| v.to_string()).collect();
+                write!(f, "[{}]", parts.join(", "))
+            }
         }
     }
 }
 
+/// A function: its parameter names and its body, kept for later.
+///
+/// The body is `Shared<Block>` rather than a copy — `lazy` handed the handler
+/// an owned node, so storing it costs a refcount.
+#[derive(Clone)]
+pub struct Function {
+    pub params: Vec<String>,
+    pub body: nh_runtime::Shared<generated::ast::Block>,
+}
+
+/// How deep calls may nest before Pebble gives up.
+///
+/// Recursion without a base case is a program bug, and the honest response is
+/// a diagnostic — not a stack overflow that takes the process down and cannot
+/// be caught.
+///
+/// The number is bounded by the *host* stack, not by taste: each Pebble call
+/// costs several Rust frames, and a spawned thread gets far less stack than
+/// `main` does. 256 passed from the command line and aborted the test runner,
+/// which is exactly the sort of thing a test suite is for.
+const MAX_DEPTH: usize = 128;
+
 #[derive(Default)]
 pub struct Interp {
+    /// Globals. Present even inside a call, since a function can read them.
     vars: HashMap<String, Value>,
+    /// One map per active call. A parameter lives here, so a recursive call
+    /// cannot write over its caller's copy.
+    frames: Vec<HashMap<String, Value>>,
+    funcs: HashMap<String, Function>,
+    /// Where a `return` leaves its value on the way out.
+    returned: Option<Value>,
     pub output: Vec<String>,
 }
 
 impl Interp {
+    /// Writes to the innermost frame that already holds the name, else to the
+    /// current scope — so `n = n + 1` inside a function updates the local `n`
+    /// rather than shadowing it, and a name first assigned in a function stays
+    /// local to it.
     pub fn set(&mut self, name: &str, v: Value) {
+        if let Some(frame) = self.frames.last_mut() {
+            frame.insert(name.to_string(), v);
+            return;
+        }
         self.vars.insert(name.to_string(), v);
     }
+
+    /// Innermost frame first, then globals.
     pub fn get(&self, name: &str) -> Option<&Value> {
+        if let Some(frame) = self.frames.last() {
+            if let Some(v) = frame.get(name) {
+                return Some(v);
+            }
+        }
         self.vars.get(name)
+    }
+
+    pub fn define(&mut self, name: &str, f: Function) {
+        self.funcs.insert(name.to_string(), f);
+    }
+
+    pub fn function(&self, name: &str) -> Option<Function> {
+        self.funcs.get(name).cloned()
+    }
+
+    /// Runs a function body in a frame of its own.
+    pub fn call(
+        &mut self,
+        f: &Function,
+        args: Vec<Value>,
+        cx: &mut nh_runtime::Ctx,
+    ) -> Result<Value> {
+        if self.frames.len() >= MAX_DEPTH {
+            return Err(nh_runtime::Error::runtime(format!(
+                "call nested more than {MAX_DEPTH} deep — is the recursion missing a base case?"
+            )));
+        }
+        let frame = f.params.iter().cloned().zip(args).collect();
+        self.frames.push(frame);
+
+        use crate::generated::dispatch::Eval;
+        let outcome = f.body.eval(self, cx);
+
+        self.frames.pop();
+        match outcome {
+            // The signal `return` raises: not a failure, an early exit.
+            Err(e) if e.is_signal("return") => Ok(self.returned.take().unwrap_or(Value::Null)),
+            Err(e) => Err(e),
+            // Falling off the end of a body yields null, not the last value —
+            // a function that means to give something back says so.
+            Ok(_) => Ok(Value::Null),
+        }
+    }
+
+    pub fn stash_return(&mut self, v: Value) {
+        self.returned = Some(v);
     }
     /// Pebble's one opinion about truth, in the one place that has it.
     pub fn is_true(&self, v: &Value) -> bool {

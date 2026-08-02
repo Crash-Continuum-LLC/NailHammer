@@ -38,6 +38,8 @@ pub enum Stmt {
     Show(Shared<StmtShow>),
     Branch(Shared<StmtBranch>),
     Loop(Shared<StmtLoop>),
+    Define(Shared<StmtDefine>),
+    Give(Shared<StmtGive>),
     Frame(Shared<StmtFrame>),
     Evaluate(Shared<StmtEvaluate>),
     /// A span the parser recovered from. Reported once, then poisoned.
@@ -76,6 +78,22 @@ pub struct StmtLoop {
     pub span: Span,
 }
 
+/// From `rule stmt = "fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define`.
+#[derive(Clone, Debug)]
+pub struct StmtDefine {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Shared<Block>,
+    pub span: Span,
+}
+
+/// From `rule stmt = "return" value:expr? ";" -> give`.
+#[derive(Clone, Debug)]
+pub struct StmtGive {
+    pub value: Option<Shared<Expr>>,
+    pub span: Span,
+}
+
 /// From `rule stmt = "begin" "frame" lazy body:stmt* "end" "frame" -> frame`.
 #[derive(Clone, Debug)]
 pub struct StmtFrame {
@@ -105,6 +123,7 @@ pub struct Block {
 pub enum Atom {
     Number(Shared<AtomNumber>),
     Text(Shared<AtomText>),
+    Call(Shared<AtomCall>),
     Name(Shared<AtomName>),
     Point(Shared<AtomPoint>),
     /// A transparent alternative yielding `expr`.
@@ -125,6 +144,14 @@ pub struct AtomText {
     pub span: Span,
 }
 
+/// From `rule atom = name:IDENT "(" args:exprs? ")" -> call`.
+#[derive(Clone, Debug)]
+pub struct AtomCall {
+    pub name: String,
+    pub args: Option<Shared<Exprs>>,
+    pub span: Span,
+}
+
 /// From `rule atom = name:IDENT -> name place`.
 #[derive(Clone, Debug)]
 pub struct AtomName {
@@ -137,6 +164,13 @@ pub struct AtomName {
 pub struct AtomPoint {
     pub x: Shared<Expr>,
     pub y: Shared<Expr>,
+    pub span: Span,
+}
+
+/// From `rule exprs = args:expr ("," args:expr)* -> some`.
+#[derive(Clone, Debug)]
+pub struct Exprs {
+    pub args: Vec<Shared<Expr>>,
     pub span: Span,
 }
 
@@ -239,6 +273,12 @@ pub fn build_stmt(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Stmt>> {
             Rule::stmt_loop => {
                 return Ok(Shared::new(Stmt::Loop(build_stmt_loop(pair, file)?)))
             }
+            Rule::stmt_define => {
+                return Ok(Shared::new(Stmt::Define(build_stmt_define(pair, file)?)))
+            }
+            Rule::stmt_give => {
+                return Ok(Shared::new(Stmt::Give(build_stmt_give(pair, file)?)))
+            }
             Rule::stmt_frame => {
                 return Ok(Shared::new(Stmt::Frame(build_stmt_frame(pair, file)?)))
             }
@@ -292,6 +332,26 @@ pub fn build_stmt_loop(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Stmt
     }))
 }
 
+/// Builds `StmtDefine` from `"fn" name:IDENT "(" (params:IDENT ","?)* ")" lazy body:block -> define`.
+pub fn build_stmt_define(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtDefine>> {
+    let view = StmtDefineView::from_pair(pair, file);
+    Ok(Shared::new(StmtDefine {
+        name: view.name().text().to_string(),
+        params: { let mut v = Vec::new(); for n in view.params() { v.push(n.text().to_string()); } v },
+        body: build_block(view.body().into_pair(), file)?,
+        span: view.span(),
+    }))
+}
+
+/// Builds `StmtGive` from `"return" value:expr? ";" -> give`.
+pub fn build_stmt_give(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtGive>> {
+    let view = StmtGiveView::from_pair(pair, file);
+    Ok(Shared::new(StmtGive {
+        value: match view.value() { Some(n) => Some(build_expr(n.into_pair(), file)?), None => None },
+        span: view.span(),
+    }))
+}
+
 /// Builds `StmtFrame` from `"begin" "frame" lazy body:stmt* "end" "frame" -> frame`.
 pub fn build_stmt_frame(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<StmtFrame>> {
     let view = StmtFrameView::from_pair(pair, file);
@@ -331,6 +391,9 @@ pub fn build_atom(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Atom>> {
             Rule::atom_text => {
                 return Ok(Shared::new(Atom::Text(build_atom_text(pair, file)?)))
             }
+            Rule::atom_call => {
+                return Ok(Shared::new(Atom::Call(build_atom_call(pair, file)?)))
+            }
             Rule::atom_name => {
                 return Ok(Shared::new(Atom::Name(build_atom_name(pair, file)?)))
             }
@@ -364,6 +427,16 @@ pub fn build_atom_text(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Atom
     }))
 }
 
+/// Builds `AtomCall` from `name:IDENT "(" args:exprs? ")" -> call`.
+pub fn build_atom_call(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<AtomCall>> {
+    let view = AtomCallView::from_pair(pair, file);
+    Ok(Shared::new(AtomCall {
+        name: view.name().text().to_string(),
+        args: match view.args() { Some(n) => Some(build_exprs(n.into_pair(), file)?), None => None },
+        span: view.span(),
+    }))
+}
+
 /// Builds `AtomName` from `name:IDENT -> name place`.
 pub fn build_atom_name(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<AtomName>> {
     let view = AtomNameView::from_pair(pair, file);
@@ -379,6 +452,15 @@ pub fn build_atom_point(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Ato
     Ok(Shared::new(AtomPoint {
         x: build_expr(view.x().into_pair(), file)?,
         y: build_expr(view.y().into_pair(), file)?,
+        span: view.span(),
+    }))
+}
+
+/// Builds `Exprs` from `args:expr ("," args:expr)* -> some`.
+pub fn build_exprs(pair: Pair<'_, Rule>, file: FileId) -> Result<Shared<Exprs>> {
+    let view = ExprsView::from_pair(pair, file);
+    Ok(Shared::new(Exprs {
+        args: { let mut v = Vec::new(); for n in view.args() { v.push(build_expr(n.into_pair(), file)?); } v },
         span: view.span(),
     }))
 }

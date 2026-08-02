@@ -123,4 +123,4 @@ spend your time doing.
 
 ---
 
-Next: [Adding a type](07-a-new-type.md).
+Next: [Functions](07-functions.md).
