@@ -1,0 +1,31 @@
+# Pebble — the language built in the guide.
+
+let width = 4;
+let height = 7;
+show width * height + 2;
+
+let name = "pebble";
+show "hello, " + name;
+
+if width < height {
+  show "taller than wide";
+} else {
+  show "wider than tall";
+}
+
+let n = 1;
+let total = 0;
+while n <= 5 {
+  total = total + n;
+  n = n + 1;
+}
+show total;
+
+let a = (3, 4);
+let b = (1, 2);
+
+begin frame
+  show "points";
+  show a + b;
+  show a == (3, 4);
+end frame

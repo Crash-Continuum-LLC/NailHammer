@@ -132,4 +132,4 @@ Problems panel as you type, and `nh trace` runs in a live pane.
 
 ---
 
-Next: [Choosing a host shape](10-hosts.md).
+Next: [Choosing a host shape](11-hosts.md).

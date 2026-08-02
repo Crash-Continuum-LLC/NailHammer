@@ -279,6 +279,7 @@ See [editors/vscode](editors/vscode).
 |---|---|
 | [`examples/config`](examples/config) | A config-language interpreter. Nine handlers, two or three lines each |
 | [`examples/calc-interp`](examples/calc-interp) | Operators end to end: precedence, short-circuiting, assignment, recovery, `lazy` |
+| [`examples/pebble`](examples/pebble) | The language the [guide](guide/README.md) builds, finished |
 | [`examples/selfhost`](examples/selfhost) | `.nh` describing `.nh`, parsing every grammar in this repo |
 | [`examples/basic-interp`](examples/basic-interp) | Mini BASIC: `PRINT`, `FOR`, `WHILE`, `SUB`, `FUNCTION`, `GOTO`, `EXIT`/`CONTINUE`. Recursion with local frames, stored bodies, jumps, signals, a from-scratch operator table |
 | [`examples/bytecode`](examples/bytecode) | A **bytecode compiler**, not an interpreter. `type Out = ()`, a stack machine, handlers emit instead of compute. Precedence becomes instruction order; `lazy` becomes jump patching |

@@ -139,6 +139,20 @@ taller than wide
 +--------+
 ```
 
+## Running it
+
+This language ships as [`examples/pebble/`](../examples/pebble/) — the same
+grammar, the same handlers, plus the wiring the chapters skipped: `Interp`
+itself, `nh_handlers!(Interp)`, the parser derive, and `main.rs`.
+
+```console
+$ cargo run -p pebble -- examples/pebble/sample.pebble
+```
+
+It is a workspace member, so CI regenerates it, compiles it, lints it, and
+builds it thread-safe. If a snippet in this book ever stops being true, that
+crate stops building first.
+
 ---
 
 Back to [the beginning](README.md).

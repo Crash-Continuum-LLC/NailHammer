@@ -200,6 +200,7 @@ $ nh check mylang.nh --json
 | `examples/calc-interp/` | Operators end to end, proved by tests |
 | `examples/basic-interp/` | Mini BASIC: loops, subroutines, functions, `GOTO` |
 | `examples/bytecode/` | The same idea compiled instead of interpreted — `type Out = ()`, a stack machine |
+| `examples/pebble/` | The language the [guide](guide/README.md) builds, finished |
 | `examples/selfhost/` | `.nh` describing `.nh` |
 
 ---

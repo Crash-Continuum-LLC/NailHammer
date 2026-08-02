@@ -48,9 +48,23 @@ end frame
 | [6. Assignment, and `place`](06-assignment.md) | The one enum the grammar generates for you |
 | [7. Adding a type](07-a-new-type.md) | A point, `(4, 2)` — and which decisions the compiler forces on you |
 | [8. Adding a block form](08-a-new-block.md) | `begin frame … end frame`, and why a body that runs once is still `lazy` |
-| [9. When programs are wrong](09-errors.md) | Recovery, better messages, and the determinism lints |
-| [10. Choosing a host shape](10-hosts.md) | Interpreter, compiler, or a shared VM — and where to go next |
-| [Appendix: Pebble in full](11-pebble-in-full.md) | The finished grammar in one piece, and every handler signature |
+| [9. Changing what you have](09-changing-what-you-have.md) | Renaming, removing, `--prune`, and splitting a grammar |
+| [10. When programs are wrong](10-errors.md) | Recovery, better messages, and the determinism lints |
+| [11. Choosing a host shape](11-hosts.md) | Interpreter, compiler, or a shared VM — and where to go next |
+| [Appendix: Pebble in full](12-pebble-in-full.md) | The finished grammar in one piece, and every handler signature |
+
+## What this book does not cover
+
+One path through the middle, not a tour of everything. These are real features
+Pebble had no use for, each a section of [USAGE.md](../USAGE.md) away:
+
+| | |
+|---|---|
+| **Case-insensitive languages** | `keywords case-insensitive`, and `.key()` on a folding token so a symbol table looks names up folded while messages print what was typed. `examples/basic-interp/` is built on it |
+| **Functions and calls** | Parameters bind as *names*, not values, which is why a call and a definition cannot share a rule. `examples/vm-c/` has the short version |
+| **Silent rules** | `silent rule` matches without producing a node — useful for pure alternations, and you cannot bind one |
+| **`boundary`** | Fine control over what counts as the end of a keyword |
+| **Testing a language** | The worked examples all have tests worth copying; `examples/vm-c/tests/agree.rs` is the most thorough |
 
 ## Before you start
 

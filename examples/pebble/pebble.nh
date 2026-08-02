@@ -1,0 +1,40 @@
+grammar Pebble;
+
+use operators::core;
+
+skip WHITESPACE = " " | "\t" | "\r" | "\n";
+skip COMMENT    = "#" (!"\n" ANY)*;
+
+token DIGIT  = @ "0".."9";
+token ALPHA  = @ "a".."z" | "A".."Z";
+token NUMBER = @ DIGIT+ ("." DIGIT+)?;
+token IDENT  = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
+token TEXT   = @ "\"" (!"\"" ANY)* "\"";
+
+reserved from IDENT { "let" "show" "if" "else" "while" "not" "begin" "end" "frame" }
+
+rule program = SOI body:stmt* EOI -> program;
+
+rule stmt
+  = "let" name:IDENT "=" value:expr ";"          -> declare
+  | "show" value:expr ";"                        -> show
+  | "if" cond:expr lazy then:block
+      lazy otherwise:else_tail?                  -> branch
+  | "while" lazy cond:expr lazy body:block       -> loop
+  | "begin" "frame" lazy body:stmt* "end" "frame" -> frame
+  | value:expr ";"                               -> evaluate
+  ;
+
+rule else_tail = "else" body:block -> pass;
+
+rule block = "{" body:stmt* "}" -> block;
+
+rule atom
+  = value:NUMBER        -> number
+  | text:TEXT           -> text
+  | name:IDENT          -> name place
+  | "(" x:expr "," y:expr ")" -> point
+  | "(" inner:expr ")"  -> pass
+  ;
+
+recover stmt sync ";" | "}";

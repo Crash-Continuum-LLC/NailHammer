@@ -73,7 +73,7 @@ The rest of this book shows handlers in that narrowed form.
 pub fn run(_host: &mut Interp, value: &str, cx: &mut Ctx) -> Result<Value> {
     match value.parse() {
         Ok(n) => Ok(Value::Num(n)),
-        Err(_) => cx.err(&format!("`{value}` is not a number Pebble can hold")),
+        Err(_) => cx.err(format!("`{value}` is not a number Pebble can hold")),
     }
 }
 ```
@@ -91,7 +91,14 @@ evaluator knows where it is.
 
 ## The type your language returns
 
-`src/lib.rs` is yours. Pebble's values:
+`src/lib.rs` is yours. This chapter shows the parts of it that are about
+*language design* and skips the parts that are about wiring — `Interp` itself,
+the `nh_handlers!(Interp)` line, the parser derive, and `main.rs`. Those are in
+[`examples/pebble/`](../examples/pebble/), which is this language finished, kept
+compiling by CI. If you are building along and something below refers to a
+method you have not written — `host.set`, `self.num` — that is where it lives.
+
+Pebble's values:
 
 ```rust
 #[derive(Clone, Debug, PartialEq)]
