@@ -1,6 +1,11 @@
 [workspace]
 members = ["crates/nh-syntax", "crates/nh-operators", "crates/nh-lower", "crates/nh-analysis", "crates/nh-codegen", "crates/nh-build", "crates/nh-runtime", "crates/nh-vm", "crates/nh-cli", "examples/config", "examples/calc-interp", "examples/basic-interp", "examples/bytecode", "examples/vm-c", "examples/vm-basic", "examples/vm-host", "examples/pebble"]
 resolver = "2"
+# Crash BASIC 2.x is a consumer of nh, not a member of it. Without this, cargo
+# refuses to build a project scaffolded here: the manifest `nh init` writes has
+# no `[workspace]` table of its own, so cargo adopts it into this workspace and
+# then fails it for not being a member.
+exclude = ["crashbasic2"]
 
 [workspace.package]
 version = "0.4.0"

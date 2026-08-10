@@ -7,6 +7,10 @@ node_modules/
 # Packaged extensions are build output.
 *.vsix
 
+# Crash BASIC 2.x, driven from here to exercise nh against a real consumer.
+# It lives in its own repo; this is a scratch working copy.
+/crashbasic2/
+
 # macOS
 .DS_Store
 
