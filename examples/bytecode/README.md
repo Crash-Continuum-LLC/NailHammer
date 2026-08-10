@@ -60,7 +60,7 @@ Without `lazy` on the `if` body, the body would already be in the instruction
 stream before the handler could put a jump in front of it:
 
 ```rust
-// src/handlers/stmt_iff.rs
+// src/handlers/stmt/iff.rs
 pub fn run(host: &mut Interp, _cond: (), body: &Shared<Stmt>, cx: &mut Ctx) -> Result<()> {
     let jump = host.emit_jump_if_false();   // cond's code is already emitted
     body.eval(host, cx)?;                   // emits the body at this point
@@ -151,6 +151,6 @@ shared mechanism would serve both — patching is not unwinding.
 |---|---|
 | `bc.nh` | The grammar — the scaffold's as of when this was written |
 | `src/lib.rs` | The `Op` enum, the emitters, the trait impls, and a small VM |
-| `src/handlers/*.rs` | One file per alternative; each emits |
+| `src/handlers/**.rs` | One file per alternative, grouped by rule; each emits |
 | `src/generated/**` | Generated. Never edited |
 | `tests/compile.rs` | Asserts on the instruction stream, not just the output |

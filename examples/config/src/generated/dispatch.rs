@@ -422,46 +422,46 @@ macro_rules! nh_handlers {
                 raw: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::value_string::run(self, raw, cx)
+                $crate::handlers::value::string::run(self, raw, cx)
             }
             fn value_number(
                 &mut self,
                 digits: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::value_number::run(self, digits, cx)
+                $crate::handlers::value::number::run(self, digits, cx)
             }
             fn value_yes(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::value_yes::run(self, cx)
+                $crate::handlers::value::yes::run(self, cx)
             }
             fn value_no(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::value_no::run(self, cx)
+                $crate::handlers::value::no::run(self, cx)
             }
             fn value_null(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::value_null::run(self, cx)
+                $crate::handlers::value::null::run(self, cx)
             }
             fn value_list(
                 &mut self,
                 items: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::value_list::run(self, items, cx)
+                $crate::handlers::value::list::run(self, items, cx)
             }
             fn value_table(
                 &mut self,
                 fields: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::value_table::run(self, fields, cx)
+                $crate::handlers::value::table::run(self, fields, cx)
             }
         }
     };

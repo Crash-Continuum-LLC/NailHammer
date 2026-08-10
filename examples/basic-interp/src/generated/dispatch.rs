@@ -1286,7 +1286,7 @@ macro_rules! nh_handlers {
                 closing: Option<&::nh_runtime::Name>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_loop::run(self, var, from, to, step, body, closing, cx)
+                $crate::handlers::stmt::r#loop::run(self, var, from, to, step, body, closing, cx)
             }
             fn stmt_while(
                 &mut self,
@@ -1294,7 +1294,7 @@ macro_rules! nh_handlers {
                 body: &[::nh_runtime::Shared<$crate::generated::ast::Line>],
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_while::run(self, cond, body, cx)
+                $crate::handlers::stmt::r#while::run(self, cond, body, cx)
             }
             fn stmt_define(
                 &mut self,
@@ -1302,14 +1302,14 @@ macro_rules! nh_handlers {
                 body: &[::nh_runtime::Shared<$crate::generated::ast::Line>],
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_define::run(self, name, body, cx)
+                $crate::handlers::stmt::define::run(self, name, body, cx)
             }
             fn stmt_call(
                 &mut self,
                 target: &::nh_runtime::Name,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_call::run(self, target, cx)
+                $crate::handlers::stmt::call::run(self, target, cx)
             }
             fn stmt_function(
                 &mut self,
@@ -1318,51 +1318,51 @@ macro_rules! nh_handlers {
                 body: &[::nh_runtime::Shared<$crate::generated::ast::Line>],
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_function::run(self, name, params, body, cx)
+                $crate::handlers::stmt::function::run(self, name, params, body, cx)
             }
             fn stmt_ret(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_ret::run(self, value, cx)
+                $crate::handlers::stmt::ret::run(self, value, cx)
             }
             fn stmt_goto(
                 &mut self,
                 target: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_goto::run(self, target, cx)
+                $crate::handlers::stmt::goto::run(self, target, cx)
             }
             fn stmt_exit_for(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_exit_for::run(self, cx)
+                $crate::handlers::stmt::exit_for::run(self, cx)
             }
             fn stmt_exit_while(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_exit_while::run(self, cx)
+                $crate::handlers::stmt::exit_while::run(self, cx)
             }
             fn stmt_exit_sub(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_exit_sub::run(self, cx)
+                $crate::handlers::stmt::exit_sub::run(self, cx)
             }
             fn stmt_continue_for(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_continue_for::run(self, cx)
+                $crate::handlers::stmt::continue_for::run(self, cx)
             }
             fn stmt_continue_while(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_continue_while::run(self, cx)
+                $crate::handlers::stmt::continue_while::run(self, cx)
             }
             fn stmt_iff(
                 &mut self,
@@ -1370,7 +1370,7 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Stmt>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_iff::run(self, cond, body, cx)
+                $crate::handlers::stmt::iff::run(self, cond, body, cx)
             }
             fn stmt_print(
                 &mut self,
@@ -1378,13 +1378,13 @@ macro_rules! nh_handlers {
                 tail: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_print::run(self, head, tail, cx)
+                $crate::handlers::stmt::print::run(self, head, tail, cx)
             }
             fn stmt_blank(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_blank::run(self, cx)
+                $crate::handlers::stmt::blank::run(self, cx)
             }
             fn stmt_let(
                 &mut self,
@@ -1392,7 +1392,7 @@ macro_rules! nh_handlers {
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_let::run(self, target, value, cx)
+                $crate::handlers::stmt::r#let::run(self, target, value, cx)
             }
             fn step_clause(
                 &mut self,
@@ -1444,28 +1444,28 @@ macro_rules! nh_handlers {
                 args: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_call_fn::run(self, name, args, cx)
+                $crate::handlers::primary::call_fn::run(self, name, args, cx)
             }
             fn primary_num(
                 &mut self,
                 value: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_num::run(self, value, cx)
+                $crate::handlers::primary::num::run(self, value, cx)
             }
             fn primary_str(
                 &mut self,
                 text: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_str::run(self, text, cx)
+                $crate::handlers::primary::str::run(self, text, cx)
             }
             fn primary_var(
                 &mut self,
                 name: &::nh_runtime::Name,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_var::run(self, name, cx)
+                $crate::handlers::primary::var::run(self, name, cx)
             }
         }
     };

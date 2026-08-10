@@ -6,10 +6,6 @@
 // One module per labelled alternative. Each is a small file you own;
 // this list is regenerated so a new alternative wires itself up.
 
-pub mod primary_num;
-pub mod primary_var;
+pub mod primary;
 pub mod program;
-pub mod stmt_bind;
-pub mod stmt_eval;
-pub mod stmt_iff;
-pub mod stmt_print;
+pub mod stmt;

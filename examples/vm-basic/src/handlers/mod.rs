@@ -8,21 +8,8 @@
 
 pub mod block;
 pub mod exprs;
-pub mod line_blank;
-pub mod line_code;
+pub mod line;
 pub mod more_elem;
-pub mod primary_call;
-pub mod primary_elem;
-pub mod primary_list;
-pub mod primary_num;
-pub mod primary_str;
-pub mod primary_var;
+pub mod primary;
 pub mod program;
-pub mod stmt_assign;
-pub mod stmt_define;
-pub mod stmt_ifelse;
-pub mod stmt_iff;
-pub mod stmt_print;
-pub mod stmt_ret;
-pub mod stmt_setelem;
-pub mod stmt_whilst;
+pub mod stmt;

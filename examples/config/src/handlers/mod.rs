@@ -8,10 +8,4 @@
 
 pub mod document;
 pub mod entry;
-pub mod value_list;
-pub mod value_no;
-pub mod value_null;
-pub mod value_number;
-pub mod value_string;
-pub mod value_table;
-pub mod value_yes;
+pub mod value;
