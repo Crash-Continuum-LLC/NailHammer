@@ -22,6 +22,12 @@ pub fn render(ast: &Ast) -> String {
     if !ast.uses.is_empty() {
         out.push('\n');
     }
+    // After the presets, and with one blank line of its own — a `use` says
+    // which operators exist and `target` says what executes them, which is the
+    // order they are read in.
+    if let Some(t) = &ast.target {
+        let _ = writeln!(out, "target {};\n", t.value);
+    }
 
     if let Some(mode) = &ast.keywords_case {
         let word = match mode.value {

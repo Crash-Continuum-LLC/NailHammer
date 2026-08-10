@@ -22,6 +22,8 @@ token ALPHA = @ "a".."z" | "A".."Z";
 token DIGIT = @ "0".."9";
 
 token IDENT = @ (ALPHA | "_") (ALPHA | DIGIT | "_")*;
+// A target's name is spelled as on the command line — `nh-vm`, not `nh_vm`.
+token TARGET_NAME = @ (ALPHA | "_") (ALPHA | DIGIT | "_" | "-")*;
 
 // The one keyword that needs more than a boundary guard: `lazy` must not match
 // the `lazy` in `lazy:something`, where it is an ordinary binding name. Line
@@ -53,6 +55,7 @@ guard from IDENT {
   "import"
   "use"
   "operators"
+  "target"
   "keywords"
   "precedence"
   "override"
@@ -94,6 +97,7 @@ rule grammar_decl = "grammar" name:IDENT ";" -> decl;
 rule item
   = import_item
   | use_item
+  | target_item
   | keywords_item
   | precedence_item
   | skip_item
@@ -114,6 +118,12 @@ rule item
 rule import_item = "import" path:STRING ";" -> import;
 
 rule use_item = "use" "operators" "::" preset:IDENT ";" -> use_preset;
+
+// `target nh-vm;` — the machine this grammar's operators run on.
+//
+// The name takes a hyphen, because it is spelled as it is on the command line.
+// An IDENT does not, which is why this has a token of its own.
+rule target_item = "target" name:TARGET_NAME ";" -> target;
 
 rule keywords_item = "keywords" mode:case_mode ";" -> keywords;
 

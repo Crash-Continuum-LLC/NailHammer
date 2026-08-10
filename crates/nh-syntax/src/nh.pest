@@ -32,6 +32,9 @@ block_comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
 ident_start = _{ ASCII_ALPHA | "_" }
 ident_cont  = _{ ASCII_ALPHANUMERIC | "_" }
 ident       = @{ ident_start ~ ident_cont* }
+// A target's name is spelled as it is on the command line — `nh-vm`, not
+// `nh_vm` — so it admits the hyphen an `ident` does not.
+target_name = @{ ident_start ~ (ident_cont | "-")* }
 
 // Case-insensitive literal, e.g. ^"AND".
 string_ci = ${ "^" ~ "\"" ~ str_inner ~ "\"" }
@@ -67,6 +70,7 @@ kw_import     = @{ "import"     ~ !ident_cont }
 kw_use        = @{ "use"        ~ !ident_cont }
 kw_operators  = @{ "operators"  ~ !ident_cont }
 kw_keywords   = @{ "keywords"   ~ !ident_cont }
+kw_target     = @{ "target"     ~ !ident_cont }
 kw_precedence = @{ "precedence" ~ !ident_cont }
 kw_override   = @{ "override"   ~ !ident_cont }
 kw_skip       = @{ "skip"       ~ !ident_cont }
@@ -113,6 +117,7 @@ grammar_decl = { kw_grammar ~ #name = ident ~ ";" }
 item = _{
       import_item
     | use_item
+    | target_item
     | keywords_item
     | precedence_item
     | skip_item
@@ -133,6 +138,7 @@ item = _{
 import_item = { kw_import ~ #path = string ~ ";" }
 
 use_item = { kw_use ~ kw_operators ~ "::" ~ #preset = ident ~ ";" }
+target_item = { kw_target ~ #name = target_name ~ ";" }
 
 keywords_item = { kw_keywords ~ #mode = case_mode ~ ";" }
 case_mode     = { kw_case_insensitive | kw_case_sensitive }

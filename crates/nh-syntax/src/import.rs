@@ -155,7 +155,18 @@ fn short(p: &Path) -> String {
 // ---------------------------------------------------------------------------
 
 fn merge(files: Vec<Ast>, diagnostics: &mut Vec<Diagnostic>) -> Ast {
-    let mut out = Ast::default();
+    // The entry file is the last one, because loading is post-order:
+    // dependencies are recorded before their importer. Its first rule is where
+    // a program starts — and it has to be captured here, since after the merge
+    // the first rule belongs to the deepest import.
+    let mut out = Ast {
+        entry_rule: files
+            .last()
+            .and_then(|root| root.rules.first())
+            .map(|r| r.name.value.clone()),
+        ..Ast::default()
+    };
+
     // Name → (kind, span). Tokens, skips, and rules share one namespace,
     // because they all become `.pest` rules and would collide there.
     let mut defined: HashMap<String, (&'static str, Span)> = HashMap::new();
@@ -183,6 +194,8 @@ fn merge(files: Vec<Ast>, diagnostics: &mut Vec<Diagnostic>) -> Ast {
             grammar_name,
             imports: _,
             uses,
+            entry_rule: _,
+            target,
             keywords_case,
             precedence,
             skips,
@@ -205,6 +218,21 @@ fn merge(files: Vec<Ast>, diagnostics: &mut Vec<Diagnostic>) -> Ast {
                         .help("only the entry file should declare the grammar name"),
                 ),
                 None => out.grammar_name = Some(name),
+            }
+        }
+
+        // One target, like one grammar name: an imported file declaring a
+        // different machine is a contradiction rather than an override.
+        if let Some(t) = target {
+            match &out.target {
+                Some(prev) if prev.value != t.value => diagnostics.push(
+                    Diagnostic::error("conflicting `target` declarations")
+                        .at(t.span)
+                        .note("first declared here", Some(prev.span))
+                        .help("a grammar is compiled for one machine"),
+                ),
+                Some(_) => {}
+                None => out.target = Some(t),
             }
         }
 
