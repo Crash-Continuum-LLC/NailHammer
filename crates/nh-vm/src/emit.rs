@@ -35,7 +35,7 @@
 use std::collections::HashMap;
 
 use crate::op::{Op, Reg};
-use crate::program::Program;
+use crate::program::{DebugInfo, Program};
 use crate::store::Slot;
 use crate::value::Value;
 
@@ -66,6 +66,12 @@ pub struct Emit<X> {
     in_fn: bool,
     /// Functions defined so far.
     fns: HashMap<String, crate::program::FnDef>,
+    /// Slot-to-name tables, accumulated as each function is finished.
+    ///
+    /// Filled from `locals` and `slots`, which this emitter already keeps in
+    /// order to compile at all — so a debuggable program costs a language
+    /// nothing to ask for and nothing to opt into.
+    debug: DebugInfo,
 }
 
 impl<X> Default for Emit<X> {
@@ -79,8 +85,24 @@ impl<X> Default for Emit<X> {
             locals_end: 0,
             in_fn: false,
             fns: HashMap::new(),
+            debug: DebugInfo::default(),
         }
     }
+}
+
+/// Inverts a name-to-index list into the index-to-name table a debugger reads.
+///
+/// Sparse by construction: an index nothing claimed is a temporary, and stays
+/// `None` rather than being invented a name.
+fn name_table(pairs: impl IntoIterator<Item = (String, usize)>) -> Vec<Option<String>> {
+    let mut out: Vec<Option<String>> = Vec::new();
+    for (name, i) in pairs {
+        if out.len() <= i {
+            out.resize(i + 1, None);
+        }
+        out[i] = Some(name);
+    }
+    out
 }
 
 impl<X> Emit<X> {
@@ -206,6 +228,22 @@ pub trait Emitter {
             .map(|(_, r)| *r)
     }
 
+    /// Whether this name is already a variable.
+    ///
+    /// A local in the body being compiled, or a global slot already handed out.
+    /// What it is *for* is `name(args)`: a language whose call and subscript
+    /// look alike has to decide which one it is, and "something has already
+    /// assigned to this name" is the evidence available at compile time.
+    ///
+    /// Note what it does not say: nothing about a name yet to be seen. A
+    /// function called before it is written is not a variable either, which is
+    /// why the caller should treat "no" as "assume a call" rather than as "this
+    /// is undefined".
+    fn knows_var(&self, name: &str) -> bool {
+        let s = self.emit_state_ref();
+        s.locals.iter().any(|(n, _)| n == name) || s.slots.contains_key(name)
+    }
+
     /// Reads a variable into a register.
     ///
     /// A parameter is already in one, so reading it emits nothing at all —
@@ -288,6 +326,11 @@ pub trait Emitter {
         self.emit(Op::ReturnUnit);
         let frame = self.frame_size();
         let s = self.emit_state();
+        // Before the clear: this is the only moment the body's names and its
+        // register numbers exist together. Keyed by `addr`, because that is
+        // what a live frame carries.
+        let table = name_table(s.locals.iter().map(|(n, r)| (n.clone(), *r as usize)));
+        s.debug.frames.insert(addr, table);
         s.locals.clear();
         s.locals_end = 0;
         s.in_fn = false;
@@ -300,7 +343,14 @@ pub trait Emitter {
 
     // ---- constants and jumps ------------------------------------------------
 
-    fn konst(&mut self, value: Value) -> Reg {
+    /// A constant, in a register of its own.
+    ///
+    /// Named for what it does, like the rest of this trait — `const` is a Rust
+    /// keyword, and the alternatives were a raw identifier (`r#const`, hostile
+    /// at every call site) or a deliberate misspelling. It was `konst` for a
+    /// while, which is a habit borrowed from other languages: a misspelled noun
+    /// in a trait where everything else is a verb.
+    fn emit_const(&mut self, value: Value) -> Reg {
         let dst = self.alloc();
         self.emit(Op::LoadK { dst, value });
         dst
@@ -327,11 +377,15 @@ pub trait Emitter {
         let frame = self.frame_size();
         let globals = self.globals_needed();
         let s = self.emit_state();
+        let mut debug = std::mem::take(&mut s.debug);
+        debug.globals = name_table(s.slots.iter().map(|(n, sl)| (n.clone(), *sl as usize)));
+        debug.top = name_table(s.locals.iter().map(|(n, r)| (n.clone(), *r as usize)));
         Program {
             code: std::mem::take(&mut s.code),
             fns: std::mem::take(&mut s.fns),
             frame,
             globals,
+            debug,
         }
     }
 }

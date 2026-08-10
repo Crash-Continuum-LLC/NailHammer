@@ -39,6 +39,19 @@ pub enum Value {
     /// refcount. The difference is not an inconsistency; it is what mutability
     /// costs.
     Array(Arc<std::sync::RwLock<Vec<Value>>>),
+    /// A **shared and mutable** map, for the same reason an array is one:
+    /// objects are reference types, so `b = a` makes `b` another name for the
+    /// same object and a write through either is visible through both.
+    ///
+    /// A `BTreeMap` rather than a hash map so iteration order is the same
+    /// everywhere — serialising an object has to give the same bytes on native
+    /// and on WASM, or a saved game stops round-tripping.
+    ///
+    /// Keys are exact here. Whether `NAME` and `name` are one key is a question
+    /// about a *language*, not about a machine — the same reasoning that keeps
+    /// `Program::fns` unfolded — so a case-insensitive BASIC folds them on the
+    /// way in and a case-sensitive language does not.
+    Object(Arc<std::sync::RwLock<std::collections::BTreeMap<String, Value>>>),
 }
 
 impl Value {
@@ -50,12 +63,17 @@ impl Value {
         Value::Array(Arc::new(std::sync::RwLock::new(items)))
     }
 
+    pub fn object(fields: std::collections::BTreeMap<String, Value>) -> Self {
+        Value::Object(Arc::new(std::sync::RwLock::new(fields)))
+    }
+
     /// Length, for whatever has one. `None` for a value that has no notion of
     /// one -- a number is not empty, it simply is not a sequence.
     pub fn len(&self) -> Option<usize> {
         match self {
             Value::Str(s) => Some(s.chars().count()),
             Value::Array(a) => Some(a.read().expect("poisoned").len()),
+            Value::Object(o) => Some(o.read().expect("poisoned").len()),
             _ => None,
         }
     }
@@ -77,6 +95,7 @@ impl Value {
             // An empty array is false, matching the string rule -- one decision
             // about emptiness rather than two.
             Value::Array(a) => !a.read().expect("poisoned").is_empty(),
+            Value::Object(o) => !o.read().expect("poisoned").is_empty(),
         }
     }
 
@@ -123,6 +142,17 @@ impl std::fmt::Display for Value {
                     write!(f, "{v}")?;
                 }
                 write!(f, "]")
+            }
+            Value::Object(o) => {
+                let g = o.read().expect("poisoned");
+                write!(f, "{{")?;
+                for (i, (k, v)) in g.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{k}: {v}")?;
+                }
+                write!(f, "}}")
             }
         }
     }

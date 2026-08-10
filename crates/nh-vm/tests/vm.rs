@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::thread;
 
 use nh_vm::{
-    Cmp, ExtCx, Extension, Flow, LocalStore, Machine, NoExt, Op, Program, RwLockStore, SharedStore,
-    Step, Value,
+    Cmp, Emit, Emitter, ExtCx, Extension, Flow, LocalStore, Machine, NoExt, Op, Program,
+    RwLockStore, SharedStore, Step, Value,
 };
 
 /// Most tests here care about instructions, not about the shape a program is
@@ -407,7 +407,7 @@ fn a_function_is_called_and_returns() {
     let mut fns = HashMap::new();
     fns.insert("double".to_string(), FnDef { addr: 4, arity: 1, frame: 2 });
 
-    let prog = Program { code, fns, frame: 2, globals: 0 };
+    let prog = Program { code, fns, frame: 2, ..Program::default() };
     let globals = LocalStore::new(0);
     let mut m = Machine::new(&prog, &globals);
 
@@ -441,7 +441,7 @@ fn a_function_can_call_itself() {
     let mut fns = HashMap::new();
     fns.insert("fact".to_string(), FnDef { addr: 4, arity: 1, frame: 3 });
 
-    let prog = Program { code, fns, frame: 2, globals: 0 };
+    let prog = Program { code, fns, frame: 2, ..Program::default() };
     let globals = LocalStore::new(0);
     let mut m = Machine::new(&prog, &globals);
 
@@ -462,7 +462,7 @@ fn infinite_recursion_fails_the_program_not_the_host() {
     let mut fns = HashMap::new();
     fns.insert("loop".to_string(), FnDef { addr: 2, arity: 0, frame: 1 });
 
-    let prog = Program { code, fns, frame: 1, globals: 0 };
+    let prog = Program { code, fns, frame: 1, ..Program::default() };
     let globals = LocalStore::new(0);
     let mut m = Machine::new(&prog, &globals);
 
@@ -500,7 +500,7 @@ fn the_wrong_number_of_arguments_is_reported() {
     let mut fns = HashMap::new();
     fns.insert("f".to_string(), FnDef { addr: 2, arity: 1, frame: 1 });
 
-    let prog = Program { code, fns, frame: 4, globals: 0 };
+    let prog = Program { code, fns, frame: 4, ..Program::default() };
     let globals = LocalStore::new(0);
     let mut m = Machine::new(&prog, &globals);
 
@@ -531,4 +531,498 @@ fn add_concatenates_strings() {
 
     assert!(matches!(m.resume(), Step::Done));
     assert_eq!(m.output, ["nailhammer", "v2"]);
+}
+
+// ---------------------------------------------------------------------------
+// A debugger can name what a running program is holding
+// ---------------------------------------------------------------------------
+//
+// A register machine is fast because it does *not* look names up: a local is a
+// slot index, and by the time anything runs the name is gone. That is also why
+// a debugger cannot be bolted on afterwards — a compiler that has discarded
+// names has nothing left to describe. So the emitter keeps the mapping it
+// already builds, and the machine carries it.
+
+struct Compiler {
+    emit: Emit<NoExt>,
+}
+
+impl Emitter for Compiler {
+    type Ext = NoExt;
+    fn emit_state(&mut self) -> &mut Emit<NoExt> {
+        &mut self.emit
+    }
+    fn emit_state_ref(&self) -> &Emit<NoExt> {
+        &self.emit
+    }
+}
+
+/// The claim: a frame suspended inside a function can be asked what its
+/// variables are called and what they currently hold — with no cooperation
+/// from the language beyond compiling normally.
+#[test]
+fn a_suspended_frame_reports_its_locals_by_name() {
+    let mut c = Compiler { emit: Emit::default() };
+
+    // Top level first: execution starts at pc 0, so a function body emitted
+    // ahead of it would simply be run rather than called.
+    c.emit(Op::LoadK { dst: 0, value: Value::Num(3.0) });
+    c.emit(Op::LoadK { dst: 1, value: Value::Num(4.0) });
+    c.emit(Op::Call { dst: 0, base: 0, argc: 2, key: "area".into(), shown: "area".into() });
+    c.emit(Op::Halt);
+
+    // A function of two parameters that suspends in the middle, so there is a
+    // live frame to interrogate.
+    let addr = c.begin_fn(&["width".into(), "height".into()]);
+    c.emit(Op::Await { dst: 0, src: 1 });
+    c.end_fn("area", addr, 2);
+    let prog = c.finish();
+
+    // The table exists, keyed by the address a live frame carries.
+    let table = prog.debug.frames.get(&addr).expect("function should be described");
+    assert_eq!(table[0].as_deref(), Some("width"));
+    assert_eq!(table[1].as_deref(), Some("height"));
+
+    let globals = LocalStore::new(prog.globals);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Awaiting(_)), "should suspend inside the call");
+    assert_eq!(m.depth(), 2, "the function's frame should be live");
+
+    let seen: Vec<(String, String)> = m
+        .locals(1)
+        .map(|(n, v)| (n.to_string(), format!("{v:?}")))
+        .collect();
+    let names: Vec<&str> = seen.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["width", "height"], "got {seen:?}");
+    assert!(format!("{:?}", m.locals(1).next().unwrap().1).contains('3'), "{seen:?}");
+}
+
+/// Temporaries are not variables. A slot nothing named stays unnamed rather
+/// than being invented one, or the debugger would report scratch as state.
+#[test]
+fn unnamed_slots_are_not_reported() {
+    let mut c = Compiler { emit: Emit::default() };
+    c.emit(Op::LoadK { dst: 0, value: Value::Num(9.0) });
+    c.emit(Op::Call { dst: 0, base: 0, argc: 1, key: "f".into(), shown: "f".into() });
+    c.emit(Op::Halt);
+
+    let addr = c.begin_fn(&["only".into()]);
+    // Scratch above `locals_end`, which no name claims.
+    c.emit(Op::LoadK { dst: 1, value: Value::Num(1.0) });
+    c.emit(Op::Await { dst: 0, src: 0 });
+    c.end_fn("f", addr, 1);
+    let prog = c.finish();
+
+    let globals = LocalStore::new(prog.globals);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Awaiting(_)));
+    let names: Vec<&str> = m.locals(1).map(|(n, _)| n).collect();
+    assert_eq!(names, ["only"]);
+}
+
+/// A language that never asks for names allocates none. `Program::default()`
+/// is what a hand-built program looks like, and it must stay queryable-but-empty
+/// rather than panicking.
+#[test]
+fn a_program_without_debug_info_reports_nothing() {
+    let prog = program::<NoExt>(vec![Op::Halt], 1);
+    let globals = LocalStore::new(0);
+    let m = Machine::new(&prog, &globals);
+    assert_eq!(m.locals(0).count(), 0);
+    assert!(prog.debug.frames.is_empty());
+}
+
+/// `IDiv` exists because rounding `Div` afterwards is not the same operation.
+/// A language with both `/` and `\` needs the machine to keep them apart.
+#[test]
+fn integer_division_is_not_rounded_division() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::Num(7.0) },
+        Op::LoadK { dst: 1, value: Value::Num(2.0) },
+        Op::Div { dst: 2, a: 0, b: 1 },
+        Op::IDiv { dst: 3, a: 0, b: 1 },
+        Op::Print { src: 2 },
+        Op::Print { src: 3 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 4);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["3.5", "3"]);
+}
+
+/// Truncation is toward zero, matching the `as i64` the bitwise instructions
+/// already use — so `\` and `AND` agree about what an integer is.
+#[test]
+fn integer_division_truncates_toward_zero() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::Num(-7.0) },
+        Op::LoadK { dst: 1, value: Value::Num(2.0) },
+        Op::IDiv { dst: 2, a: 0, b: 1 },
+        Op::Print { src: 2 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 3);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["-3"], "toward zero, not floor");
+}
+
+#[test]
+fn integer_division_by_zero_is_reported() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::Num(1.0) },
+        Op::LoadK { dst: 1, value: Value::Num(0.0) },
+        Op::IDiv { dst: 2, a: 0, b: 1 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 3);
+    let mut m = Machine::new(&prog, &globals);
+    match m.resume() {
+        Step::Failed(e) => assert!(e.contains("zero"), "{e}"),
+        other => panic!("expected a failure, got {other:?}"),
+    }
+}
+
+/// A host running work concurrently needs to start a machine *inside* a
+/// function, not at the top of the program — and to have it share the globals
+/// the language says are shared, while its registers stay its own.
+#[test]
+fn a_machine_can_enter_at_a_function() {
+    let mut c = Compiler { emit: Emit::default() };
+    c.emit(Op::Halt);
+
+    // `worker()` writes a global, so the effect is visible outside it.
+    let addr = c.begin_fn(&[]);
+    let slot = c.slot_of("shared");
+    let v = c.emit_const(Value::Num(7.0));
+    c.emit(Op::StoreGlobal { slot, src: v });
+    c.end_fn("worker", addr, 0);
+    let prog = c.finish();
+
+    let globals = LocalStore::new(prog.globals.max(1));
+    let mut m = Machine::<NoExt, _>::entering(&prog, &globals, "worker").expect("compiled in");
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(globals.load(slot), Value::Num(7.0), "the global it wrote is shared");
+
+    assert!(
+        Machine::<NoExt, _>::entering(&prog, &globals, "absent").is_none(),
+        "a name that is not compiled in has no entry point"
+    );
+}
+
+/// An extension may suspend to *tell* its driver something rather than to wait
+/// for a value — starting concurrent work is the obvious case. There is then no
+/// register to fill, and resuming must carry on rather than panic.
+#[test]
+fn an_extension_may_suspend_without_awaiting_a_value() {
+    #[derive(Clone, Debug)]
+    enum Tell {
+        Notify,
+    }
+    impl Extension for Tell {
+        fn exec(&self, _cx: &mut ExtCx<'_>) -> Result<Flow, String> {
+            Ok(Flow::Suspend(Value::str("started")))
+        }
+    }
+
+    let code: Vec<Op<Tell>> = vec![
+        Op::Ext(Tell::Notify),
+        Op::LoadK { dst: 0, value: Value::Num(1.0) },
+        Op::Print { src: 0 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 1);
+    let mut m = Machine::new(&prog, &globals);
+
+    let Step::Awaiting(v) = m.resume() else {
+        panic!("the extension should suspend");
+    };
+    assert_eq!(v, Value::str("started"));
+    // Nothing asked for a value; this must not panic.
+    m.resume_with(Value::Nil);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["1"], "and the program carries on");
+}
+
+/// A panic inside an extension is *this program's* failure, not the process's.
+///
+/// `Extension::exec` returns a `Result`, so a language's own instruction is
+/// expected to be able to fail — but a `Result` does not contain a panic, and
+/// an extension is the one place the VM runs code it knows nothing about. A bad
+/// index or an `unwrap` on a missing file would otherwise unwind through the
+/// machine and take down whatever is driving it.
+#[test]
+fn a_panicking_extension_fails_the_program_not_the_process() {
+    #[derive(Clone, Debug)]
+    enum Bad {
+        Boom,
+    }
+    impl Extension for Bad {
+        fn exec(&self, _cx: &mut ExtCx<'_>) -> Result<Flow, String> {
+            panic!("a bug in somebody's file handler");
+        }
+    }
+
+    let code: Vec<Op<Bad>> = vec![Op::Ext(Bad::Boom), Op::Halt];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 1);
+    let mut m = Machine::new(&prog, &globals);
+
+    // The default hook would print a backtrace for a panic the test expects.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let step = m.resume();
+    std::panic::set_hook(hook);
+
+    match step {
+        Step::Failed(e) => {
+            assert!(e.contains("panicked"), "{e}");
+            assert!(e.contains("file handler"), "carry the message across:\n{e}");
+        }
+        other => panic!("expected a failure, got {other:?}"),
+    }
+}
+
+/// And the barrier costs nothing when nothing panics.
+#[test]
+fn a_well_behaved_extension_is_unaffected() {
+    let code: Vec<Op<BasicOp>> = vec![
+        Op::LoadK { dst: 0, value: Value::str("hello") },
+        Op::LoadK { dst: 1, value: Value::Num(1.0) },
+        Op::LoadK { dst: 2, value: Value::Num(3.0) },
+        Op::Ext(BasicOp::Mid { dst: 3, src: 0, start: 1, len: 2 }),
+        Op::Print { src: 3 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 4);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["ell"]);
+}
+
+/// An extension that suspends to *ask* something needs somewhere to be told the
+/// answer. Reading a line from a file is a suspension whose whole point is the
+/// value that comes back — and before `resume_into`, only `Op::Await` could
+/// name a destination.
+#[test]
+fn an_extension_can_suspend_for_an_answer() {
+    #[derive(Clone, Debug)]
+    enum Ask {
+        Line { dst: u16 },
+    }
+    impl Extension for Ask {
+        fn exec(&self, cx: &mut ExtCx<'_>) -> Result<Flow, String> {
+            match self {
+                Ask::Line { dst } => {
+                    cx.resume_into(*dst);
+                    Ok(Flow::Suspend(Value::str("read a line")))
+                }
+            }
+        }
+    }
+
+    let code: Vec<Op<Ask>> = vec![
+        Op::Ext(Ask::Line { dst: 0 }),
+        Op::Print { src: 0 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 1);
+    let mut m = Machine::new(&prog, &globals);
+
+    let Step::Awaiting(what) = m.resume() else {
+        panic!("should suspend");
+    };
+    assert_eq!(what, Value::str("read a line"));
+
+    m.resume_with(Value::str("the answer"));
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["the answer"], "landed in the register it asked for");
+}
+
+/// An object is a map, reached by key, and the *container* decides how an index
+/// is read — one `Index` instruction covers both kinds, the same call `Add`
+/// makes when either side is a string.
+#[test]
+fn an_object_is_indexed_by_key() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::str("name") },
+        Op::LoadK { dst: 1, value: Value::str("Ada") },
+        Op::LoadK { dst: 2, value: Value::str("score") },
+        Op::LoadK { dst: 3, value: Value::Num(100.0) },
+        Op::NewObject { dst: 4, base: 0, len: 2 },
+        Op::LoadK { dst: 5, value: Value::str("name") },
+        Op::Index { dst: 6, seq: 4, idx: 5 },
+        Op::Print { src: 6 },
+        // A key nobody set is `Nil`, not a failure: asking about an absent key
+        // is a question, not a mistake.
+        Op::LoadK { dst: 5, value: Value::str("absent") },
+        Op::Index { dst: 6, seq: 4, idx: 5 },
+        Op::Print { src: 6 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 7);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["Ada", "nil"]);
+}
+
+/// Objects are reference types: two names for one object, and a write through
+/// either is visible through both. That is what `Arc<RwLock<..>>` buys, and it
+/// is why `CLONE` has to exist.
+#[test]
+fn an_object_is_shared_not_copied() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::str("hp") },
+        Op::LoadK { dst: 1, value: Value::Num(10.0) },
+        Op::NewObject { dst: 2, base: 0, len: 1 },
+        // A second name for the same object.
+        Op::Move { dst: 3, src: 2 },
+        Op::LoadK { dst: 4, value: Value::str("hp") },
+        Op::LoadK { dst: 5, value: Value::Num(99.0) },
+        Op::SetIndex { seq: 3, idx: 4, src: 5 },
+        // Read through the first name.
+        Op::Index { dst: 6, seq: 2, idx: 4 },
+        Op::Print { src: 6 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 7);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["99"], "one object, two names");
+}
+
+/// Iteration order is the same everywhere. A `BTreeMap` rather than a hash map
+/// is what makes serialising an object give identical bytes on native and on
+/// WASM — without it a saved game stops round-tripping.
+#[test]
+fn object_order_is_deterministic() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::str("zebra") },
+        Op::LoadK { dst: 1, value: Value::Num(1.0) },
+        Op::LoadK { dst: 2, value: Value::str("apple") },
+        Op::LoadK { dst: 3, value: Value::Num(2.0) },
+        Op::NewObject { dst: 4, base: 0, len: 2 },
+        Op::Print { src: 4 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 5);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["{apple: 2, zebra: 1}"], "sorted, not insertion order");
+}
+
+/// `DIM a(n)` sizes an array at run time, which `NewArray` cannot: a literal
+/// knows its length when it is compiled and a declaration does not.
+#[test]
+fn an_array_can_be_sized_at_run_time() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::Num(3.0) },
+        Op::NewSized { dst: 1, size: 0 },
+        Op::Len { dst: 2, src: 1 },
+        Op::Print { src: 2 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 3);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["3"]);
+}
+
+/// `REDIM` resizes **in place**, keeping what still fits — and every name for
+/// the array sees it, because an array is a reference type. Replacing the value
+/// would rebind one name and leave a `BYREF` parameter looking at the old one.
+#[test]
+fn resizing_is_in_place_and_preserves() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::Num(10.0) },
+        Op::LoadK { dst: 1, value: Value::Num(20.0) },
+        Op::NewArray { dst: 2, base: 0, len: 2 },
+        // A second name for the same array.
+        Op::Move { dst: 3, src: 2 },
+        Op::LoadK { dst: 4, value: Value::Num(4.0) },
+        Op::Resize { seq: 2, size: 4 },
+        // Grown: the originals survive and the new cells are empty...
+        Op::LoadK { dst: 5, value: Value::Num(0.0) },
+        Op::Index { dst: 6, seq: 3, idx: 5 },
+        Op::Print { src: 6 },
+        Op::Len { dst: 6, src: 3 },
+        Op::Print { src: 6 },
+        // ...and shrinking keeps what remains in range.
+        Op::LoadK { dst: 4, value: Value::Num(1.0) },
+        Op::Resize { seq: 3, size: 4 },
+        Op::Len { dst: 6, src: 2 },
+        Op::Print { src: 6 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 7);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["10", "4", "1"], "seen through both names");
+}
+
+/// One instruction for iterating either kind of collection, because iterating
+/// is one idea. An array yields 0-based indices as keys; an object yields its
+/// keys — and both arrive in the alternating layout `NewObject` reads, so the
+/// two agree about what a pair is.
+#[test]
+fn entries_flattens_either_collection() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::str("a") },
+        Op::LoadK { dst: 1, value: Value::str("b") },
+        Op::NewArray { dst: 2, base: 0, len: 2 },
+        Op::Entries { dst: 3, src: 2 },
+        Op::Print { src: 3 },
+        // An object: keys instead of indices.
+        Op::LoadK { dst: 0, value: Value::str("y") },
+        Op::LoadK { dst: 1, value: Value::Num(2.0) },
+        Op::NewObject { dst: 2, base: 0, len: 1 },
+        Op::Entries { dst: 3, src: 2 },
+        Op::Print { src: 3 },
+        // Something with no parts is an empty loop, not a failure.
+        Op::LoadK { dst: 2, value: Value::Num(7.0) },
+        Op::Entries { dst: 3, src: 2 },
+        Op::Len { dst: 4, src: 3 },
+        Op::Print { src: 4 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 5);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["[0, a, 1, b]", "[y, 2]", "0"]);
+}
+
+/// The entries are a **copy**. Iterating a live collection while the body
+/// mutates it has no good answer; taking them once has an obvious one, and it
+/// is what lets a language promise that modifying during iteration is safe.
+#[test]
+fn entries_are_a_snapshot() {
+    let code: Vec<Op<NoExt>> = vec![
+        Op::LoadK { dst: 0, value: Value::Num(1.0) },
+        Op::NewArray { dst: 1, base: 0, len: 1 },
+        Op::Entries { dst: 2, src: 1 },
+        // Change the array after taking entries.
+        Op::LoadK { dst: 3, value: Value::Num(0.0) },
+        Op::LoadK { dst: 4, value: Value::Num(99.0) },
+        Op::SetIndex { seq: 1, idx: 3, src: 4 },
+        Op::Print { src: 2 },
+        Op::Halt,
+    ];
+    let globals = LocalStore::new(0);
+    let prog = program(code, 5);
+    let mut m = Machine::new(&prog, &globals);
+    assert!(matches!(m.resume(), Step::Done));
+    assert_eq!(m.output, ["[0, 1]"], "unchanged by the write");
 }
