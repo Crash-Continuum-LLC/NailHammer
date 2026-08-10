@@ -113,7 +113,7 @@ $ nh trace pebble.nh --source 'show 1 + 2 * 3;'
 program  → handlers/program.rs
   · SOI body:stmt* EOI -> program
   body: Vec<Self::Out>   ⟵ evaluated first, by:
-    stmt_show  → handlers/stmt_show.rs
+    stmt_show  → handlers/stmt/show.rs
       · "show" value:expr ";" -> show
       value: Self::Out   ⟵ evaluated first, by:
         Operators::add

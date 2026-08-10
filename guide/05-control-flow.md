@@ -22,7 +22,7 @@ Regenerate, and look at what changed in the signatures (narrowed to `Interp`,
 as chapter 4 described):
 
 ```rust
-// handlers/stmt_branch.rs
+// handlers/stmt/branch.rs
 pub fn run(
     host: &mut Interp,
     cond: Value,                            // evaluated

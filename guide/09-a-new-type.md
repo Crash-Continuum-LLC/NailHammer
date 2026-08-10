@@ -70,8 +70,7 @@ Now build, **before writing anything else**, and read what comes back:
 
 ```console
 $ cargo build
-error: handler `atom_point` is not implemented. ...
-  --> src/handlers/atom_point.rs:18:5
+warning: pebble@0.1.0: note: 1 handler(s) not implemented yet — each reports at run time
 
 error[E0004]: non-exhaustive patterns: `&Value::Point(_, _)` not covered
   --> src/lib.rs:25:15
@@ -80,8 +79,10 @@ error[E0004]: non-exhaustive patterns: `&Value::Point(_, _)` not covered
    |               ^^^^ pattern `&Value::Point(_, _)` not covered
 ```
 
-Two errors, and the second is the useful one: `Display` has to say what a point
-looks like, and the compiler will not let you forget.
+The note is the new stub at `src/handlers/atom/point.rs`, waiting; it compiles
+and reports at run time until you write it. The **error** is the useful one:
+`Display` has to say what a point looks like, and the compiler will not let you
+forget.
 
 ## 4. What the compiler catches — and what it does not
 
@@ -116,7 +117,7 @@ That clears the `E0004`.
 ## 6. The handler
 
 ```rust
-// handlers/atom_point.rs
+// handlers/atom/point.rs
 pub fn run(_host: &mut Interp, x: Value, y: Value, cx: &mut Ctx) -> Result<Value> {
     match (x, y) {
         (Value::Num(a), Value::Num(b)) => Ok(Value::Point(a, b)),

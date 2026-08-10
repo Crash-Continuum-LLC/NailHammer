@@ -167,7 +167,7 @@ check("a failure renders as text rather than throwing", () => {
 check("the provider hands back what it was last given", () => {
   const p = new playground.TraceProvider();
   assert.strictEqual(p.provideTextDocumentContent(), "");
-  p.update("stmt_bind  → handlers/stmt_bind.rs\n");
+  p.update("stmt_bind  → handlers/stmt/bind.rs\n");
   assert.ok(p.provideTextDocumentContent().includes("stmt_bind"));
 });
 

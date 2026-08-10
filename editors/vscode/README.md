@@ -96,7 +96,7 @@ whether the last run parsed.
 What the right pane tells you:
 
 ```
-stmt_iff  → handlers/stmt_iff.rs
+stmt_iff  → handlers/stmt/iff.rs
   · "if" cond:expr lazy then:block lazy otherwise:else_tail? -> iff
   cond: Self::Out   ⟵ evaluated first, by:
     Operators::compare

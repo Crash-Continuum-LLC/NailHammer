@@ -13,9 +13,12 @@ rule stmt
 ```console
 $ nh build pebble.nh -o src/pebble.pest --rust src
 ok: generated 15 file(s) in src  [7 new handler(s), 0 kept]
+note: 7 handler(s) not implemented yet — each reports at run time
 ```
 
-Seven handler files, one per labelled alternative. Open one:
+Seven handler files, one per labelled alternative, grouped into a directory per
+rule — `stmt/declare.rs`, `stmt/show.rs`, `stmt/evaluate.rs`. A rule with a
+single alternative keeps a file of its own, like `program.rs`. Open one:
 
 ```rust
 //! Handler for `stmt_declare`.
@@ -30,13 +33,21 @@ Seven handler files, one per labelled alternative. Open one:
 
 /// * `name` — the text of the `IDENT` token
 /// * `value` — the value of the `expr` rule, already evaluated
+#[allow(unused_variables)]
 pub fn run<H: Handlers>(host: &mut H, name: &str, value: H::Out, cx: &mut Ctx)
     -> Result<H::Out>
 {
-    compile_error!("handler `stmt_declare` is not implemented. ...");
+    // handler `stmt_declare` is not implemented. Delete this line, then return
+    // a value built from the parameters above.
+    //
+    // `cx.err(..)` reports at this node — no span threading needed.
     cx.err("`stmt_declare` is not implemented yet")
 }
 ```
+
+**A stub compiles.** It reports at run time, at the node, naming itself — so the
+statements you *have* written run while the rest are still stubs. Delete the
+marker comment as you fill each one in; `nh build` counts what is left.
 
 **The bindings are the parameters.** `name:IDENT` became `name: &str`;
 `value:expr` became `value: H::Out`, already evaluated, because the generated
@@ -56,7 +67,7 @@ host. **Narrow it to your own type** as you fill it in — every worked example 
 the repository does — and the signature gets shorter and the errors get better:
 
 ```rust
-// handlers/stmt_declare.rs
+// handlers/stmt/declare.rs
 use nh_runtime::{Ctx, Result};
 use crate::{Interp, Value};
 
@@ -69,7 +80,7 @@ pub fn run(host: &mut Interp, name: &str, value: Value, _cx: &mut Ctx) -> Result
 The rest of this book shows handlers in that narrowed form.
 
 ```rust
-// handlers/atom_number.rs
+// handlers/atom/number.rs
 pub fn run(_host: &mut Interp, value: &str, cx: &mut Ctx) -> Result<Value> {
     match value.parse() {
         Ok(n) => Ok(Value::Num(n)),
@@ -79,7 +90,7 @@ pub fn run(_host: &mut Interp, value: &str, cx: &mut Ctx) -> Result<Value> {
 ```
 
 ```rust
-// handlers/atom_text.rs
+// handlers/atom/text.rs
 pub fn run(_host: &mut Interp, text: &str, _cx: &mut Ctx) -> Result<Value> {
     // The token includes its quotes, because the grammar matched them.
     Ok(Value::Text(text[1..text.len() - 1].to_string()))

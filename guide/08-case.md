@@ -64,7 +64,7 @@ Every use is one or the other, and the rule is short: **`key()` for lookups,
 `text()` for messages.**
 
 ```rust
-// handlers/atom_name.rs
+// handlers/atom/name.rs
 pub fn run(host: &mut Interp, name: &Name, cx: &mut Ctx) -> Result<Value> {
     match host.get(name.key()) {
         Some(v) => Ok(v.clone()),

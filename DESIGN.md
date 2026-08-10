@@ -594,18 +594,33 @@ a trait with one required method per labeled alternative and an impl whose bodie
 only delegate to a per-rule module:
 
 ```rust
-// generated, always overwritten: handlers/mod.rs
+// generated, always overwritten
 impl Handlers for Interp {
     fn stmt_let(&mut self, name: &str, value: Value, cx: &mut Ctx) -> Result<Value> {
-        crate::handlers::stmt_let::run(self, name, value, cx)
+        crate::handlers::stmt::let_::run(self, name, value, cx)
     }
     // ...one delegation per labeled alternative
 }
 ```
 
-You write only `handlers/stmt_let.rs` — one small file each. Rust's own
-exhaustiveness does the checking: add an alternative to the `.nh` and the build
-fails until a handler exists. No runtime registry lookup that can silently miss.
+You write only `handlers/stmt/let_.rs` — one small file each, grouped into a
+directory per rule, because a language with fifty statements is fifty files in
+one directory otherwise. Rust's own
+exhaustiveness does the checking: add an alternative to the `.nh` and a stub
+appears for it. No runtime registry lookup that can silently miss.
+
+**A stub reports at run time; it does not break the build.** It once did, via
+`compile_error!`, and that was wrong for a reason only visible on a real
+language: `nh_handlers!` cannot expand while any stub is a `compile_error!`, so
+`Handlers` is not implemented, so `.eval(..)` does not resolve — and `lazy`
+handlers, the ones for conditionals, loops and access chains (§6.7), were
+precisely the ones that could not be written until every *other* handler already
+was. A sixty-rule grammar had no working build until its last trivial stub was
+filled in.
+
+Nothing silently misses. `cx.err` reports at the node, with a span, naming the
+handler; `nh build` prints how many stubs remain. The check moved from "refuse
+to compile" to "say so, twice, and let the rest of the language run".
 
 **Regeneration policy** — stated up front because getting it wrong destroys user
 work:
@@ -625,9 +640,11 @@ not want this code":
 | Orphan that is still an untouched stub | `--prune` removes it. No work is lost |
 | Orphan containing real code | Reported; needs `--prune --force`. Read it first |
 
-The generated stub's `compile_error!` doubles as the marker: it tells you to
-delete that line, so its absence means somebody did. That is what separates a
-handler nobody ever wrote from one somebody did.
+The generated stub carries a marker comment — *"is not implemented. Delete this
+line"* — which it instructs you to delete, so its absence means somebody did.
+That is what separates a handler nobody ever wrote from one somebody did. It was
+a `compile_error!` until that turned out to block `lazy` handlers entirely; the
+marker survived the change, because pruning depends on it.
 
 ### 5.5 Errors and recovery
 
@@ -942,7 +959,7 @@ exactly the untyped positional destructuring this design exists to remove.
 They leave the operator table entirely and live in the grammar as a suffix chain:
 
 ```nh
-rule atom = base:primary suffixes:suffix* -> access;
+rule atom = lazy base:primary lazy suffixes:suffix* -> access;
 
 rule suffix
   = "(" args:expr_list ")"   -> call
@@ -952,10 +969,22 @@ rule suffix
   ;
 ```
 
+**Both bindings are `lazy`, and the pattern does not work without it.** `Out` is
+one type, so an eagerly-evaluated chain reaches the handler as a flat list of
+values with nothing to say which alternative produced each — reinstating exactly
+the collapse this section exists to prevent. A field access has no value to
+carry at all; it has a *name*. `lazy` hands over the discriminated node instead,
+so `access` can tell `Call` from `Field`.
+
+The base needs it for a second reason: `f(x)` is indistinguishable from `arr(x)`
+until something resolves `f`, and an eager base has already emitted a variable
+read — and discarded the name — before the argument list is even in view. Held
+lazily, the name survives long enough to try the function path first.
+
 Each becomes an ordinary handler file, its bindings arriving as parameters:
 
 ```rust
-// handlers/suffix_call.rs
+// handlers/suffix/call.rs
 pub fn run(host: &mut Interp, args: Option<Value>, cx: &mut Ctx) -> Result<Value> {
     host.invoke(args, cx)
 }
@@ -1844,7 +1873,7 @@ The fix moves the decision onto the host, next to the symbol table, and out of
 the handler:
 
 ```rust
-// handlers/primary_var.rs — shared by both styles
+// handlers/primary/var.rs — shared by both styles
 host.read(name.key(), cx)
 ```
 
@@ -2131,7 +2160,7 @@ retire.** Recorded so the first surprise isn't a discovery:
 2. ~~**Handler stub churn.**~~ *Retired.* `nh build --prune` removes orphaned
    handlers, and the orphaned/stale distinction turned out to be
    *never-implemented* versus *contains real code* — decidable from the stub's
-   `compile_error!` marker, which the stub itself instructs you to delete.
+   marker comment, which the stub itself instructs you to delete.
    Signature drift within a *current* handler is still only caught by the
    compiler, which is the right place for it.
 

@@ -94,7 +94,7 @@ inside. That is the same shape as an error, and the runtime gives you the
 distinction:
 
 ```rust
-// handlers/stmt_give.rs
+// handlers/stmt/give.rs
 pub fn run(host: &mut Interp, value: Option<Value>, cx: &mut Ctx) -> Result<Value> {
     host.stash_return(value.unwrap_or(Value::Null));
     Err(cx.signal("return"))
@@ -145,7 +145,7 @@ have bugs, and the response to one should be a message.
 ## The call
 
 ```rust
-// handlers/atom_call.rs
+// handlers/atom/call.rs
 pub fn run(host: &mut Interp, name: &str, args: Option<Value>, cx: &mut Ctx) -> Result<Value> {
     let Some(f) = host.function(name) else {
         return cx.err(format!("`{name}` is not a function"));
