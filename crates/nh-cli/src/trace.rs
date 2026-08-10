@@ -35,6 +35,13 @@ use nh_operators::OperatorTable;
 /// work out which two were the condition.
 pub struct Node {
     pub handler: String,
+    /// Where the handler lives, relative to `handlers/`.
+    ///
+    /// Carried rather than derived from `handler`, because the two no longer
+    /// agree: handlers are grouped by rule, so `stmt_iff` is `stmt/iff.rs`.
+    /// Printing the name with `.rs` on the end would send a reader to a file
+    /// that is not there.
+    pub path: String,
     /// The alternative as written in the grammar.
     pub source: String,
     pub args: Vec<Arg>,
@@ -182,12 +189,23 @@ pub fn trace(
 
 type Pair<'a> = pest::iterators::Pair<'a, &'a str>;
 
+/// Where the generator puts this handler, relative to `handlers/`.
+///
+/// Asked of the generator rather than spelled here, so trace and build cannot
+/// disagree about where a file is — which is the whole point of printing a path
+/// at all.
+fn handler_path(alt: &LoweredAlternative) -> String {
+    let full = nh_codegen::stubs::handler_path(alt);
+    full.strip_prefix("handlers/").unwrap_or(&full).to_string()
+}
+
 fn build<'a>(index: &Index<'_>, pair: Pair<'a>) -> Node {
     let rule = pair.as_rule().to_string();
     let alt = index.alts.get(rule.as_str()).copied();
 
     let mut node = Node {
         handler: alt.map(|a| a.pest_rule.clone()).unwrap_or(rule),
+        path: alt.map(handler_path).unwrap_or_default(),
         source: alt.map(|a| a.source.clone()).unwrap_or_default(),
         args: Vec::new(),
         inside: Vec::new(),
@@ -275,6 +293,7 @@ fn collect(index: &Index<'_>, pair: Pair<'_>, into: &mut Arg) {
     if let Some(what) = index.recovered.get(rule.as_str()) {
         into.from.push(Node {
             handler: format!("<{what} did not parse>"),
+            path: String::new(),
             source: format!("recovered here; no handler runs for `{}`", pair.as_str().trim()),
             args: Vec::new(),
             inside: Vec::new(),
@@ -304,6 +323,7 @@ fn fold_expr(index: &Index<'_>, pair: Pair<'_>) -> Node {
     let mut pos = 0;
     parse_expr(&toks, &mut pos, 0).unwrap_or_else(|| Node {
         handler: "<empty expression>".into(),
+        path: String::new(),
         source: String::new(),
         args: Vec::new(),
         inside: Vec::new(),
@@ -398,6 +418,8 @@ fn binary(lit: &str, info: &OpInfo, lhs: Node, rhs: Node) -> Node {
     let lazy_rhs = info.lazy.iter().any(|l| l == "rhs");
     Node {
         handler: format!("Operators::{}", info.role),
+        // No file: an operator goes to `Operators::<role>`, not to a handler.
+        path: String::new(),
         source: format!("`{lit}` — {}", how(info)),
         kind: Kind::Operator,
         inside: Vec::new(),
@@ -427,6 +449,8 @@ fn binary(lit: &str, info: &OpInfo, lhs: Node, rhs: Node) -> Node {
 fn unary(lit: &str, info: &OpInfo, operand: Node) -> Node {
     Node {
         handler: format!("Operators::{}", info.role),
+        // No file: an operator goes to `Operators::<role>`, not to a handler.
+        path: String::new(),
         source: format!("`{lit}` — {}", how(info)),
         kind: Kind::Operator,
         inside: Vec::new(),
@@ -462,6 +486,7 @@ fn how(info: &OpInfo) -> String {
 fn clone_node(n: &Node) -> Node {
     Node {
         handler: n.handler.clone(),
+        path: n.path.clone(),
         source: n.source.clone(),
         kind: n.kind,
         inside: n.inside.iter().map(clone_node).collect(),
@@ -502,7 +527,7 @@ fn render_node(node: &Node, depth: usize, dir: &str, out: &mut String) {
         Kind::Operator => out.push_str(&format!("{pad}{}\n", node.handler)),
         Kind::Pass => out.push_str(&format!("{pad}{}\n", node.handler)),
         Kind::Handler => {
-            out.push_str(&format!("{pad}{}  → {dir}/{}.rs\n", node.handler, node.handler))
+            out.push_str(&format!("{pad}{}  → {dir}/{}\n", node.handler, node.path))
         }
     }
     if !node.source.is_empty() {
@@ -557,7 +582,7 @@ pub fn to_json(node: &Node) -> String {
         .collect();
 
     format!(
-        "{{\"kind\":\"{}\",\"handler\":\"{}\",\"source\":\"{}\",\"args\":[{}],\"inside\":[{}]}}",
+        "{{\"kind\":\"{}\",\"handler\":\"{}\",\"path\":\"{}\",\"source\":\"{}\",\"args\":[{}],\"inside\":[{}]}}",
         match node.kind {
             Kind::Handler => "handler",
             Kind::Operator => "operator",
@@ -565,6 +590,7 @@ pub fn to_json(node: &Node) -> String {
             Kind::Pass => "pass",
         },
         esc(&node.handler),
+        esc(&node.path),
         esc(&node.source),
         args.join(","),
         node.inside.iter().map(to_json).collect::<Vec<_>>().join(",")

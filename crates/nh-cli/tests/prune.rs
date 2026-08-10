@@ -55,7 +55,7 @@ impl Project {
 
         // One handler gets real code; the other keeps its generated stub.
         std::fs::write(
-            p.handler("item_named"),
+            p.handler("item/named"),
             "// my real implementation\npub fn run() {}\n",
         )
         .unwrap();
@@ -64,6 +64,7 @@ impl Project {
         p
     }
 
+    /// Handlers are grouped by rule, so a name is a path: `item/named`.
     fn handler(&self, name: &str) -> PathBuf {
         self.dir.join("src/handlers").join(format!("{name}.rs"))
     }
@@ -97,12 +98,12 @@ fn without_prune_orphans_are_reported_and_kept() {
     let out = p.build(&[]);
 
     assert!(out.contains("no longer match any grammar alternative"), "{out}");
-    assert!(out.contains("item_named.rs  (implemented"), "{out}");
-    assert!(out.contains("item_unknown.rs  (never implemented"), "{out}");
+    assert!(out.contains("item/named.rs  (implemented"), "{out}");
+    assert!(out.contains("item/unknown.rs  (never implemented"), "{out}");
     assert!(out.contains("pass --prune"), "{out}");
 
-    assert!(p.handler("item_named").exists(), "nothing is deleted by default");
-    assert!(p.handler("item_unknown").exists());
+    assert!(p.handler("item/named").exists(), "nothing is deleted by default");
+    assert!(p.handler("item/unknown").exists());
 }
 
 /// `--prune` removes what was never written, and stops at what was.
@@ -111,12 +112,12 @@ fn prune_removes_untouched_stubs_only() {
     let p = Project::with_two_orphans();
     let out = p.build(&["--prune"]);
 
-    assert!(!p.handler("item_unknown").exists(), "the untouched stub should go");
+    assert!(!p.handler("item/unknown").exists(), "the untouched stub should go");
     assert!(
-        p.handler("item_named").exists(),
+        p.handler("item/named").exists(),
         "a handler containing code must survive --prune"
     );
-    assert!(out.contains("removed handlers/item_unknown.rs"), "{out}");
+    assert!(out.contains("removed handlers/item/unknown.rs"), "{out}");
     assert!(out.contains("pass --prune --force"), "{out}");
 }
 
@@ -125,8 +126,8 @@ fn force_removes_implemented_orphans_too() {
     let p = Project::with_two_orphans();
     p.build(&["--prune", "--force"]);
 
-    assert!(!p.handler("item_unknown").exists());
-    assert!(!p.handler("item_named").exists(), "--force removes it");
+    assert!(!p.handler("item/unknown").exists());
+    assert!(!p.handler("item/named").exists(), "--force removes it");
 }
 
 /// Handlers that still match the grammar are never candidates, implemented or

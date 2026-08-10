@@ -128,7 +128,14 @@ impl Builder {
 
         let table = nh_operators::resolve(&ast, &mut sources).map_err(|e| e.render(&sources))?;
 
-        let diagnostics = nh_analysis::analyse(&ast, table.atom_rule.as_deref());
+        // Lowering first: it is where undefined references surface, and it is
+        // also what knows which rule a program starts at. Reading that from the
+        // AST would disagree once a grammar is split across files.
+        let lowered = nh_lower::lower(&ast, &table).map_err(|e| e.render(&sources))?;
+
+        let entry_rule = lowered.entry_rule.as_deref();
+        let diagnostics =
+            nh_analysis::analyse(&ast, table.atom_rule.as_deref(), entry_rule);
         let errors = diagnostics
             .iter()
             .filter(|d| d.severity == nh_syntax::Severity::Error)
@@ -150,8 +157,6 @@ impl Builder {
                 grammar.display()
             ));
         }
-
-        let lowered = nh_lower::lower(&ast, &table).map_err(|e| e.render(&sources))?;
 
         let mut out = Generated::default();
 
@@ -200,6 +205,11 @@ impl Builder {
                 ));
             }
 
+            // A project on the old flat handler layout has its files moved into
+            // their rule's directory before anything is written — otherwise
+            // regenerating produces fresh stubs beside the author's real code.
+            nh_codegen::stubs::migrate_flat_handlers(&root, &lowered)?;
+
             for file in &generated.files {
                 let path = root.join(&file.path);
                 match file.policy {
@@ -221,16 +231,23 @@ impl Builder {
             }
 
             // A handler that no longer matches its grammar alternative. The
-            // compiler catches arity and type changes; it cannot catch a
-            // rename or a reorder, because parameters are positional.
+            // compiler catches arity and type changes — but it catches them at
+            // the *call*, in `generated/dispatch.rs`, so this names the handler
+            // instead. A rename or a reorder it cannot catch at all, because
+            // parameters are positional.
             out.drift = nh_codegen::drift::check_all(&lowered, |rel| {
                 std::fs::read_to_string(root.join(rel)).ok()
             })
             .into_iter()
-            .map(|(alt, d)| DriftReport {
-                path: root.join(format!("handlers/{}.rs", alt.pest_rule)),
-                message: d.message(&format!("handlers/{}.rs", alt.pest_rule)),
-                is_error: d.is_error(),
+            .map(|(alt, d)| {
+                // From the generator, so a grouped handler is reported where it
+                // actually lives.
+                let rel = nh_codegen::stubs::handler_path(alt);
+                DriftReport {
+                    path: root.join(&rel),
+                    message: d.message(&rel),
+                    is_error: d.is_error(),
+                }
             })
             .collect();
         }

@@ -79,6 +79,11 @@ pub struct Options {
     /// `None` leaves the `Operators` trait for the author to implement, which
     /// is the behaviour every existing project relies on.
     pub target: Option<String>,
+    /// A target read from a file, when it is not one of the built-in names.
+    ///
+    /// Set by the caller — resolving `<name>.nht` needs to know where the
+    /// grammar lives, which is the CLI's business rather than the generator's.
+    pub target_def: Option<vm::Target>,
     /// The type the generated `Operators` implementation is written for.
     ///
     /// `crate::Interp` matches what the scaffold names its host. A project that
@@ -94,6 +99,7 @@ impl Default for Options {
             module_path: "crate::generated".to_string(),
             handlers_path: "crate::handlers".to_string(),
             target: None,
+            target_def: None,
             host_type: "crate::Interp".to_string(),
         }
     }
@@ -161,7 +167,9 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
     let mut unsupported = Vec::new();
     let mut vm_module = "";
     if let Some(name) = &opts.target {
-        if let Some(vm) = vm::target_by_name(name) {
+        // A definition supplied by the caller wins, so a file may extend or
+        // replace a built-in name without this having to know which.
+        if let Some(vm) = opts.target_def.clone().or_else(|| vm::target_by_name(name)) {
             match vm::operators_impl(table, lowered, &vm, &opts.host_type) {
                 Ok(contents) => {
                     vm_module = "pub mod vm_operators;\n";
@@ -196,9 +204,11 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
 
     let mut handler_modules = Vec::new();
     for alt in &lowered.alternatives {
-        handler_modules.push(alt.pest_rule.clone());
+        // The path, not the module name: what the caller does with this is
+        // find files that no longer match an alternative.
+        handler_modules.push(stubs::handler_path(alt));
         files.push(GeneratedFile {
-            path: format!("handlers/{}.rs", alt.pest_rule),
+            path: stubs::handler_path(alt),
             contents: stubs::generate(alt, opts),
             policy: Policy::OnceOnly,
         });
@@ -209,6 +219,11 @@ pub fn generate(ast: &Ast, table: &OperatorTable, lowered: &Lowered, opts: &Opti
         contents: stubs::generate_mod(lowered),
         policy: Policy::Generated,
     });
+    // One `mod.rs` per rule that has alternatives to group. Regenerated, like
+    // the top-level one — the list of alternatives is the grammar's to state.
+    for (path, contents) in stubs::generate_rule_mods(lowered) {
+        files.push(GeneratedFile { path, contents, policy: Policy::Generated });
+    }
 
     Generated {
         files,
@@ -240,6 +255,10 @@ pub fn ident(s: &str) -> String {
         "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
         "unsafe", "use", "where", "while", "async", "await", "box", "final", "macro", "override",
         "priv", "try", "typeof", "unsized", "virtual", "yield",
+        // Reserved but rarely written, which is why they were missed: a label
+        // only became an identifier on its own when handlers moved under their
+        // rule, and `stmt_do` was fine where `stmt::do` is not.
+        "abstract", "become", "do", "gen",
     ];
     if KEYWORDS.contains(&s) {
         format!("r#{s}")

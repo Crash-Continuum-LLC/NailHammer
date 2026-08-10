@@ -55,9 +55,13 @@ OPTIONS:
     --rust <d> build: also generate views, dispatch, and handler stubs into <d>
     --target <vm>
                build: also generate operator emission for a VM, so the
-               `Operators` impl is generated rather than written. `nh-vm` is
-               the only target today; a role it cannot execute is reported
-               rather than emitted. Needs --rust
+               `Operators` impl is generated rather than written. A role it
+               cannot execute is reported rather than emitted. Needs --rust.
+               Built in: nh-vm, crash-vm. Any other name is read from
+               `<name>.nht` beside the grammar, so extending a VM and
+               targeting it needs no change to this tool.
+               Prefer declaring `target <vm>;` in the grammar — then every
+               build agrees, including the one `build.rs` runs
     --host <ty>
                build: the type the generated `Operators` impl is written for
                (default: `crate::Interp`). Needs --rust
@@ -231,7 +235,7 @@ fn init_cmd(args: &[String]) -> ExitCode {
     // `--rust` never overwrites an existing handler file, so this fills in the
     // generated half without touching them.
     let src_dir = created.pest_path.parent().unwrap_or(&opts.dir).to_path_buf();
-    if emit_rust(&src_dir, &ast, &table, &lowered, false, false, None, None) != ExitCode::SUCCESS {
+    if emit_rust(&src_dir, &opts.dir, &ast, &table, &lowered, false, false, None, None) != ExitCode::SUCCESS {
         eprintln!("error: scaffolded codegen failed — this is a bug in nh init");
         return ExitCode::FAILURE;
     }
@@ -306,7 +310,15 @@ fn check(args: &[String]) -> ExitCode {
     // every operator diagnostic that follows it.
     let mut diagnostics = table.diagnostics.clone();
     diagnostics.extend(lowering.diagnostics.clone());
-    diagnostics.extend(nh_analysis::analyse(&ast, table.atom_rule.as_deref()));
+    // The entry rule comes from lowering, which is the same answer the
+    // generator uses. Reading it from the AST here would disagree once a
+    // grammar is split across files.
+    let entry_rule = lowering.entry_rule.as_deref();
+    diagnostics.extend(nh_analysis::analyse(
+        &ast,
+        table.atom_rule.as_deref(),
+        entry_rule,
+    ));
     let errors = diagnostics
         .iter()
         .filter(|d| d.severity == nh_syntax::Severity::Error)
@@ -418,12 +430,20 @@ fn build(args: &[String]) -> ExitCode {
     if let Some(rust_dir) = parsed.value("--rust") {
         return emit_rust(
             Path::new(rust_dir),
+            path.parent().unwrap_or(Path::new(".")),
             &ast,
             &table,
             &lowered,
             parsed.has("--prune"),
             parsed.has("--force"),
-            parsed.value("--target"),
+            // The grammar's own `target nh-vm;` unless this invocation
+            // overrides it. Declared in the `.nh`, a project's `build.rs` and
+            // whoever runs `nh build` by hand cannot disagree about it — which
+            // they previously could, silently, producing a crate with no
+            // `Operators` impl and an error in a file nobody wrote.
+            parsed
+                .value("--target")
+                .or(ast.target.as_deref().map(|t| t.as_str())),
             parsed.value("--host"),
         );
     }
@@ -448,6 +468,7 @@ fn build(args: &[String]) -> ExitCode {
 #[allow(clippy::too_many_arguments)]
 fn emit_rust(
     dir: &Path,
+    grammar_dir: &Path,
     ast: &Ast,
     table: &nh_operators::OperatorTable,
     lowered: &nh_lower::Lowered,
@@ -464,13 +485,44 @@ fn emit_rust(
         ..nh_codegen::Options::default()
     };
     if let Some(name) = target {
+        // Built in, or defined in a file beside the grammar.
+        //
+        // The file is what keeps "bring your own language" from meaning "and a
+        // fork of nh": somebody extends the VM, writes `<name>.nht`, and a
+        // front end targets it without this tool knowing anything about it.
         if nh_codegen::vm::target_by_name(name).is_none() {
-            eprintln!("error: unknown target `{name}`");
-            eprintln!(
-                "help: available targets: {}",
-                nh_codegen::vm::TARGET_NAMES.join(", ")
-            );
-            return ExitCode::FAILURE;
+            let file = grammar_dir.join(format!("{name}.nht"));
+            match std::fs::read_to_string(&file) {
+                Ok(text) => match nh_codegen::vm::parse_target(&text) {
+                    Ok(t) => {
+                        if t.name != name {
+                            eprintln!(
+                                "error: `{}` declares `target {}`, not `{name}`",
+                                file.display(),
+                                t.name
+                            );
+                            return ExitCode::FAILURE;
+                        }
+                        opts.target_def = Some(t);
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}: {e}", file.display());
+                        return ExitCode::FAILURE;
+                    }
+                },
+                Err(_) => {
+                    eprintln!("error: unknown target `{name}`");
+                    eprintln!(
+                        "help: built-in targets: {}",
+                        nh_codegen::vm::TARGET_NAMES.join(", ")
+                    );
+                    eprintln!(
+                        "help: or define one in `{}`",
+                        file.display()
+                    );
+                    return ExitCode::FAILURE;
+                }
+            }
         }
     }
     if let Some(host) = host_type {
@@ -497,6 +549,31 @@ fn emit_rust(
     }
 
     let (mut written, mut kept, mut created) = (0usize, 0usize, 0usize);
+
+    // A generated file this run did not produce is stale, and stale is not
+    // harmless here: dropping `--target` stops `generated/mod.rs` declaring
+    // `vm_operators`, but the file itself stayed behind — so `nh_handlers!`
+    // never ran, no `Handlers` impl existed, and the failure surfaced as an
+    // unrelated trait bound in a *handler* the author had just written.
+    //
+    // DESIGN.md §5.4: everything under `generated/` is always regenerated and
+    // never hand-edited, which is exactly what makes removing it safe. Handler
+    // files are reported rather than deleted, because those contain your work.
+    // Before anything is written: a project on the old flat layout has its
+    // handlers moved rather than orphaned.
+    match nh_codegen::stubs::migrate_flat_handlers(dir, lowered) {
+        Ok(n) if n > 0 => eprintln!("note: {n} handler(s) moved into their rule's directory"),
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+
+    if let Err(e) = sweep_generated(dir, &generated.files) {
+        eprintln!("error: {e}");
+        return ExitCode::FAILURE;
+    }
 
     for file in &generated.files {
         let path = dir.join(&file.path);
@@ -529,11 +606,33 @@ fn emit_rust(
         }
     }
 
+    // How many handlers are still stubs.
+    //
+    // A stub no longer breaks the build — see `nh_codegen::stubs` for why — so
+    // this is what keeps the number in front of you. Without it, "not yet
+    // written" would be visible only by running the program and hitting one.
+    //
+    // Counted the same way orphans are found — recursively — because handlers
+    // are grouped by rule, and a flat read would report zero for a project
+    // whose stubs all live one directory down.
+    let mut all_handlers = Vec::new();
+    handler_files(dir, Path::new("handlers"), &mut all_handlers);
+    let pending = all_handlers
+        .iter()
+        .filter(|rel| {
+            std::fs::read_to_string(dir.join(rel))
+                .is_ok_and(|t| t.contains(nh_codegen::stubs::UNIMPLEMENTED_MARKER))
+        })
+        .count();
+
     eprintln!(
         "ok: generated {} file(s) in {}  [{created} new handler(s), {kept} kept]",
         written + created,
         dir.display()
     );
+    if pending > 0 {
+        eprintln!("note: {pending} handler(s) not implemented yet — each reports at run time");
+    }
 
     if let Err(e) = prune_orphans(dir, &generated.handler_modules, prune, force) {
         eprintln!("error: {e}");
@@ -548,7 +647,7 @@ fn emit_rust(
     });
     let mut fatal = false;
     for (alt, d) in &drift {
-        let rel = format!("handlers/{}.rs", alt.pest_rule);
+        let rel = nh_codegen::stubs::handler_path(alt);
         if d.is_error() {
             fatal = true;
             eprintln!("error: {}", d.message(&rel));
@@ -576,31 +675,75 @@ struct Orphan {
     implemented: bool,
 }
 
-fn find_orphans(dir: &Path, expected: &[String]) -> Vec<Orphan> {
-    let handlers = dir.join("handlers");
-    let Ok(entries) = std::fs::read_dir(&handlers) else {
-        return Vec::new();
+/// Every `.rs` under `handlers/`, relative to `dir`, `mod.rs` excluded.
+///
+/// Recursive, because handlers are grouped by rule — a hundred of them in one
+/// directory is the thing that grouping exists to avoid.
+fn handler_files(dir: &Path, rel: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(dir.join(rel)) else {
+        return;
     };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let here = rel.join(&name);
+        if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            handler_files(dir, &here, out);
+        } else if name.ends_with(".rs") && name != "mod.rs" {
+            out.push(here.to_string_lossy().replace('\\', "/"));
+        }
+    }
+}
 
-    let mut orphans: Vec<Orphan> = entries
-        .flatten()
-        .filter_map(|e| {
-            let path = e.path();
-            let name = e.file_name().to_string_lossy().into_owned();
-            let stem = name.strip_suffix(".rs")?.to_string();
-            if stem == "mod" || expected.contains(&stem) {
-                return None;
-            }
+fn find_orphans(dir: &Path, expected: &[String]) -> Vec<Orphan> {
+    let mut found = Vec::new();
+    handler_files(dir, Path::new("handlers"), &mut found);
+
+    let mut orphans: Vec<Orphan> = found
+        .into_iter()
+        .filter(|rel| !expected.iter().any(|e| e == rel))
+        .map(|rel| {
+            let path = dir.join(&rel);
             let text = std::fs::read_to_string(&path).unwrap_or_default();
-            Some(Orphan {
+            Orphan {
                 implemented: !text.contains(nh_codegen::stubs::UNIMPLEMENTED_MARKER),
                 path,
-                name: stem,
-            })
+                name: rel,
+            }
         })
         .collect();
     orphans.sort_by(|a, b| a.name.cmp(&b.name));
     orphans
+}
+
+/// Removes files under `generated/` that this run did not produce.
+///
+/// Unconditional, unlike `--prune` for handlers: a generated file carries a DO
+/// NOT EDIT header and is rewritten on every build, so there is no user work to
+/// weigh against removing it. Leaving one behind is worse than it looks — a
+/// module the author never wrote can stop compiling the crate, and the error
+/// will name something else entirely.
+fn sweep_generated(dir: &Path, files: &[nh_codegen::GeneratedFile]) -> Result<(), String> {
+    let generated_dir = dir.join("generated");
+    let Ok(entries) = std::fs::read_dir(&generated_dir) else {
+        return Ok(());
+    };
+
+    let produced: std::collections::HashSet<String> = files
+        .iter()
+        .filter_map(|f| Path::new(&f.path).file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .collect();
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".rs") || produced.contains(&name) {
+            continue;
+        }
+        std::fs::remove_file(entry.path())
+            .map_err(|e| format!("cannot remove `{}`: {e}", entry.path().display()))?;
+        eprintln!("removed generated/{name}  (no longer generated)");
+    }
+    Ok(())
 }
 
 /// Reports orphaned handlers, and removes them when asked.
@@ -623,7 +766,7 @@ fn prune_orphans(dir: &Path, expected: &[String], prune: bool, force: bool) -> R
         if removable {
             std::fs::remove_file(&orphan.path)
                 .map_err(|e| format!("cannot remove `{}`: {e}", orphan.path.display()))?;
-            eprintln!("removed handlers/{}.rs", orphan.name);
+            eprintln!("removed {}", orphan.name);
             removed += 1;
         } else {
             kept.push(orphan);
@@ -641,7 +784,7 @@ fn prune_orphans(dir: &Path, expected: &[String], prune: bool, force: bool) -> R
             } else {
                 "never implemented"
             };
-            eprintln!("  handlers/{}.rs  ({note})", orphan.name);
+            eprintln!("  {}  ({note})", orphan.name);
         }
 
         if !prune {
@@ -699,10 +842,15 @@ fn trace_cmd(args: &[String]) -> ExitCode {
         Err(e) => return report(&e, &sm),
     };
 
-    // The entry rule is the first one declared, unless told otherwise.
+    // The rule the entry *file* declares first, unless told otherwise.
+    //
+    // Not `rules.first()`: imports merge post-order, so that is the first rule
+    // of the deepest import — and tracing a split grammar would parse it with
+    // somebody else's rule and report a baffling failure.
     let entry = parsed
         .value("--rule")
         .map(str::to_string)
+        .or_else(|| lowered.entry_rule.clone())
         .or_else(|| lowered.rules.first().map(|r| r.name.clone()))
         .unwrap_or_else(|| "program".into());
 

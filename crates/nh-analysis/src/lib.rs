@@ -32,7 +32,15 @@ pub use lints::LINTS;
 /// grammar text alone. Reporting it would be a false positive on every grammar
 /// that uses a preset — and one bad warning is enough to teach people to ignore
 /// the rest.
-pub fn analyse(ast: &Ast, operator_atom: Option<&str>) -> Vec<Diagnostic> {
+///
+/// `entry_rule` is passed for the same reason, and the reason is sharper. It is
+/// "the first rule declared" — but a grammar split across files merges its
+/// imports **before** the importer (`import.rs`: *"Post-order: dependencies are
+/// recorded before their importer"*), so the first rule of the merged AST is
+/// the first rule of the deepest import, not of the entry file. Working it out
+/// from the AST here gave a different answer than the generator's, and warned
+/// that the actual entry rule was unused.
+pub fn analyse(ast: &Ast, operator_atom: Option<&str>, entry_rule: Option<&str>) -> Vec<Diagnostic> {
     let allowed = Allowed::from(ast);
     let mut out = Vec::new();
 
@@ -41,7 +49,7 @@ pub fn analyse(ast: &Ast, operator_atom: Option<&str>) -> Vec<Diagnostic> {
     lints::shadowed_alternatives(ast, &allowed, &mut out);
     lints::unreachable_alternatives(ast, &allowed, &mut out);
     lints::duplicate_bindings(ast, &allowed, &mut out);
-    lints::unused_definitions(ast, operator_atom, &allowed, &mut out);
+    lints::unused_definitions(ast, operator_atom, entry_rule, &allowed, &mut out);
     lints::recover_sync(ast, &allowed, &mut out);
     lints::silent_binding(ast, &allowed, &mut out);
     lints::unknown_allows(ast, &mut out);
@@ -54,9 +62,10 @@ pub fn analyse(ast: &Ast, operator_atom: Option<&str>) -> Vec<Diagnostic> {
 pub fn check(
     ast: &Ast,
     operator_atom: Option<&str>,
+    entry_rule: Option<&str>,
     deny_warnings: bool,
 ) -> Result<Vec<Diagnostic>, Errors> {
-    let diagnostics = analyse(ast, operator_atom);
+    let diagnostics = analyse(ast, operator_atom, entry_rule);
     let fatal = diagnostics
         .iter()
         .any(|d| d.severity == Severity::Error || (deny_warnings && d.severity == Severity::Warning));

@@ -95,8 +95,8 @@ fn scaffold_creates_a_complete_project() {
         "src/generated/place.rs",
         // Working handlers, not `todo!` stubs.
         "src/handlers/program.rs",
-        "src/handlers/stmt_bind.rs",
-        "src/handlers/primary_num.rs",
+        "src/handlers/stmt/bind.rs",
+        "src/handlers/primary/num.rs",
     ] {
         assert!(dir.join(f).exists(), "missing {f}");
     }
@@ -153,7 +153,7 @@ fn the_runtime_is_vendored_into_the_project() {
 #[test]
 fn handlers_are_implemented_not_stubbed() {
     let dir = scaffold("impls");
-    let handler = read(&dir, "src/handlers/stmt_bind.rs");
+    let handler = read(&dir, "src/handlers/stmt/bind.rs");
     assert!(
         !handler.contains("is not implemented yet"),
         "the scaffold must ship working handlers:\n{handler}"
@@ -528,11 +528,21 @@ fn both_styles_share_their_handlers() {
     let c = scaffold_with("shc", &["--style", "c", "--with", "all"]);
     let b = scaffold_with("shb", &["--style", "basic", "--with", "all"]);
 
+    // Handlers are grouped by rule, so this walks: `stmt/bind.rs`, not `stmt`.
+    fn walk(root: &Path, rel: &Path, out: &mut Vec<String>) {
+        for e in std::fs::read_dir(root.join(rel)).expect("a handlers directory") {
+            let e = e.expect("an entry");
+            let here = rel.join(e.file_name());
+            if e.file_type().expect("a kind").is_dir() {
+                walk(root, &here, out);
+            } else {
+                out.push(here.to_string_lossy().into_owned());
+            }
+        }
+    }
     let names = |dir: &Path| -> Vec<String> {
-        let mut v: Vec<String> = std::fs::read_dir(dir.join("src/handlers"))
-            .expect("a handlers directory")
-            .map(|e| e.expect("an entry").file_name().to_string_lossy().into_owned())
-            .collect();
+        let mut v = Vec::new();
+        walk(&dir.join("src/handlers"), Path::new(""), &mut v);
         v.sort();
         v
     };
@@ -1055,14 +1065,18 @@ async fn a_single_threaded_driver_serves_the_same_bytecode() {
 }
 "##;
 
-/// DESIGN.md §5.4: adding an alternative to the grammar breaks the build until
-/// a handler exists.
+/// DESIGN.md §5.4: adding an alternative to the grammar produces a stub, and
+/// the stub reports **at run time** rather than refusing to compile.
 ///
-/// This only holds because the generated stub is a `compile_error!`. A stub
-/// that compiled and failed at run time would let an unhandled alternative ship.
+/// It was a `compile_error!` once, and that was wrong for a reason only a real
+/// language shows: `nh_handlers!` cannot expand while any stub is one, so
+/// `Handlers` is never implemented, so `.eval(..)` does not resolve — and the
+/// `lazy` handlers are exactly the ones that cannot be written until every
+/// other handler already is. Nothing silently misses: the stub reports at the
+/// node, with a span, naming the handler, and everything else still runs.
 #[test]
 #[ignore = "compiles a whole cargo project"]
-fn an_unhandled_alternative_breaks_the_build() {
+fn an_unhandled_alternative_reports_at_run_time() {
     let dir = scaffold("unhandled");
 
     let grammar = dir.join("unhandled.nh");
@@ -1072,23 +1086,37 @@ fn an_unhandled_alternative_breaks_the_build() {
     );
     std::fs::write(&grammar, text).unwrap();
 
+    std::fs::write(dir.join("prog.unhandled"), "print 1;\nshow 2;\n").unwrap();
+
     let out = Command::new(env!("CARGO"))
         .current_dir(&dir)
         .env("NH", env!("CARGO_BIN_EXE_nh"))
         .env("CARGO_TARGET_DIR", shared_target())
-        .args(["build", "--quiet"])
+        .args(["run", "--quiet", "--", "prog.unhandled"])
         .output()
         .expect("running cargo");
 
-    assert!(!out.status.success(), "an unhandled alternative must fail the build");
+    let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
+
     assert!(
-        stderr.contains("handler `stmt_show` is not implemented"),
-        "the error should name the handler and point at its file:\n{stderr}"
+        dir.join("src/handlers/stmt/show.rs").exists(),
+        "the stub should be waiting, under its rule"
     );
     assert!(
-        dir.join("src/handlers/stmt_show.rs").exists(),
-        "and the stub should be waiting"
+        stderr.contains("`stmt_show` is not implemented yet"),
+        "the report should name the handler:\n{stderr}"
+    );
+    assert!(
+        !out.status.success(),
+        "an unimplemented handler is still a failure:\n{stdout}"
+    );
+    // The statements that *are* implemented ran, which is the whole point of
+    // the change.
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        vec!["1"],
+        "the rest of the language still runs:\n{stdout}"
     );
 }
 

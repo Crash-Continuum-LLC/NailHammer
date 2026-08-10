@@ -65,6 +65,20 @@ const SAMPLE_FNS_BASIC: &str = include_str!("templates/sample_functions_basic");
 /// `nh build --rust` would create, so `cargo run` does something on the first
 /// try. `nh build --rust` never overwrites an existing handler, so these
 /// survive regeneration.
+/// Where a scaffolded handler goes, relative to `handlers/`.
+///
+/// The generator groups alternatives under their rule. Only `stmt` and
+/// `primary` have more than one in the scaffolded grammar — everything else is
+/// its own rule with a single alternative, and stays flat.
+fn scaffold_handler_path(name: &str) -> String {
+    for rule in ["stmt", "primary"] {
+        if let Some(label) = name.strip_prefix(&format!("{rule}_")) {
+            return format!("{rule}/{label}.rs");
+        }
+    }
+    format!("{name}.rs")
+}
+
 const HANDLERS: &[(&str, &str)] = &[
     ("program", include_str!("templates/handlers/program.rs")),
     ("block", include_str!("templates/handlers/block.rs")),
@@ -445,7 +459,17 @@ pub fn scaffold(opts: &Options) -> Result<Created, String> {
             .find(|(n, _)| *n == name)
             .map(|(_, b)| *b)
             .unwrap_or_else(|| panic!("no template for handler `{name}`"));
-        files.push((handlers.join(format!("{name}.rs")), render(body, opts)));
+        // Written where the generator would put it: handlers are grouped by
+        // rule, so `stmt_bind` is `handlers/stmt/bind.rs`. Naming it flat and
+        // letting the migration move it would work, and would make a fresh
+        // scaffold announce that it had relocated its own files.
+        let rel = scaffold_handler_path(name);
+        let path = handlers.join(&rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create `{}`: {e}", parent.display()))?;
+        }
+        files.push((path, render(body, opts)));
     }
 
     let mut written = Vec::new();

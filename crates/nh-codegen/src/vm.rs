@@ -32,14 +32,26 @@ use crate::{ident, type_name};
 use crate::operators::{emitted, Emitted};
 
 /// How a target spells one role.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Shape {
     /// `Op::Name { dst, a, b }`
-    Binary(&'static str),
+    Binary(String),
     /// `Op::Name { dst, <field> }` — the operand's field name travels with the
     /// shape, because it is not always `a`: `Await` calls it `src`, since what
     /// it holds is the thing being waited on rather than an arithmetic operand.
-    Unary(&'static str, &'static str),
+    Unary(String, String),
+    /// `Op::Ext(Path { dst, a, b })` — a **language's own** binary instruction.
+    ///
+    /// The reason a target is not just a table of core opcodes. A front end
+    /// compiling for somebody else's extended VM binds its operators to that
+    /// VM's extension set, and without this it could only reach the base
+    /// instructions — which is the half of the machine nobody extended.
+    ///
+    /// The path is written as the generated code will spell it, e.g.
+    /// `crash_vm::BasicOp::Deref`.
+    ExtBinary(String),
+    /// `Op::Ext(Path { dst, <field> })` — the unary form.
+    ExtUnary(String, String),
     /// `Op::Compare { dst, cmp, a, b }` — one instruction, discriminant as an
     /// operand, rather than six near-identical opcodes.
     Compare,
@@ -63,7 +75,7 @@ pub enum Shape {
     /// The payload names the jump that **skips** the right operand — so `&&`
     /// skips when the left is false and `||` when it is true. Everything else
     /// about the two is identical, which is why one shape covers both.
-    ShortCircuit(&'static str),
+    ShortCircuit(String),
 }
 
 /// A VM's instruction set, as far as operators are concerned.
@@ -73,9 +85,10 @@ pub enum Shape {
 /// needed here is the *one* mapping, in code, where it can be type-checked.
 /// A file only becomes necessary for a front end compiling against somebody
 /// else's extended VM (§7.5), which is not this.
+#[derive(Clone, Debug)]
 pub struct Target {
-    pub name: &'static str,
-    pub ops: BTreeMap<&'static str, Shape>,
+    pub name: String,
+    pub ops: BTreeMap<String, Shape>,
 }
 
 impl Target {
@@ -87,36 +100,57 @@ impl Target {
     /// being demonstrated.
     pub fn nh_vm() -> Self {
         let mut ops = BTreeMap::new();
-        ops.insert("add", Shape::Binary("Add"));
-        ops.insert("sub", Shape::Binary("Sub"));
-        ops.insert("mul", Shape::Binary("Mul"));
-        ops.insert("div", Shape::Binary("Div"));
-        ops.insert("neg", Shape::Unary("Neg", "a"));
-        ops.insert("not", Shape::Unary("Not", "a"));
-        ops.insert("bit_and", Shape::Binary("And"));
-        ops.insert("bit_or", Shape::Binary("Or"));
-        ops.insert("bit_xor", Shape::Binary("Xor"));
-        ops.insert("rem", Shape::Binary("Rem"));
-        ops.insert("pow", Shape::Binary("Pow"));
-        ops.insert("shl", Shape::Binary("Shl"));
-        ops.insert("shr", Shape::Binary("Shr"));
-        ops.insert("shift", Shape::Compare); // grouped `<< >>` in c_style
-        ops.insert("bit_not", Shape::Unary("BitNot", "a"));
-        ops.insert("pos", Shape::Identity);
-        ops.insert("comma", Shape::Sequence);
-        ops.insert("len", Shape::Unary("Len", "src"));
-        ops.insert("assign", Shape::Assign);
+        ops.insert("add".into(), Shape::Binary("Add".into()));
+        ops.insert("sub".into(), Shape::Binary("Sub".into()));
+        ops.insert("mul".into(), Shape::Binary("Mul".into()));
+        ops.insert("div".into(), Shape::Binary("Div".into()));
+        ops.insert("neg".into(), Shape::Unary("Neg".into(), "a".into()));
+        ops.insert("not".into(), Shape::Unary("Not".into(), "a".into()));
+        ops.insert("bit_and".into(), Shape::Binary("And".into()));
+        ops.insert("bit_or".into(), Shape::Binary("Or".into()));
+        ops.insert("bit_xor".into(), Shape::Binary("Xor".into()));
+        ops.insert("idiv".into(), Shape::Binary("IDiv".into()));
+        ops.insert("rem".into(), Shape::Binary("Rem".into()));
+        ops.insert("pow".into(), Shape::Binary("Pow".into()));
+        ops.insert("shl".into(), Shape::Binary("Shl".into()));
+        ops.insert("shr".into(), Shape::Binary("Shr".into()));
+        ops.insert("shift".into(), Shape::Compare); // grouped `<< >>` in c_style
+        ops.insert("bit_not".into(), Shape::Unary("BitNot".into(), "a".into()));
+        ops.insert("pos".into(), Shape::Identity);
+        ops.insert("comma".into(), Shape::Sequence);
+        ops.insert("len".into(), Shape::Unary("Len".into(), "src".into()));
+        ops.insert("assign".into(), Shape::Assign);
         // Suspension is a unary operation on the machine: the operand is what
         // the program is waiting on, and the result is what it is handed back.
         // `ident` escapes the role to `r#await`, since it is a Rust keyword.
-        ops.insert("await", Shape::Unary("Await", "src"));
+        ops.insert("await".into(), Shape::Unary("Await".into(), "src".into()));
         // Lazy roles. Not an instruction but a *sequence with a patch point*,
         // which is why they need their own shape: short-circuiting is control
         // flow to a compiler, not an operation.
-        ops.insert("and_then", Shape::ShortCircuit("JumpIfFalse"));
-        ops.insert("or_else", Shape::ShortCircuit("JumpIfTrue"));
-        ops.insert("compare", Shape::Compare);
-        Target { name: "nh-vm", ops }
+        ops.insert("and_then".into(), Shape::ShortCircuit("JumpIfFalse".into()));
+        ops.insert("or_else".into(), Shape::ShortCircuit("JumpIfTrue".into()));
+        ops.insert("compare".into(), Shape::Compare);
+        Target { name: "nh-vm".into(), ops }
+    }
+
+    /// The **Crash VM**: the base machine plus Crash's own instructions.
+    ///
+    /// VM-DESIGN.md §7.5: *"Crash BASIC 2.x becomes 'the base VM plus BASIC's
+    /// commands', and a front end targeting it needs to know what those
+    /// commands are and how to emit them."* This is that list, for the roles an
+    /// operator table can bind.
+    ///
+    /// A language targeting this is not Crash BASIC and need not resemble it.
+    /// It binds whichever of these roles it has spellings for, and gets the
+    /// instruction — which is what "bring your own language" means in practice.
+    pub fn crash_vm() -> Self {
+        let mut t = Target::nh_vm();
+        t.name = "crash-vm".into();
+        // `&s` — dereference a string as a variable or function name. No
+        // machine has an instruction for this, which is exactly why it is an
+        // extension rather than a core opcode.
+        t.ops.insert("deref".into(), Shape::ExtUnary("crash_vm::BasicOp::Deref".into(), "src".into()));
+        t
     }
 }
 
@@ -129,12 +163,133 @@ impl Target {
 pub fn target_by_name(name: &str) -> Option<Target> {
     match name {
         "nh-vm" => Some(Target::nh_vm()),
+        "crash-vm" => Some(Target::crash_vm()),
         _ => None,
     }
 }
 
+/// Reads a target definition.
+///
+/// # Why a file
+///
+/// VM-DESIGN.md §7.5 reserves exactly one case for this: *"a front end
+/// compiling for someone else's extended VM. A language building its own VM
+/// needs no file at all."* Extending the machine and targeting it must not
+/// require patching this toolkit, or "bring your own language" means "bring
+/// your own language and a fork of nh".
+///
+/// # The format
+///
+/// ```text
+/// // Anything after `//` is a comment.
+/// target crash-vm;
+/// extends nh-vm;
+///
+/// op deref = ext crash_vm::BasicOp::Deref { dst, src };
+/// op mid   = ext crash_vm::BasicOp::Mid { dst, a, b };
+/// op add   = Add { dst, a, b };
+/// ```
+///
+/// `extends` inherits a built-in set — the base machine is not something an
+/// extended VM should have to restate. `ext` marks an instruction reached
+/// through `Op::Ext`, which is the whole difference between a core opcode and
+/// somebody's own.
+///
+/// The fields decide the arity: `{ dst, a, b }` is binary, `{ dst, <name> }` is
+/// unary and the name travels with it, because it is not always `a` — `Await`
+/// calls it `src`, since what it holds is the thing being waited on.
+///
+/// Deliberately not expressible: `Compare`, `Assign` and the short-circuit
+/// roles. Those are not one instruction but a shape the generator knows how to
+/// build, so they come from `extends` or not at all.
+pub fn parse_target(text: &str) -> Result<Target, String> {
+    let mut name: Option<String> = None;
+    let mut ops: BTreeMap<String, Shape> = BTreeMap::new();
+
+    for (i, raw) in text.lines().enumerate() {
+        let line = match raw.find("//") {
+            Some(at) => &raw[..at],
+            None => raw,
+        }
+        .trim();
+        if line.is_empty() {
+            continue;
+        }
+        let at = |m: &str| format!("line {}: {m}", i + 1);
+        let body = line
+            .strip_suffix(';')
+            .ok_or_else(|| at("every declaration ends with `;`"))?
+            .trim();
+
+        if let Some(rest) = body.strip_prefix("target ") {
+            name = Some(rest.trim().to_string());
+        } else if let Some(rest) = body.strip_prefix("extends ") {
+            let base = rest.trim();
+            let inherited = target_by_name(base)
+                .ok_or_else(|| at(&format!("`{base}` is not a known target to extend")))?;
+            // Inherited first, so a file may override one and keep the rest.
+            for (k, v) in inherited.ops {
+                ops.entry(k).or_insert(v);
+            }
+        } else if let Some(rest) = body.strip_prefix("op ") {
+            let (role, spec) = rest
+                .split_once('=')
+                .ok_or_else(|| at("an `op` needs `= <instruction>`"))?;
+            let role = role.trim();
+            let spec = spec.trim();
+
+            let (is_ext, spec) = match spec.strip_prefix("ext ") {
+                Some(r) => (true, r.trim()),
+                None => (false, spec),
+            };
+
+            let (ctor, fields) = spec
+                .split_once('{')
+                .ok_or_else(|| at("an instruction needs `{ dst, .. }`"))?;
+            let ctor = ctor.trim();
+            let fields: Vec<&str> = fields
+                .trim_end_matches('}')
+                .split(',')
+                .map(str::trim)
+                .filter(|f| !f.is_empty())
+                .collect();
+
+            let Some((first, operands)) = fields.split_first() else {
+                return Err(at("an instruction needs a `dst`"));
+            };
+            if *first != "dst" {
+                return Err(at("the first field is `dst`"));
+            }
+
+            let shape = match operands {
+                [f] if is_ext => Shape::ExtUnary(ctor.to_string(), f.to_string()),
+                [f] => Shape::Unary(ctor.to_string(), f.to_string()),
+                [a, b] if is_ext => {
+                    if (*a, *b) != ("a", "b") {
+                        return Err(at("a binary instruction names its operands `a, b`"));
+                    }
+                    Shape::ExtBinary(ctor.to_string())
+                }
+                [a, b] => {
+                    if (*a, *b) != ("a", "b") {
+                        return Err(at("a binary instruction names its operands `a, b`"));
+                    }
+                    Shape::Binary(ctor.to_string())
+                }
+                _ => return Err(at("an instruction takes one or two operands")),
+            };
+            ops.insert(role.to_string(), shape);
+        } else {
+            return Err(at("expected `target`, `extends` or `op`"));
+        }
+    }
+
+    let name = name.ok_or_else(|| "no `target <name>;` declaration".to_string())?;
+    Ok(Target { name, ops })
+}
+
 /// Names a caller can offer when a target is not recognised.
-pub const TARGET_NAMES: &[&str] = &["nh-vm"];
+pub const TARGET_NAMES: &[&str] = &["nh-vm", "crash-vm"];
 
 /// A role a grammar binds that the target cannot execute.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -181,7 +336,7 @@ pub fn operators_impl(
         if !done.insert((e.role.clone(), e.tier.fixity)) {
             continue;
         }
-        match target.ops[e.role.as_str()] {
+        match &target.ops[e.role.as_str()] {
             // A different trait, emitted below.
             Shape::ShortCircuit(_) => continue,
             // Emitted from the grammar's `place` alternatives, below, because
@@ -319,7 +474,7 @@ pub fn operators_impl(
 
 fn emit_role(out: &mut String, e: &Emitted<'_>, all: &[Emitted<'_>], target: &Target) {
     let m = ident(&e.role);
-    let shape = target.ops[e.role.as_str()];
+    let shape = &target.ops[e.role.as_str()];
 
     match (shape, e.tier.fixity) {
         (Shape::Unary(op, field), Fixity::Prefix | Fixity::Postfix) => {
@@ -329,6 +484,30 @@ fn emit_role(out: &mut String, e: &Emitted<'_>, all: &[Emitted<'_>], target: &Ta
                 \x20   fn {m}(&mut self, operand: Reg) -> Result<Reg> {{\n\
                 \x20       let dst = self.reuse(&[operand]);\n\
                 \x20       self.emit(Op::{op} {{ dst, {field}: operand }});\n\
+                \x20       Ok(dst)\n\
+                \x20   }}",
+                e.op.literal
+            );
+        }
+        (Shape::ExtBinary(path), Fixity::Left | Fixity::Right) => {
+            let _ = writeln!(
+                out,
+                "\n    /// `{}` — emits `Op::Ext({path})`.\n\
+                \x20   fn {m}(&mut self, lhs: Reg, rhs: Reg) -> Result<Reg> {{\n\
+                \x20       let dst = self.reuse(&[lhs, rhs]);\n\
+                \x20       self.emit(Op::Ext({path} {{ dst, a: lhs, b: rhs }}));\n\
+                \x20       Ok(dst)\n\
+                \x20   }}",
+                e.op.literal
+            );
+        }
+        (Shape::ExtUnary(path, field), _) => {
+            let _ = writeln!(
+                out,
+                "\n    /// `{}` — emits `Op::Ext({path})`.\n\
+                \x20   fn {m}(&mut self, operand: Reg) -> Result<Reg> {{\n\
+                \x20       let dst = self.reuse(&[operand]);\n\
+                \x20       self.emit(Op::Ext({path} {{ dst, {field}: operand }}));\n\
                 \x20       Ok(dst)\n\
                 \x20   }}",
                 e.op.literal

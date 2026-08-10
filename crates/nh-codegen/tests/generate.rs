@@ -128,9 +128,10 @@ fn handlers_are_required_and_one_file_each() {
     // Required, not defaulted: adding an alternative must break the build.
     assert!(dispatch.contains("fn item_named(&mut self, name: &str, cx: &mut Ctx) -> Result<Self::Out>;"), "{dispatch}");
     assert!(dispatch.contains("macro_rules! nh_handlers"), "{dispatch}");
-    assert!(dispatch.contains("$crate::handlers::item_named::run"), "{dispatch}");
+    // Grouped by rule: the delegation goes through the rule's module.
+    assert!(dispatch.contains("$crate::handlers::item::named::run"), "{dispatch}");
 
-    for expected in ["handlers/item_named.rs", "handlers/item_many.rs", "handlers/item_opt.rs"] {
+    for expected in ["handlers/item/named.rs", "handlers/item/many.rs", "handlers/item/opt.rs"] {
         assert!(g.files.iter().any(|f| f.path == expected), "missing {expected}");
     }
 }
@@ -140,7 +141,7 @@ fn handlers_are_required_and_one_file_each() {
 fn regeneration_policy_is_explicit() {
     let g = gen(BASIC);
     for f in &g.files {
-        let expected = if f.path.starts_with("handlers/") && f.path != "handlers/mod.rs" {
+        let expected = if f.path.starts_with("handlers/") && !f.path.ends_with("mod.rs") {
             Policy::OnceOnly
         } else {
             Policy::Generated
@@ -330,9 +331,17 @@ fn a_stub_receives_its_bindings_as_parameters() {
     for absent in ["view", "into_pair", "dispatch(", "View<"] {
         assert!(!stub.contains(absent), "a stub should never mention `{absent}`:\n{stub}");
     }
-    assert!(stub.contains("compile_error!"), "{stub}");
+    // Not `compile_error!` — a stub compiles, so the rest of the language can be
+    // built and run while this one is unwritten. See DESIGN.md §5.4.
+    assert!(!stub.contains("compile_error!"), "{stub}");
+    assert!(stub.contains(crate_marker()), "{stub}");
     // And the header quotes the grammar too.
     assert!(stub.contains(r#"//! "let" name:IDENT "=" value:expr ";" -> bind"#), "{stub}");
+}
+
+/// The marker `--prune` uses to tell an untouched stub from real code.
+fn crate_marker() -> &'static str {
+    nh_codegen::stubs::UNIMPLEMENTED_MARKER
 }
 
 /// A parameter's doc says what it *is*, so the reader never has to work out
@@ -433,12 +442,12 @@ fn a_wide_rule_does_not_warn_in_the_users_linter() {
         "the generated trait method has eight parameters"
     );
     assert!(
-        file(&g, "handlers/item_wide.rs").contains("#[allow(clippy::too_many_arguments)]"),
+        file(&g, "handlers/item/wide.rs").contains("#[allow(clippy::too_many_arguments)]"),
         "and so does the stub, which the user then owns"
     );
     // A narrow handler must not carry a pointless attribute.
     assert!(
-        !file(&g, "handlers/item_named.rs").contains("too_many_arguments"),
+        !file(&g, "handlers/item/named.rs").contains("too_many_arguments"),
         "only where it is needed"
     );
 }
@@ -577,7 +586,7 @@ fn reordering_same_typed_bindings_is_an_error() {
 
     let drift = nh_codegen::drift::check(named, handler).expect("must report");
     assert!(drift.is_error(), "a reorder is a defect, not a nitpick");
-    let msg = drift.message("handlers/item_named.rs");
+    let msg = drift.message("handlers/item/named.rs");
     assert!(msg.contains("different order"), "{msg}");
     assert!(msg.contains("grammar:  first, second"), "{msg}");
     assert!(msg.contains("handler:  second, first"), "{msg}");
@@ -609,7 +618,7 @@ fn a_fresh_stub_does_not_drift() {
     let g = gen(BASIC);
     let l = lowered_of(BASIC);
     let named = l.alternatives.iter().find(|a| a.pest_rule == "item_named").unwrap();
-    let stub = file(&g, "handlers/item_named.rs");
+    let stub = file(&g, "handlers/item/named.rs");
     assert_eq!(nh_codegen::drift::check(named, stub), None);
 }
 
@@ -622,17 +631,21 @@ fn an_unreadable_signature_is_left_alone() {
     assert_eq!(nh_codegen::drift::check(named, "// rewritten by hand\n"), None);
 }
 
-/// Adding a binding is an arity error, and the compiler names the parameter and
-/// its type. A vaguer warning ahead of it would be noise.
+/// Adding a binding is an arity error, and this used to leave it to the
+/// compiler on the grounds that its message names the parameter and its type.
+/// It does — at the *call*, in `generated/dispatch.rs`. The author is sent to a
+/// file they never wrote, so the handler is named here first.
 #[test]
-fn a_changed_parameter_count_is_left_to_the_compiler() {
+fn a_changed_parameter_count_names_the_handler() {
     let l = lowered_of(&BASIC.replace(
         "  = name:IDENT              -> named place",
         "  = name:IDENT extra:IDENT  -> named place",
     ));
     let named = l.alternatives.iter().find(|a| a.pest_rule == "item_named").unwrap();
     let stale = "pub fn run<H: Handlers>(host: &mut H, name: &str, cx: &mut Ctx) -> Result<H::Out> {}";
-    assert_eq!(nh_codegen::drift::check(named, stale), None);
+    let drift = nh_codegen::drift::check(named, stale).expect("must report");
+    assert!(drift.is_error());
+    assert!(drift.message("handlers/item/named.rs").contains("item/named.rs"));
 }
 
 // ---------------------------------------------------------------------------
@@ -846,4 +859,99 @@ fn every_eval_call_has_a_definition() {
         missing.is_empty(),
         "these are called but never defined: {missing:?}\n\n{src}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Drift the compiler catches, but blames on the wrong file
+// ---------------------------------------------------------------------------
+//
+// An arity or type change does break the build. It breaks it in
+// `generated/dispatch.rs`, where the delegation lives — and if it leaves the
+// `Handlers` impl unbuildable, the error is an unrelated trait bound in some
+// third file. Both of these happened while writing a real language, and in
+// neither case did anything point at the handler that was actually stale.
+
+/// A binding added to the grammar, and the handler never updated.
+#[test]
+fn a_missing_parameter_names_the_handler() {
+    let l = lowered_of(&BASIC.replace(
+        "  = name:IDENT              -> named place",
+        "  = first:IDENT second:IDENT -> named place",
+    ));
+    let named = l
+        .alternatives
+        .iter()
+        .find(|a| a.pest_rule == "item_named")
+        .unwrap();
+    let handler =
+        "pub fn run<H: Handlers>(host: &mut H, first: &str, cx: &mut Ctx) -> Result<H::Out> {}";
+
+    let drift = nh_codegen::drift::check(named, handler).expect("must report");
+    assert!(drift.is_error(), "the handler cannot compile as written");
+    let msg = drift.message("handlers/item/named.rs");
+    assert!(msg.contains("handlers/item/named.rs"), "{msg}");
+    assert!(msg.contains("grammar:  first, second"), "{msg}");
+    assert!(msg.contains("dispatch.rs"), "say where the compiler will point:\n{msg}");
+}
+
+/// **The one that bit twice.** Same name, same position, different thing: a
+/// binding gained `lazy`, so the handler now receives an unevaluated node where
+/// it used to get a value. Names and arity both still match, so every earlier
+/// check passed it.
+#[test]
+fn a_binding_that_gained_lazy_is_reported() {
+    let l = lowered_of(&BASIC.replace(
+        "  = name:IDENT              -> named place",
+        "  = lazy body:item          -> named place",
+    ));
+    let named = l
+        .alternatives
+        .iter()
+        .find(|a| a.pest_rule == "item_named")
+        .unwrap();
+    // What the handler said before the grammar changed.
+    let handler =
+        "pub fn run<H: Handlers>(host: &mut H, body: H::Out, cx: &mut Ctx) -> Result<H::Out> {}";
+
+    let drift = nh_codegen::drift::check(named, handler).expect("must report");
+    assert!(drift.is_error(), "the handler cannot compile as written");
+    let msg = drift.message("handlers/item/named.rs");
+    assert!(msg.contains("`body`"), "{msg}");
+    assert!(msg.contains("lazy"), "say what kind of edit did it:\n{msg}");
+}
+
+/// A concrete handler is not drifted just for being concrete.
+///
+/// A stub is generic and says `H::Out`; a hand-written one is usually
+/// `&mut Interp` and `Reg`. Those agree, and a check that could not see that
+/// would fire on every handler anybody finished.
+#[test]
+fn a_concrete_handler_is_not_drift() {
+    let l = lowered_of(BASIC);
+    let named = l
+        .alternatives
+        .iter()
+        .find(|a| a.pest_rule == "item_named")
+        .unwrap();
+    let handler = "pub fn run(host: &mut Interp, name: &str, cx: &mut Ctx) -> Result<Reg> {}";
+
+    assert_eq!(nh_codegen::drift::check(named, handler), None);
+}
+
+/// The shapes that matter, told apart by how they are spelled in either form.
+#[test]
+fn shapes_ignore_spelling_but_not_structure() {
+    use nh_codegen::drift::{shape_of, Shape};
+
+    assert_eq!(shape_of("H::Out"), shape_of("Reg"));
+    assert_eq!(shape_of("Vec<H::Out>"), shape_of("Vec<Reg>"));
+    assert_eq!(shape_of("Option<H::Out>"), shape_of("Option<Reg>"));
+
+    assert_ne!(shape_of("Vec<H::Out>"), shape_of("H::Out"));
+    assert_ne!(shape_of("Option<H::Out>"), shape_of("H::Out"));
+    assert_ne!(shape_of("&[Shared<Suffix>]"), shape_of("Vec<H::Out>"));
+    assert_ne!(shape_of("&Shared<Block>"), shape_of("H::Out"));
+    // A lazy node of one type is not a lazy node of another.
+    assert_ne!(shape_of("&Shared<Block>"), shape_of("&Shared<Expr>"));
+    assert_eq!(shape_of("&[Shared<Suffix>]"), Shape::LazyMany("Suffix".into()));
 }
