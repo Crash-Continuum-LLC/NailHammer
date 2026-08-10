@@ -359,6 +359,7 @@ fn scope_bindings(
 pub fn unused_definitions(
     ast: &Ast,
     operator_atom: Option<&str>,
+    entry_rule: Option<&str>,
     allowed: &Allowed,
     out: &mut Vec<Diagnostic>,
 ) {
@@ -404,7 +405,12 @@ pub fn unused_definitions(
         }
     }
 
-    let entry = ast.rules.first().map(|r| r.name.value.clone());
+    // Told, not guessed. `ast.rules.first()` is the first rule of the deepest
+    // *import*, because imports merge before their importer — so a grammar
+    // split across files would have this warn that its entry rule is unused.
+    let entry = entry_rule
+        .map(str::to_string)
+        .or_else(|| ast.rules.first().map(|r| r.name.value.clone()));
 
     for r in &ast.rules {
         let name = &r.name.value;

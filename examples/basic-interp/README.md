@@ -51,12 +51,12 @@ the loop got a chance to decline.
 `SUB` **keeps** its body and `CALL` runs it later:
 
 ```rust
-// handlers/stmt_define.rs — the body is stored, not run
+// handlers/stmt/define.rs — the body is stored, not run
 host.subs.insert(name.key().to_string(), body.to_vec());
 ```
 
 ```rust
-// handlers/stmt_call.rs — and run at every call, from anywhere
+// handlers/stmt/call.rs — and run at every call, from anywhere
 for line in &body {
     line.eval(host, cx)?;
 }

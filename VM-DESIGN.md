@@ -912,6 +912,58 @@ because the title is what gets believed.
 needing reclamation, and whether a sharded map beats the hybrid once globals are
 keyed by name rather than slot.
 
+#### The request protocol
+
+An extension that needs the outside world does not reach for it. It **suspends
+with a request**, the driver acts, and the caller is resumed with the answer:
+
+```text
+Flow::Suspend(Value::Array([ Str(request), ...payload ]))
+                              ^^^^^^^^^^^   ^^^^^^^^^
+                              what to do    values that cannot be text
+```
+
+The first element encodes the operation and its text arguments. The rest is
+**payload** — values whose types have to survive the crossing. A `DATA` block is
+why it exists: its contents are values, and `READ` is specified to preserve
+their types, which stringifying would destroy.
+
+An extension that suspends to *tell* the driver something has nothing to
+receive. One that suspends to *ask* — read me a line — names a destination with
+`ExtCx::resume_into`, and the answer lands there. Both are legal; a suspension
+with no destination simply drops the resumed value.
+
+This is a **wire-level contract**, not a Rust one. A front end can emit these
+without linking anything, which is the same argument §8.1 makes for bytecode
+being the plugin boundary: the interesting seam is what crosses it, not which
+types happen to be in scope on either side.
+
+What travels it, in the reference implementation: starting and cancelling
+concurrent work, every file statement, and every built-in whose answer needs
+storage or an open handle. What does not: arithmetic, control flow, and
+anything else the machine can do alone.
+
+#### What an extension may not do
+
+These are the two rules a front end has to keep. Both are about `exec`, because
+that is the only place the VM runs code it knows nothing about.
+
+**Blocking belongs in the driver, not in `exec`.** An extension that reads a
+file, waits on a socket or sleeps inside `Extension::exec` blocks the machine —
+harmless on a thread of its own, and a starved worker on any executor with a
+fixed pool. The way to do it is the way `Step::Awaiting` already works: suspend
+with a request, let the driver perform the work and resume with the answer. The
+machine never blocks, so there is nothing to starve and no `block_in_place` to
+get wrong (USAGE.md's tokio section is about exactly that hazard).
+
+**A panic in `exec` is caught.** `exec` returns a `Result`, which says a
+language's own instruction is expected to be able to fail — but a `Result` does
+not contain a panic, and an extension is the one place the VM runs code it knows
+nothing about. Unwinding from there would take down whatever is driving: a
+thread, a task, or the program that called it. It is caught and becomes
+`Step::Failed`, the same as a division by zero. A build with `panic = "abort"`
+gets no barrier, because there is no unwinding to catch.
+
 #### What does not change
 
 `Step` needs nothing. `Done | Failed | Awaiting(reg)` already keeps the runtime
@@ -920,7 +972,7 @@ several programs concurrently needs — it can interleave suspended programs
 without the VM knowing a scheduler exists. It is the one part of the current
 design that was already built for this.
 
-### 7.5 What still needs describing
+### 7.5 Targeting somebody else's machine
 
 Not machines — **extension sets**. Crash BASIC 2.x becomes "the base VM plus
 BASIC's commands", and a front end targeting it needs to know what those
@@ -931,6 +983,33 @@ templates. A list of extension opcodes and their operands.
 Which means the target-file idea survives at perhaps a fifth of its size, and
 only for the case it is genuinely needed: **a front end compiling for someone
 else's extended VM.** A language building its own VM needs no file at all.
+
+#### What it turned out to be
+
+A file listing roles and the instructions they emit, `extends` for the base
+machine, and `ext` for the instructions somebody added:
+
+```text
+target my-vm;
+extends nh-vm;
+
+op deref  = ext my_vm::Op::Deref { dst, src };
+op repeat = ext my_vm::Op::Repeat { dst, a, b };
+```
+
+`nh build --target my-vm` finds `my-vm.nht` beside the grammar. Nothing in the
+toolkit knows what `my_vm` is, and nothing had to be changed to let a front end
+reach it — which is the whole test: extending the VM and targeting it must not
+require a fork.
+
+Deliberately not expressible: `Compare`, `Assign` and the short-circuit roles.
+Those are not one instruction but a shape the generator builds, so they arrive
+through `extends` or not at all. A file that needed them would be describing a
+different generator, not a different machine.
+
+The base set is inherited rather than restated, and a file may override an
+entry — the same instruction under another name is a real thing when a VM
+forks.
 
 ### 7.6 The cost, stated honestly
 

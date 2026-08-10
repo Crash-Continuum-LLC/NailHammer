@@ -699,14 +699,14 @@ macro_rules! nh_handlers {
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_bind::run(self, name, value, cx)
+                $crate::handlers::stmt::bind::run(self, name, value, cx)
             }
             fn stmt_print(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_print::run(self, value, cx)
+                $crate::handlers::stmt::print::run(self, value, cx)
             }
             fn stmt_iff(
                 &mut self,
@@ -714,28 +714,28 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Stmt>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_iff::run(self, cond, body, cx)
+                $crate::handlers::stmt::iff::run(self, cond, body, cx)
             }
             fn stmt_eval(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_eval::run(self, value, cx)
+                $crate::handlers::stmt::eval::run(self, value, cx)
             }
             fn primary_num(
                 &mut self,
                 digits: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_num::run(self, digits, cx)
+                $crate::handlers::primary::num::run(self, digits, cx)
             }
             fn primary_var(
                 &mut self,
                 name: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_var::run(self, name, cx)
+                $crate::handlers::primary::var::run(self, name, cx)
             }
         }
         impl $crate::generated::dispatch::ShortCircuit for $host {
@@ -784,14 +784,14 @@ macro_rules! nh_handlers {
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_bind::run(self, name, value, cx)
+                $crate::handlers::stmt::bind::run(self, name, value, cx)
             }
             fn stmt_print(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_print::run(self, value, cx)
+                $crate::handlers::stmt::print::run(self, value, cx)
             }
             fn stmt_iff(
                 &mut self,
@@ -799,28 +799,28 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Stmt>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_iff::run(self, cond, body, cx)
+                $crate::handlers::stmt::iff::run(self, cond, body, cx)
             }
             fn stmt_eval(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_eval::run(self, value, cx)
+                $crate::handlers::stmt::eval::run(self, value, cx)
             }
             fn primary_num(
                 &mut self,
                 digits: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_num::run(self, digits, cx)
+                $crate::handlers::primary::num::run(self, digits, cx)
             }
             fn primary_var(
                 &mut self,
                 name: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_var::run(self, name, cx)
+                $crate::handlers::primary::var::run(self, name, cx)
             }
         }
     };

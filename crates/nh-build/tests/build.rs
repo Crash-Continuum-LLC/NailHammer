@@ -106,14 +106,29 @@ fn a_changed_grammar_regenerates_and_stubs_the_new_alternative() {
 
     let out = build_in(&dir);
     assert!(!out.written.is_empty(), "the grammar changed");
-    let stub = dir.join("src/handlers/primary_huh.rs");
+    // Grouped by rule: `rule primary` has several alternatives, so its
+    // handlers live under `primary/` rather than in one flat directory.
+    let stub = dir.join("src/handlers/primary/huh.rs");
     assert!(out.created.contains(&stub), "a stub for the new alternative");
 
-    // DESIGN.md §5.4: the build must fail until a handler exists.
+    // DESIGN.md §5.4: a stub reports at run time rather than breaking the build.
+    //
+    // This asserted the opposite until a real grammar showed what it cost:
+    // `nh_handlers!` cannot expand while a stub is a `compile_error!`, so
+    // `Handlers` is unimplemented, so `.eval(..)` does not resolve — making
+    // every `lazy` handler unwritable until all the others were done.
     let text = std::fs::read_to_string(&stub).unwrap();
     assert!(
-        text.contains("compile_error!"),
-        "an unimplemented handler must break the build, not fail at run time:\n{text}"
+        !text.contains("compile_error!"),
+        "a stub must compile, so the rest of the language can be built and run:\n{text}"
+    );
+    assert!(
+        text.contains(nh_codegen::stubs::UNIMPLEMENTED_MARKER),
+        "the marker `--prune` depends on must survive:\n{text}"
+    );
+    assert!(
+        text.contains("is not implemented yet"),
+        "and it must still report at run time:\n{text}"
     );
 }
 

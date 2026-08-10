@@ -117,7 +117,7 @@ recover stmt sync ";";
 ```
 
 ```rust
-// handlers/stmt_bind.rs — one file per alternative
+// handlers/stmt/bind.rs — one file per alternative, grouped by rule
 pub fn run(host: &mut Interp, name: &str, value: Value, cx: &mut Ctx) -> Result<Value> {
     host.set(name, value.clone());
     Ok(value)
@@ -133,7 +133,7 @@ parse tree in a handler.
 | **No tree walking** | Bindings arrive as parameters, evaluated. Reorder the grammar and handlers do not change; rename a binding and they stop compiling |
 | **Cardinality in the type** | `stmts:stmt*` gives `Vec`, `x:y?` gives `Option`. Change `*` to `?` and the handler stops compiling |
 | **`lazy` when you need it** | `lazy body:stmt` hands the handler something unevaluated and **owned**, so an `if` can decline to run its body — and a `SUB` can keep it and run it later |
-| **Missing handlers break the build** | Add an alternative and you get a `compile_error!` naming the file to write |
+| **Missing handlers announce themselves** | Add an alternative and you get a stub that reports at run time, naming the handler, and `nh build` counts how many are left |
 | **Operators are free** | One `use operators::core;` supplies precedence, associativity, and short-circuiting. `&&` does not evaluate its right operand |
 | **Assignment is correct** | `a[f()] += 1` calls `f()` exactly once, because a place is resolved before the read and the write |
 | **Errors locate themselves** | `cx.err("...")` already knows which node it is inside |
@@ -151,13 +151,13 @@ $ nh trace mylang.nh --source 'if x > 1 { print 2 + 3 * 4; }'
 program  → handlers/program.rs
   · SOI stmts:stmt* EOI -> doc
   stmts: Vec<Self::Out>   ⟵ evaluated first, by:
-    stmt_iff  → handlers/stmt_iff.rs
+    stmt_iff  → handlers/stmt/iff.rs
       · "if" cond:expr lazy then:block lazy otherwise:else_tail? -> iff
       cond: Self::Out   ⟵ evaluated first, by:
         Operators::compare
           · `>` — left-associative, precedence 4
           lhs: Self::Out   ⟵ evaluated first, by:
-            primary_var  → handlers/primary_var.rs
+            primary_var  → handlers/primary/var.rs
               · name:IDENT -> var place
               name: &str = "x"
           ...

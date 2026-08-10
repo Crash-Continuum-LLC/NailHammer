@@ -63,8 +63,11 @@ fn a_trace_names_the_handler_its_arguments_and_their_values() {
     let out = trace(&g, "let width = 4;", &[]);
 
     assert!(out.contains("stmt_bind"), "which handler:\n{out}");
+    // The path, not the name with `.rs` on the end: handlers are grouped by
+    // rule, so pointing at `handlers/stmt_bind.rs` would name a file that is
+    // not there.
     assert!(
-        out.contains("handlers/stmt_bind.rs"),
+        out.contains("handlers/stmt/bind.rs"),
         "and the file to open:\n{out}"
     );
     assert!(out.contains("name"), "the parameter names:\n{out}");

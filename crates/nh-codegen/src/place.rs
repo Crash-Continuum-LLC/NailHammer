@@ -99,24 +99,11 @@ pub fn generate(lowered: &Lowered, opts: &Options) -> String {
     }
 
     // An expression binding in a place must resolve to exactly one value, or
-    // "pre-evaluated" has no meaning. Say so at build time rather than
-    // generating something that compiles and misbehaves.
-    for alt in &places {
-        for b in &alt.bindings {
-            if b.token.is_none() && b.cardinality != Cardinality::One {
-                let _ = writeln!(
-                    out,
-                    "compile_error!(\n\
-                    \x20   \"`{}` is marked `place`, but its binding `{}` is optional or \\\n\
-                    \x20    repeated. An assignable location must resolve to exactly one \\\n\
-                    \x20    value per field, because the place is evaluated once up front.\"\n\
-                     );",
-                    alt.pest_rule, b.name
-                );
-            }
-        }
-    }
-
+    // "pre-evaluated" has no meaning. That is `check_place` in `nh-lower`, which
+    // runs during lowering — so `nh check` and `nh build` both refuse the
+    // grammar and nothing reaches here. This used to emit a `compile_error!`
+    // instead, which meant a grammar error the toolkit could name precisely was
+    // delivered by rustc, reading generated code, after `check` had said `ok`.
     emit_enum(&mut out, &places);
     if resolvable {
         emit_resolver(&mut out, &places);

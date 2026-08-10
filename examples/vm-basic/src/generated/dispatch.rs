@@ -1155,20 +1155,20 @@ macro_rules! nh_handlers {
                 body: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::line_code::run(self, body, cx)
+                $crate::handlers::line::code::run(self, body, cx)
             }
             fn line_blank(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::line_blank::run(self, cx)
+                $crate::handlers::line::blank::run(self, cx)
             }
             fn stmt_print(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_print::run(self, value, cx)
+                $crate::handlers::stmt::print::run(self, value, cx)
             }
             fn stmt_ifelse(
                 &mut self,
@@ -1177,7 +1177,7 @@ macro_rules! nh_handlers {
                 alt: &::nh_runtime::Shared<$crate::generated::ast::Block>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_ifelse::run(self, cond, body, alt, cx)
+                $crate::handlers::stmt::ifelse::run(self, cond, body, alt, cx)
             }
             fn stmt_iff(
                 &mut self,
@@ -1185,7 +1185,7 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_iff::run(self, cond, body, cx)
+                $crate::handlers::stmt::iff::run(self, cond, body, cx)
             }
             fn stmt_whilst(
                 &mut self,
@@ -1193,7 +1193,7 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_whilst::run(self, cond, body, cx)
+                $crate::handlers::stmt::whilst::run(self, cond, body, cx)
             }
             fn stmt_setelem(
                 &mut self,
@@ -1202,7 +1202,7 @@ macro_rules! nh_handlers {
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_setelem::run(self, name, index, value, cx)
+                $crate::handlers::stmt::setelem::run(self, name, index, value, cx)
             }
             fn stmt_assign(
                 &mut self,
@@ -1210,7 +1210,7 @@ macro_rules! nh_handlers {
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_assign::run(self, name, value, cx)
+                $crate::handlers::stmt::assign::run(self, name, value, cx)
             }
             fn stmt_define(
                 &mut self,
@@ -1219,14 +1219,14 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_define::run(self, name, params, body, cx)
+                $crate::handlers::stmt::define::run(self, name, params, body, cx)
             }
             fn stmt_ret(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_ret::run(self, value, cx)
+                $crate::handlers::stmt::ret::run(self, value, cx)
             }
             fn block(
                 &mut self,
@@ -1240,14 +1240,14 @@ macro_rules! nh_handlers {
                 value: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_num::run(self, value, cx)
+                $crate::handlers::primary::num::run(self, value, cx)
             }
             fn primary_str(
                 &mut self,
                 text: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_str::run(self, text, cx)
+                $crate::handlers::primary::str::run(self, text, cx)
             }
             fn primary_elem(
                 &mut self,
@@ -1255,7 +1255,7 @@ macro_rules! nh_handlers {
                 index: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_elem::run(self, name, index, cx)
+                $crate::handlers::primary::elem::run(self, name, index, cx)
             }
             fn primary_call(
                 &mut self,
@@ -1263,14 +1263,14 @@ macro_rules! nh_handlers {
                 args: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_call::run(self, name, args, cx)
+                $crate::handlers::primary::call::run(self, name, args, cx)
             }
             fn primary_var(
                 &mut self,
                 name: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_var::run(self, name, cx)
+                $crate::handlers::primary::var::run(self, name, cx)
             }
             fn primary_list(
                 &mut self,
@@ -1278,7 +1278,7 @@ macro_rules! nh_handlers {
                 rest: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_list::run(self, first, rest, cx)
+                $crate::handlers::primary::list::run(self, first, rest, cx)
             }
             fn more_elem(
                 &mut self,
@@ -1341,20 +1341,20 @@ macro_rules! nh_handlers {
                 body: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::line_code::run(self, body, cx)
+                $crate::handlers::line::code::run(self, body, cx)
             }
             fn line_blank(
                 &mut self,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::line_blank::run(self, cx)
+                $crate::handlers::line::blank::run(self, cx)
             }
             fn stmt_print(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_print::run(self, value, cx)
+                $crate::handlers::stmt::print::run(self, value, cx)
             }
             fn stmt_ifelse(
                 &mut self,
@@ -1363,7 +1363,7 @@ macro_rules! nh_handlers {
                 alt: &::nh_runtime::Shared<$crate::generated::ast::Block>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_ifelse::run(self, cond, body, alt, cx)
+                $crate::handlers::stmt::ifelse::run(self, cond, body, alt, cx)
             }
             fn stmt_iff(
                 &mut self,
@@ -1371,7 +1371,7 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_iff::run(self, cond, body, cx)
+                $crate::handlers::stmt::iff::run(self, cond, body, cx)
             }
             fn stmt_whilst(
                 &mut self,
@@ -1379,7 +1379,7 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_whilst::run(self, cond, body, cx)
+                $crate::handlers::stmt::whilst::run(self, cond, body, cx)
             }
             fn stmt_setelem(
                 &mut self,
@@ -1388,7 +1388,7 @@ macro_rules! nh_handlers {
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_setelem::run(self, name, index, value, cx)
+                $crate::handlers::stmt::setelem::run(self, name, index, value, cx)
             }
             fn stmt_assign(
                 &mut self,
@@ -1396,7 +1396,7 @@ macro_rules! nh_handlers {
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_assign::run(self, name, value, cx)
+                $crate::handlers::stmt::assign::run(self, name, value, cx)
             }
             fn stmt_define(
                 &mut self,
@@ -1405,14 +1405,14 @@ macro_rules! nh_handlers {
                 body: &::nh_runtime::Shared<$crate::generated::ast::Block>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_define::run(self, name, params, body, cx)
+                $crate::handlers::stmt::define::run(self, name, params, body, cx)
             }
             fn stmt_ret(
                 &mut self,
                 value: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::stmt_ret::run(self, value, cx)
+                $crate::handlers::stmt::ret::run(self, value, cx)
             }
             fn block(
                 &mut self,
@@ -1426,14 +1426,14 @@ macro_rules! nh_handlers {
                 value: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_num::run(self, value, cx)
+                $crate::handlers::primary::num::run(self, value, cx)
             }
             fn primary_str(
                 &mut self,
                 text: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_str::run(self, text, cx)
+                $crate::handlers::primary::str::run(self, text, cx)
             }
             fn primary_elem(
                 &mut self,
@@ -1441,7 +1441,7 @@ macro_rules! nh_handlers {
                 index: <Self as $crate::generated::dispatch::Semantics>::Out,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_elem::run(self, name, index, cx)
+                $crate::handlers::primary::elem::run(self, name, index, cx)
             }
             fn primary_call(
                 &mut self,
@@ -1449,14 +1449,14 @@ macro_rules! nh_handlers {
                 args: Option<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_call::run(self, name, args, cx)
+                $crate::handlers::primary::call::run(self, name, args, cx)
             }
             fn primary_var(
                 &mut self,
                 name: &str,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_var::run(self, name, cx)
+                $crate::handlers::primary::var::run(self, name, cx)
             }
             fn primary_list(
                 &mut self,
@@ -1464,7 +1464,7 @@ macro_rules! nh_handlers {
                 rest: Vec<<Self as $crate::generated::dispatch::Semantics>::Out>,
                 cx: &mut ::nh_runtime::Ctx,
             ) -> ::nh_runtime::Result<<Self as $crate::generated::dispatch::Semantics>::Out> {
-                $crate::handlers::primary_list::run(self, first, rest, cx)
+                $crate::handlers::primary::list::run(self, first, rest, cx)
             }
             fn more_elem(
                 &mut self,

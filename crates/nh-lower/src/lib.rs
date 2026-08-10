@@ -56,6 +56,11 @@ pub struct Lowered {
     pub diagnostics: Vec<Diagnostic>,
     /// Every rule's node shape, in declaration order (M7: the owned AST).
     pub rules: Vec<LoweredRule>,
+    /// The rule a program starts at, carried through from the entry file.
+    ///
+    /// Not `rules.first()`: imports merge post-order, so that is the first rule
+    /// of the deepest import. See `Ast::entry_rule`.
+    pub entry_rule: Option<String>,
     /// Rules that are pure alternations over labelled sub-rules.
     ///
     /// These carry no handler of their own — the alternative that matched does.
@@ -311,6 +316,7 @@ pub fn lower(ast: &Ast, table: &OperatorTable) -> Result<Lowered, Errors> {
         diagnostics,
         alternatives,
         rules,
+        entry_rule: ast.entry_rule.clone(),
         has_expr,
         recoveries,
         expectations,
@@ -1003,6 +1009,56 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// A `place` binding must resolve to exactly one value.
+    ///
+    /// An assignable location is resolved once, before the read and before the
+    /// write — that is what stops a side effect in a subscript running twice in
+    /// `a[f()] += 1`. A binding under `?`, `*` or `+` has no single value to
+    /// resolve, so the alternative cannot be a place at all.
+    ///
+    /// Tokens are exempt. A place field that *names* something arrives as a
+    /// node rather than a value, and a name needs no evaluating.
+    ///
+    /// This is checked here rather than in codegen because `check` lowers: a
+    /// grammar this tool will refuse to generate should be refused by `check`,
+    /// not by rustc reading a `compile_error!` in the output.
+    fn check_place(
+        &mut self,
+        rule: &RuleDef,
+        bindings: &[Binding],
+        alt: &Alternative,
+        pest_rule: &str,
+    ) {
+        if !alt.place {
+            return;
+        }
+        for b in bindings {
+            if b.token.is_some() || b.cardinality == Cardinality::One {
+                continue;
+            }
+            let shape = match b.cardinality {
+                Cardinality::Optional => "optional",
+                _ => "repeated",
+            };
+            self.diagnostics.push(
+                Diagnostic::error(format!(
+                    "`{pest_rule}` is marked `place`, but its binding `{}` is {shape}",
+                    b.name
+                ))
+                .at(alt.span)
+                .note(
+                    "an assignable location is resolved once, up front, so every \
+                     field it holds must be there exactly once",
+                    Some(rule.name.span),
+                )
+                .help(
+                    "bind exactly one value, or drop `place` — the handler then \
+                     receives the pieces and performs the write itself",
+                ),
+            );
+        }
+    }
+
     /// The single *rule* a transparent alternative yields, if there is one.
     ///
     /// `"(" inner:expr ")"` yields an `expr`; `primary` yields a `primary`. An
@@ -1261,6 +1317,7 @@ impl<'a> Ctx<'a> {
     ) {
         let bindings = collect_bindings(&alt.body, self.res);
         self.check_lazy(rule, &bindings, alt);
+        self.check_place(rule, &bindings, alt, &pest_rule);
         self.collected_alternatives.push(LoweredAlternative {
             rule: rule.name.value.clone(),
             label,

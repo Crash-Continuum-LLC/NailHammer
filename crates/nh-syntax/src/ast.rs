@@ -16,6 +16,23 @@ pub struct Ast {
     pub grammar_name: Option<Spanned<String>>,
     pub imports: Vec<Import>,
     pub uses: Vec<UsePreset>,
+    /// The rule a program starts at: the first one the **entry file** declares.
+    ///
+    /// Recorded rather than derived, because it cannot be derived from the
+    /// merged AST. Imports are merged post-order — dependencies before their
+    /// importer — so `rules.first()` is the first rule of the deepest import.
+    /// Reading it from there means splitting a grammar across files silently
+    /// moves the start of the language, with an `unused` warning on the old
+    /// entry rule as the only sign.
+    pub entry_rule: Option<String>,
+    /// `target nh-vm;` — the machine this grammar's operators are executed by.
+    ///
+    /// A property of the *language*, not of one invocation. It used to be only
+    /// a `--target` flag, which meant a project's `build.rs` and whoever ran
+    /// `nh build` by hand had to agree about it and nothing checked that they
+    /// did — so a build without the flag silently produced a crate with no
+    /// `Operators` impl. Declared here, there is nothing to keep in step.
+    pub target: Option<Spanned<String>>,
     pub keywords_case: Option<Spanned<CaseMode>>,
     pub precedence: Vec<PrecedenceBlock>,
     pub skips: Vec<SkipDef>,

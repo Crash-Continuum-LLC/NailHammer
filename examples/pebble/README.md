@@ -24,7 +24,7 @@ taller than wide
 |---|---|---|
 | `pebble.nh` | The grammar. The only description of the language | 2–10 |
 | `src/lib.rs` | `Value`, `Interp`, frames, and the operator semantics | 4, 6, 7, 9 |
-| `src/handlers/` | One file per labelled alternative | 4–10 |
+| `src/handlers/` | One file per labelled alternative, in a directory per rule | 4–10 |
 | `tests/run.rs` | Every test runs a program and checks what it printed | 13 |
 | `src/main.rs` | Where source comes from and where errors go | — |
 | `src/generated/` | Views, dispatch, the owned AST. Never edited | — |

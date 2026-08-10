@@ -133,13 +133,15 @@ stubs.
 **`--target`** generates the operator implementation instead of leaving it for
 you. Against a VM that owns execution, `add` means "emit the add instruction" in
 every language — a consequence rather than a decision — so it is generated, and a
-project targeting one writes **no operator code at all**. See
+project targeting one writes **no operator code at all**. `nh-vm` and `crash-vm`
+are built in; any other name is read from `<name>.nht` beside the grammar.
+Prefer declaring `target <vm>;` in the grammar, so every build agrees. See
 [Compiling for a VM](#compiling-for-a-vm).
 
 **`nh trace`** shows what a program in *your* language routes to, and with what.
 It takes the program as `--source "text"` or `--input file`, starts at the first
-declared rule unless `--rule` names another, and `--json` makes it machine
-readable. See [Seeing where a program goes](#seeing-where-a-program-goes).
+rule the entry file declares unless `--rule` names another, and `--json` makes it
+machine readable. See [Seeing where a program goes](#seeing-where-a-program-goes).
 
 **`nh explain`** prints the resolved operator table:
 
@@ -277,8 +279,14 @@ point, so this is your job — the same as it is in hand-written pest.
 grammar Name;                  // exactly one across all imported files
 import "path/to/other.nh";     // relative to the importing file
 use operators::c_style;        // c_style | c_strict | core | none
+target nh-vm;                  // the machine this language compiles for
 keywords case-insensitive;     // or case-sensitive, which is the default
 ```
+
+`target` takes the name as you would type it on the command line, hyphen and
+all, and there is one across all imported files — a grammar compiles for one
+machine. See [Compiling for a VM](#compiling-for-a-vm); a language that brings
+its own semantics does not need it.
 
 ### Tokens and skipping
 
@@ -495,6 +503,10 @@ import "common_lex.nh";
   locations.
 - A file reached by two different import paths loads once. Diamonds are fine,
   cycles are an error.
+- **A program still starts at the first rule the entry file declares**, not at
+  the first rule of the merged grammar. Imports are merged dependencies-first,
+  so those are not the same rule — splitting a grammar across files would
+  otherwise move the start of your language without saying so.
 
 ### Naming a literal for error messages
 
@@ -879,7 +891,7 @@ tree-walker instead.
 
 This is worth knowing before you pick, because it means the choice is cheaper
 than it looks. `WHILE cond ... WEND` and `while cond { }` bind the same names to
-the same shapes, so both scaffold the *same* `handlers/stmt_while.rs`:
+the same shapes, so both scaffold the *same* `handlers/stmt/while.rs`:
 
 ```rust
 pub fn run(host: &mut Interp, cond: &Shared<Expr>, body: &Shared<Block>, cx: &mut Ctx)
@@ -898,7 +910,7 @@ Reading a name that was never declared is an **error** in the braced style and
 The handler does not decide:
 
 ```rust
-// handlers/primary_var.rs — the same file in both styles
+// handlers/primary/var.rs — the same file in both styles
 pub fn run(host: &mut Interp, name: &Name, cx: &mut Ctx) -> Result<Value> {
     host.read(name.key(), cx)
 }
@@ -1097,6 +1109,60 @@ nh-vm = "0.4"
 `nh init` does not add it, because targeting a VM is a decision you make after
 scaffolding rather than during it.
 
+### Say it in the grammar
+
+A flag is a property of one invocation; the machine a language compiles for is a
+property of the *language*. Declare it and there is nothing to keep in step:
+
+```nh
+grammar mylang;
+
+target nh-vm;
+```
+
+Then `nh build mylang.nh --rust src` targets the VM whether it comes from your
+`build.rs`, from a script, or from you at a prompt. `--target` still works and
+overrides the declaration, which is what you want when trying another machine —
+but it is no longer something two callers can disagree about. They could before,
+silently: a build without the flag produced a crate with no `Operators` impl and
+an error in a file nobody had written.
+
+### Targeting somebody else's machine
+
+A VM that has been extended is not `nh-vm` any more, and a front end compiling
+for it needs to know what was added. That is a file beside the grammar,
+`<name>.nht`, and `nh build --target <name>` reads it when the name is not built
+in:
+
+```text
+target my-vm;
+extends nh-vm;
+
+op deref  = ext my_vm::Op::Deref { dst, src };
+op repeat = ext my_vm::Op::Repeat { dst, a, b };
+```
+
+| | |
+|---|---|
+| `target <name>;` | What this file defines. It must match the name you build with |
+| `extends <base>;` | Inherit a built-in set, so the base machine need not be restated. An entry may then be overridden |
+| `op <role> = <Ctor> { dst, .. };` | A core instruction — `Op::<Ctor>` |
+| `op <role> = ext <path> { dst, .. };` | A **language's own** instruction, reached through `Op::Ext` |
+
+The fields decide the arity. `{ dst, a, b }` is binary; `{ dst, <name> }` is
+unary, and the name travels with it because it is not always `a` — `Await` calls
+it `src`, since what it holds is the thing being waited on.
+
+Deliberately not expressible: `compare`, `assign`, and the short-circuit roles.
+Those are not one instruction but a shape the generator builds, so they arrive
+through `extends` or not at all.
+
+Nothing in the toolkit knows what `my_vm` is, and nothing had to change to let a
+front end reach it. That is the whole test: extending the VM and targeting it
+must not require a fork.
+
+Built-in names are `nh-vm` and `crash-vm`.
+
 What stays yours is what only you could have said: which operators exist, how
 they are spelled, their precedence and associativity — all already in the `.nh`
 table — and the handlers that lower your statements.
@@ -1199,9 +1265,46 @@ That produces two kinds of file, and the difference matters:
 
 | | |
 |---|---|
-| `src/generated/**` | **Always overwritten.** The AST, its builder, the trait stack, the evaluator |
-| `src/handlers/mod.rs` | **Always overwritten.** It only lists the modules |
-| `src/handlers/<alt>.rs` | **Written once.** Yours from then on — never overwritten, never deleted |
+| `src/generated/**` | **Always overwritten.** The AST, its builder, the trait stack, the evaluator. A file here that a build no longer produces is removed |
+| `src/handlers/mod.rs`, `src/handlers/<rule>/mod.rs` | **Always overwritten.** They only list the modules |
+| `src/handlers/<rule>/<label>.rs` | **Written once.** Yours from then on — never overwritten, never deleted |
+
+### Where a handler lives
+
+Handlers are grouped by the rule they belong to. An alternative of a
+multi-alternative rule is a file under that rule's directory, and a rule with a
+single alternative stays where it is:
+
+```text
+rule stmt = "let" name:IDENT "=" value:expr ";" -> bind
+          | "print" value:expr ";"              -> print
+          ;
+rule block = "{" stmts:stmt* "}" -> body;
+```
+
+```text
+src/handlers/
+  mod.rs          generated — lists `block` and `stmt`
+  block.rs        one alternative, so no directory
+  stmt/
+    mod.rs        generated — lists `bind` and `print`
+    bind.rs
+    print.rs
+```
+
+The grammar already groups its alternatives; this says so on disk. A language
+with fifty statements is fifty files in one directory otherwise, and the
+grouping that would make them readable is thrown away on the way out.
+
+**A project written before this is migrated, not orphaned.** `nh build` moves a
+flat `handlers/stmt_bind.rs` to `handlers/stmt/bind.rs` and says so:
+
+```console
+moved handlers/stmt_bind.rs -> handlers/stmt/bind.rs
+```
+
+Same file, same contents, new path — done once. Nothing is regenerated over the
+top of your work, and nothing is reported as an orphan that is not one.
 
 ### Will a rebuild eat my code?
 
@@ -1216,9 +1319,9 @@ Only two things ever remove a file, and both are explicit:
 | `--prune` | Deletes orphaned handlers that were **never implemented** |
 | `--prune --force` | Also deletes orphaned handlers that contain your code |
 
-"Never implemented" is not a guess. The stub ships with a `compile_error!` whose
-message tells you to delete that line, so a file that still contains it cannot
-have been finished — it would not compile. Everything else is treated as yours.
+"Never implemented" is not a guess. The stub ships with a marker comment telling
+you to delete that line, so a file that still contains it has not been finished.
+Everything else is treated as yours.
 
 Without `--prune`, an orphan is reported and left alone:
 
@@ -1228,10 +1331,10 @@ warning: 1 handler file(s) no longer match any grammar alternative:
 note: pass --prune --force to remove implemented ones too, but read them first
 ```
 
-> **The one file to be careful with is `handlers/mod.rs`.** It is regenerated on
-> every build, because it is just the list of handler modules. Anything you add
-> to it is lost. If you want shared helpers, put them in their own module
-> declared from `lib.rs`, not from `handlers/mod.rs`.
+> **The files to be careful with are `handlers/mod.rs` and each
+> `handlers/<rule>/mod.rs`.** They are regenerated on every build, because they
+> are just the list of handler modules. Anything you add to one is lost. If you
+> want shared helpers, put them in their own module declared from `lib.rs`.
 
 Everything under `src/generated/` is regenerated too, and carries a `DO NOT
 EDIT` header saying so.
@@ -1265,17 +1368,38 @@ let value = generated::dispatch::eval_program(&mut interp, &tree, &mut cx)?;
 The first step is worth having on its own. `tree` owns everything, outlives the
 parse, and can be kept, inspected, or run more than once.
 
-**Add an alternative to the grammar and the build fails until you write its
-handler:**
+**Add an alternative to the grammar and you get a stub that says so.** `nh
+build` counts what is still waiting:
 
-```
-error: handler `stmt_show` is not implemented. Delete this line, then return
-       a value built from the parameters above.
-  --> src/handlers/stmt_show.rs:18:5
+```console
+$ nh build mylang.nh -o src/mylang.pest --rust src
+ok: wrote src/mylang.pest
+ok: generated 11 file(s) in src  [1 new handler(s), 20 kept]
+note: 1 handler(s) not implemented yet — each reports at run time
 ```
 
-The stub contains a `compile_error!`, not a runtime `todo!`, so an unhandled
-alternative cannot ship. Delete that line and write the handler.
+And the stub reports at the node, with a span, when a program reaches it:
+
+```console
+$ cargo run -- prog.mylang
+1
+error: `stmt_show` is not implemented yet
+ --> prog.mylang:2:1
+  |
+2 | show 2;
+  | ^^^^^^^
+```
+
+Open the file the stub names, delete the marker comment, and write the handler.
+
+> **Why not a `compile_error!`?** It was one, and it made a real language
+> impossible to build. `nh_handlers!` cannot expand while any stub is a
+> `compile_error!`, so the `Handlers` impl does not exist, so `.eval(..)` does
+> not resolve — and `lazy` handlers, the ones for conditionals, loops and access
+> chains, are exactly the ones you cannot write until every *other* handler
+> already is. A sixty-rule grammar had no working build until its last trivial
+> stub was filled in. Nothing silently misses now: the report names the handler,
+> points at the node, and everything else in the language still runs.
 
 ### Inside a handler
 
@@ -1331,18 +1455,23 @@ If a binding is not enough and you want the raw source text, use `cx.text()`.
 
 ### Changing a grammar you have already written handlers for
 
-Most edits are caught by the compiler. Two are not, and `nh build` checks those
-itself:
+Most edits are caught by the compiler. Four are not caught *usefully*, and `nh
+build` checks those itself:
 
 | You change | What happens |
 |---|---|
-| Add an alternative | New stub with a `compile_error!`. Build fails until you write it |
+| Add an alternative | New stub. It reports at run time until you write it, and `nh build` counts how many are left |
 | Delete an alternative | The handler is reported as an orphan. `--prune` removes it if it was never implemented |
 | Rename a rule or label | Both of the above at once: a new stub, and the old file orphaned |
-| Add or remove a binding | Arity changes. The compiler names the new parameter and its type |
-| Change a cardinality or a binding's kind | The type changes. The compiler catches it |
+| **Add or remove a binding** | Arity changes. The compiler catches it — at the call, in `generated/dispatch.rs` — so `nh build` **errors** first, naming your handler |
+| **Change a cardinality or a binding's kind** | The type changes, and the compiler blames the same generated file. `nh build` **errors**, naming the parameter |
 | **Rename a binding** | Nothing the compiler can see. `nh build` **warns** |
 | **Reorder two bindings of the same type** | Nothing the compiler can see. `nh build` **errors** |
+
+The two arity and type rows are about *where the error lands*, not whether one
+exists. Being right about which file is wrong is most of the value: a change
+that leaves the `Handlers` impl unbuildable otherwise surfaces as an unrelated
+trait bound in a handler you had just finished.
 
 The last two need explaining, because they are the ones that can bite.
 
@@ -1530,7 +1659,7 @@ A `lazy` parameter is **owned**, so a handler can store it as easily as run it.
 That is what makes subroutines and functions possible:
 
 ```rust
-// handlers/stmt_define.rs — SUB name ... END SUB
+// handlers/stmt/define.rs — SUB name ... END SUB
 pub fn run(host: &mut Interp, name: &Name, body: &[Shared<Line>], cx: &mut Ctx) -> Result<Value> {
     host.subs.insert(name.key().to_string(), body.to_vec());
     Ok(Value::Nothing)
@@ -1894,14 +2023,14 @@ it costs a parse. Without it, the question is a generate-compile-add-print-
 statements round trip to learn something the grammar already decided.
 
 ```
-stmt_bind  → handlers/stmt_bind.rs
+stmt_bind  → handlers/stmt/bind.rs
   · "let" name:IDENT "=" value:expr ";" -> bind
   name: &str = "a"
   value: Self::Out   ⟵ evaluated first, by:
     Operators::add
       · `+` — left-associative, precedence 4
       lhs: Self::Out   ⟵ evaluated first, by:
-        primary_num  → handlers/primary_num.rs
+        primary_num  → handlers/primary/num.rs
           · digits:NUMBER -> num
           digits: &str = "1"
       rhs: Self::Out   ⟵ evaluated first, by:
@@ -2073,13 +2202,13 @@ Deleting an alternative from the grammar leaves its handler file behind.
 ```console
 $ nh build mylang.nh --rust src
 warning: 2 handler file(s) no longer match any grammar alternative:
-  handlers/stmt_old.rs  (implemented — contains your code)
-  handlers/stmt_new.rs  (never implemented)
+  handlers/stmt/old.rs  (implemented — contains your code)
+  handlers/stmt/new.rs  (never implemented)
 note: pass --prune to remove the unimplemented ones
 ```
 
-`--prune` removes only handlers **nobody ever wrote**. The stub's
-`compile_error!` says to delete that line, so its absence means somebody did.
+`--prune` removes only handlers **nobody ever wrote**. The stub carries a marker
+comment saying to delete that line, so its absence means somebody did.
 Removing a handler that contains code needs `--force` as well, because "this rule
 no longer exists" is not the same claim as "you do not want this code".
 

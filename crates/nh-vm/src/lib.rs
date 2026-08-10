@@ -50,7 +50,7 @@ pub mod wire;
 
 pub use emit::{Emit, Emitter};
 pub use machine::{Machine, Snapshot, Step};
-pub use program::{FnDef, Program};
+pub use program::{DebugInfo, FnDef, Program};
 pub use op::{Cmp, ExtCx, Extension, Flow, NoExt, Op, Reg};
 pub use store::{
     AtomicNumStore, BankLockStore, DefaultStore, HybridStore, LocalStore, MutexStore, RwLockStore,

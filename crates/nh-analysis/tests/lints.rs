@@ -28,7 +28,7 @@ fn lints_of(source: &str) -> Vec<(Severity, String)> {
 
     let mut sm = SourceMap::new();
     let ast = resolve(&mut sm, &path).unwrap_or_else(|e| panic!("{}", e.render(&sm)));
-    analyse(&ast, None)
+    analyse(&ast, None, ast.entry_rule.as_deref())
         .into_iter()
         .map(|d| (d.severity, d.message))
         .collect()
@@ -255,7 +255,7 @@ fn the_shipped_grammars_produce_no_diagnostics() {
         let ast = resolve(&mut sm, &repo(rel)).unwrap_or_else(|e| panic!("{}", e.render(&sm)));
         let table = nh_operators::resolve(&ast, &mut sm).unwrap();
 
-        let found = analyse(&ast, table.atom_rule.as_deref());
+        let found = analyse(&ast, table.atom_rule.as_deref(), ast.entry_rule.as_deref());
         assert!(
             found.is_empty(),
             "{rel} should analyse clean, got:\n{}",

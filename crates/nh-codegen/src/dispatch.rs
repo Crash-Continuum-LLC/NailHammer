@@ -476,7 +476,8 @@ fn emit_handlers_impl(out: &mut String, lowered: &Lowered) {
 
     for alt in &lowered.alternatives {
         let m = ident(&alt.pest_rule);
-        let module = &alt.pest_rule;
+        // Grouped by rule, so this is `stmt::assign` rather than `stmt_assign`.
+        let module = crate::stubs::handler_module(alt);
         let ps = params(alt);
 
         // Inside a macro the parameter types must be spelled with `$crate`, and

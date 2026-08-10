@@ -88,6 +88,14 @@
           }
         },
         {
+          "comment": "`target nh-vm;` — the machine this grammar compiles for. The name takes a hyphen, because it is spelled as it is on the command line.",
+          "match": "\\b(target)\\s+([A-Za-z_][A-Za-z0-9_-]*)",
+          "captures": {
+            "1": { "name": "keyword.control.nh" },
+            "2": { "name": "support.class.nh" }
+          }
+        },
+        {
           "comment": "`reserved from IDENT { .. }` and `guard from IDENT { .. }`",
           "match": "\\b(reserved|guard)\\s+(from)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {

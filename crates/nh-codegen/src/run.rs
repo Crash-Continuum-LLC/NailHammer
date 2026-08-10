@@ -21,9 +21,16 @@ use nh_lower::Lowered;
 
 use crate::{ident, type_name, Options, HEADER};
 
-/// The rule a program starts at: the first one declared.
+/// The rule a program starts at: the first one the **entry file** declares.
+///
+/// Not `rules.first()`. Imports merge post-order — dependencies before their
+/// importer — so that is the first rule of the deepest import, and splitting a
+/// grammar across files would quietly move the start of the language.
 fn entry(lowered: &Lowered) -> Option<&str> {
-    lowered.rules.first().map(|r| r.name.as_str())
+    lowered
+        .entry_rule
+        .as_deref()
+        .or_else(|| lowered.rules.first().map(|r| r.name.as_str()))
 }
 
 pub fn generate(lowered: &Lowered, opts: &Options) -> String {

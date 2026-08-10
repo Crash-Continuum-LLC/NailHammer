@@ -70,6 +70,9 @@ function check(grammar, line, needle, expected) {
   check(grammar, "token NUMBER = @ DIGIT+;", "token", "keyword.control");
   check(grammar, "token NUMBER = @ DIGIT+;", "NUMBER", "entity.name.class");
   check(grammar, "skip WHITESPACE = \" \";", "WHITESPACE", "entity.name.class");
+  // A target's name takes a hyphen, so it must not stop at `nh`.
+  check(grammar, "target nh-vm;", "target", "keyword.control");
+  check(grammar, "target nh-vm;", "nh-vm", "support.class");
 
   // Comments and strings, including the case-insensitive literal form.
   check(grammar, "// a note", "// a note", "comment.line");

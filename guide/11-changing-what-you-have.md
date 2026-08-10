@@ -13,17 +13,18 @@ Delete `frame` from `rule stmt` and rebuild:
 
 ```console
 $ nh build pebble.nh -o src/pebble.pest --rust src
-ok: generated 8 file(s) in src  [0 new handler(s), 11 kept]
+ok: wrote src/pebble.pest
+ok: generated 10 file(s) in src  [0 new handler(s), 15 kept]
 warning: 1 handler file(s) no longer match any grammar alternative:
-  handlers/stmt_frame.rs  (implemented — contains your code)
+  handlers/stmt/frame.rs  (implemented — contains your code)
 note: pass --prune to remove the unimplemented ones
 note: pass --prune --force to remove implemented ones too, but read them first
 ```
 
 Three things worth reading closely.
 
-**It is a warning, and the build still succeeds.** `handlers/mod.rs` was
-regenerated without `stmt_frame`, so the file is no longer compiled. It is
+**It is a warning, and the build still succeeds.** `handlers/stmt/mod.rs` was
+regenerated without `frame`, so the file is no longer compiled. It is
 inert, not broken — your project builds and runs exactly as before, minus the
 statement you deleted.
 
@@ -35,8 +36,10 @@ and it will not treat them the same.
 
 ```console
 $ nh build pebble.nh -o src/pebble.pest --rust src --prune
+ok: wrote src/pebble.pest
+ok: generated 10 file(s) in src  [0 new handler(s), 15 kept]
 warning: 1 handler file(s) no longer match any grammar alternative:
-  handlers/stmt_frame.rs  (implemented — contains your code)
+  handlers/stmt/frame.rs  (implemented — contains your code)
 note: pass --prune --force to remove implemented ones too, but read them first
 ```
 
@@ -55,12 +58,14 @@ removal and an addition at once:
 
 ```console
 $ nh build pebble.nh -o src/pebble.pest --rust src
-ok: generated 9 file(s) in src  [1 new handler(s), 10 kept]
+ok: wrote src/pebble.pest
+ok: generated 11 file(s) in src  [1 new handler(s), 15 kept]
+note: 1 handler(s) not implemented yet — each reports at run time
 warning: 1 handler file(s) no longer match any grammar alternative:
-  handlers/stmt_show.rs  (implemented — contains your code)
+  handlers/stmt/show.rs  (implemented — contains your code)
 ```
 
-You get a fresh `handlers/stmt_emit.rs` stub and your `stmt_show.rs` is left
+You get a fresh `handlers/stmt/emit.rs` stub and your `stmt/show.rs` is left
 alone. Move your code across, delete the old file yourself, and the warning
 stops.
 
@@ -75,8 +80,7 @@ Different machinery, because the handler still matches — only the parameter
 names disagree:
 
 ```console
-warning: handlers/stmt_show.rs names its parameters differently than the
-         grammar binds them
+warning: handlers/stmt/show.rs names its parameters differently than the grammar binds them
   grammar:  amount
   handler:  value
 help: rename the parameters to match, so the handler says what it reads
@@ -88,16 +92,26 @@ that the handler has stopped describing itself.
 
 ## Changing a cardinality
 
-This one *is* an error, and it happens in `cargo build` rather than `nh build`:
+This one *is* an error, and `nh build` reports it before the compiler gets to:
 
 ```nh
 rule block = "{" body:stmt? "}" -> block;   // was stmt*
 ```
 
-The generated dispatch now passes `Option<Value>` where your handler takes
-`Vec<Value>`, and the types do not match. Nothing warns you, because nothing
-needs to — a cardinality change *is* a change to what the handler receives, and
-the compiler is exactly the right thing to catch it.
+```console
+$ nh build pebble.nh -o src/pebble.pest --rust src
+error: handlers/block.rs takes `body` as `Vec<Value>`, but the grammar now binds it as `Option<Self::Out>`
+note: `lazy`, `?` and `*` each change what a handler receives, and so does a token that folds case — this does not guess which
+note: the compiler will blame `generated/dispatch.rs`, not this file
+help: change the parameter's type to match
+```
+
+The compiler would catch it too — a cardinality change *is* a change to what the
+handler receives. But it catches it at the **call**, which lives in
+`generated/dispatch.rs`, so the error names a file you never wrote; and a
+`Handlers` impl that will not build takes `.eval(..)` down with it, so the first
+thing you see can be an unrelated trait bound in a handler you had just
+finished. Being right about which file is wrong is most of the value.
 
 That is the pattern throughout. **Renames warn, because the code still works.
 Shape changes fail, because it does not.**

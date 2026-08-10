@@ -31,6 +31,13 @@ pub enum Op<X> {
     Sub { dst: Reg, a: Reg, b: Reg },
     Mul { dst: Reg, a: Reg, b: Reg },
     Div { dst: Reg, a: Reg, b: Reg },
+    /// Integer division: BASIC's `\`, Python's `//`, Pascal's `div`.
+    ///
+    /// Distinct from `Div` because the results differ — `7 / 2` is `3.5` and
+    /// `7 \ 2` is `3` — and a language with both cannot express one of them by
+    /// rounding the other after the fact. Paired with `Rem`, which was here
+    /// without it.
+    IDiv { dst: Reg, a: Reg, b: Reg },
     Rem { dst: Reg, a: Reg, b: Reg },
     Pow { dst: Reg, a: Reg, b: Reg },
     Neg { dst: Reg, a: Reg },
@@ -80,6 +87,33 @@ pub enum Op<X> {
     // ---- sequences ---------------------------------------------------------
     /// `[a, b, c]` — `len` values starting at `base`.
     NewArray { dst: Reg, base: Reg, len: usize },
+    /// An array of `size` default elements, sized at **run time**.
+    ///
+    /// Distinct from `NewArray`, which builds one *from* registers: a literal
+    /// knows its length when it is compiled, and `DIM a(n)` does not.
+    NewSized { dst: Reg, size: Reg },
+    /// Resizes an array **in place**, keeping the elements that still fit.
+    ///
+    /// In place matters: an array is a reference type, so a second binding and
+    /// a `BYREF` parameter have to see the new size too. Replacing the value
+    /// would only rebind one name.
+    Resize { seq: Reg, size: Reg },
+    /// A collection's contents, as a flat array of alternating key and value.
+    ///
+    /// An array yields 0-based indices as keys; an object yields its keys. One
+    /// instruction for both, because iterating is one idea — and the same
+    /// layout `NewObject` reads, so the two agree about what a pair is.
+    ///
+    /// **A copy.** Iterating a live collection while the body mutates it has no
+    /// good answer; taking the entries once has an obvious one, and it is what
+    /// lets a language promise that modifying during iteration is safe.
+    Entries { dst: Reg, src: Reg },
+    /// Builds an object from `len` **key/value pairs** in consecutive registers
+    /// starting at `base` — so `2 * len` registers in all.
+    ///
+    /// Pairs rather than two runs because an object literal is written as
+    /// pairs, and evaluating it left to right lands them in exactly that order.
+    NewObject { dst: Reg, base: Reg, len: usize },
     /// `a[i]`. Out-of-range reads are an error, not a silent `Nil`.
     Index { dst: Reg, seq: Reg, idx: Reg },
     /// `a[i] = v`. Writing one past the end appends, which is how a program
@@ -139,6 +173,11 @@ pub struct ExtCx<'a> {
     pub regs: &'a mut [Value],
     pub globals: &'a dyn crate::store::SharedStore,
     pub output: &'a mut Vec<String>,
+    /// Where a value handed back by the driver should land.
+    ///
+    /// Set through [`ExtCx::resume_into`] rather than directly, so an
+    /// extension asks for one rather than being handed the machine's state.
+    pub(crate) awaiting: &'a mut Option<Reg>,
 }
 
 impl ExtCx<'_> {
@@ -148,6 +187,20 @@ impl ExtCx<'_> {
 
     pub fn set(&mut self, r: Reg, v: Value) {
         self.regs[r as usize] = v;
+    }
+
+    /// Suspend *for an answer*, and put it in `dst`.
+    ///
+    /// An extension that suspends is usually telling its driver something —
+    /// start this thread, cancel that timer — and has nothing to receive. One
+    /// that is asking a question does: reading a line from a file is a
+    /// suspension whose whole point is the value that comes back.
+    ///
+    /// Only `Op::Await` could name a destination before this, so an extension
+    /// could ask a question and had nowhere to be told the answer. Call it,
+    /// then return [`Flow::Suspend`].
+    pub fn resume_into(&mut self, dst: Reg) {
+        *self.awaiting = Some(dst);
     }
 }
 

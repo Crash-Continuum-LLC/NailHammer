@@ -1252,3 +1252,98 @@ fn a_hand_written_table_gets_the_plain_help() {
     assert!(out.contains("add `rule primary = ...;`"), "{out}");
     assert!(!out.contains("supplies"), "no preset to blame:\n{out}");
 }
+
+// ---------------------------------------------------------------------------
+// `place` arity
+// ---------------------------------------------------------------------------
+
+const PLACE_GRAMMAR: &str = "grammar A;\nskip WS = \" \";\ntoken ALPHA = @ \"a\"..\"z\";\n\
+     token IDENT = @ ALPHA+;\nrule item = name:IDENT -> one;\n";
+
+/// A place is resolved once, up front, so a binding it holds has to be there
+/// exactly once. This was previously emitted as a `compile_error!` into the
+/// generated Rust — so `nh check` reported `ok`, `nh build` reported `ok`, and
+/// rustc delivered the news while compiling output nobody had edited.
+#[test]
+fn a_repeated_place_binding_is_reported() {
+    let rendered = lower_err(&format!(
+        "{PLACE_GRAMMAR}rule r = name:IDENT items:item* -> t place;\n"
+    ));
+    assert!(rendered.contains("marked `place`"), "{rendered}");
+    assert!(rendered.contains("`items` is repeated"), "{rendered}");
+}
+
+#[test]
+fn an_optional_place_binding_is_reported() {
+    let rendered = lower_err(&format!(
+        "{PLACE_GRAMMAR}rule r = name:IDENT extra:item? -> t place;\n"
+    ));
+    assert!(rendered.contains("`extra` is optional"), "{rendered}");
+}
+
+/// Exactly one of each is the shape a place is *for*, and must stay silent —
+/// a lint that fires on the valid case is worse than no lint.
+#[test]
+fn a_well_formed_place_is_silent() {
+    let l = build_str(&format!(
+        "{PLACE_GRAMMAR}rule r = name:IDENT index:item -> t place;\n"
+    ));
+    assert!(l.diagnostics.is_empty(), "{:?}", l.diagnostics);
+}
+
+/// An unmarked alternative may be variadic all it likes.
+#[test]
+fn variadic_bindings_are_fine_without_place() {
+    let l = build_str(&format!(
+        "{PLACE_GRAMMAR}rule r = name:IDENT items:item* -> t;\n"
+    ));
+    assert!(l.diagnostics.is_empty(), "{:?}", l.diagnostics);
+}
+
+// ---------------------------------------------------------------------------
+// Where a program starts, once a grammar is split across files
+// ---------------------------------------------------------------------------
+
+/// **The entry rule belongs to the entry file.**
+///
+/// Imports merge post-order — `import.rs`: *"dependencies are recorded before
+/// their importer"* — so `rules.first()` on a merged AST is the first rule of
+/// the deepest *import*. Deriving the entry from there means splitting a
+/// grammar into files silently moves the start of the language, and the only
+/// sign is an `unused` warning on the rule that used to be the entry.
+#[test]
+fn splitting_a_grammar_does_not_move_its_entry_rule() {
+    let dir = std::env::temp_dir().join("nh-entry-tests");
+    std::fs::create_dir_all(&dir).unwrap();
+    let part = unique_path(&dir, ".nh");
+    std::fs::write(
+        &part,
+        "rule helper = \"h\" -> h;\nrule other = \"o\" -> o;\n",
+    )
+    .unwrap();
+
+    let main = unique_path(&dir, ".nh");
+    std::fs::write(
+        &main,
+        format!(
+            "grammar A;\nskip WS = \" \";\nimport \"{}\";\n\
+             rule start = SOI body:helper EOI -> doc;\n",
+            part.file_name().unwrap().to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let l = build(&main);
+    assert_eq!(
+        l.entry_rule.as_deref(),
+        Some("start"),
+        "the entry file's first rule, not the import's"
+    );
+    // And the merged order really is import-first, which is what makes the
+    // naive answer wrong rather than merely fragile.
+    assert_eq!(
+        l.rules.first().map(|r| r.name.as_str()),
+        Some("helper"),
+        "post-order merge puts the import first"
+    );
+}

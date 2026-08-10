@@ -11,6 +11,7 @@ WHITESPACE = _{ nh_skip_WHITESPACE | nh_skip_LINE_COMMENT | nh_skip_BLOCK_COMMEN
 ALPHA = @{ 'a'..'z' | 'A'..'Z' }
 DIGIT = @{ '0'..'9' }
 IDENT = @{ (ALPHA | "_") ~ (ALPHA | DIGIT | "_")* }
+TARGET_NAME = @{ (ALPHA | "_") ~ (ALPHA | DIGIT | "_" | "-")* }
 LAZY = @{ nh_kw_lazy ~ !(ALPHA | DIGIT | "_") ~ !":" }
 STRING = @{ "\"" ~ (!("\"" | "\\") ~ ANY | "\\" ~ ANY)* ~ "\"" }
 STRING_CI = @{ "^" ~ STRING }
@@ -18,9 +19,10 @@ STRING_CI = @{ "^" ~ STRING }
 // Rules
 file = { SOI ~ (#decl = grammar_decl)? ~ (#items = item)* ~ EOI }
 grammar_decl = { nh_kw_grammar ~ #name = IDENT ~ ";" }
-item = { import_item | use_item | keywords_item | precedence_item | skip_item | token_item | reserved_item | guard_item | boundary_item | rule_item | recover_item | expect_item | allow_item }
+item = { import_item | use_item | target_item | keywords_item | precedence_item | skip_item | token_item | reserved_item | guard_item | boundary_item | rule_item | recover_item | expect_item | allow_item }
 import_item = { nh_kw_import ~ #path = STRING ~ ";" }
 use_item = { nh_kw_use ~ nh_kw_operators ~ "::" ~ #preset = IDENT ~ ";" }
+target_item = { nh_kw_target ~ #name = TARGET_NAME ~ ";" }
 keywords_item = { nh_kw_keywords ~ #mode = case_mode ~ ";" }
 case_mode = { case_mode_insensitive | case_mode_sensitive }
 case_mode_insensitive = { "case-insensitive" }
@@ -97,6 +99,7 @@ nh_kw_grammar = @{ "grammar" ~ !nh_cont_IDENT }
 nh_kw_import = @{ "import" ~ !nh_cont_IDENT }
 nh_kw_use = @{ "use" ~ !nh_cont_IDENT }
 nh_kw_operators = @{ "operators" ~ !nh_cont_IDENT }
+nh_kw_target = @{ "target" ~ !nh_cont_IDENT }
 nh_kw_keywords = @{ "keywords" ~ !nh_cont_IDENT }
 nh_kw_skip = @{ "skip" ~ !nh_cont_IDENT }
 nh_kw_token = @{ "token" ~ !nh_cont_IDENT }

@@ -144,6 +144,9 @@ fn lower_file(pair: Pair<'_, Rule>, file: FileId) -> Ast {
                 preset: ident_of(&required(&item, "preset"), file),
                 span,
             }),
+            Rule::target_item => {
+                ast.target = Some(ident_of(&required(&item, "name"), file));
+            }
             Rule::keywords_item => {
                 let mode = required(&item, "mode");
                 let value = if mode.as_str().starts_with("case-insensitive") {

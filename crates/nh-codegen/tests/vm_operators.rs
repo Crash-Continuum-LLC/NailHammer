@@ -151,3 +151,111 @@ fn assignment_lowers_to_a_store_by_slot() {
     assert!(src.contains("fn place_read"), "{src}");
     assert!(src.contains("Ok(self.read_var(name))"), "{src}");
 }
+
+// ---------------------------------------------------------------------------
+// Bring your own language
+// ---------------------------------------------------------------------------
+
+/// A target is not just a table of core opcodes.
+///
+/// VM-DESIGN.md §7.5 reserves one case for a target definition: *"a front end
+/// compiling for someone else's extended VM."* That front end binds its own
+/// spellings to that VM's **extension** set — and without a shape for it, a
+/// target could only reach the base instructions, which is the half of the
+/// machine nobody extended.
+#[test]
+fn a_target_can_bind_a_role_to_an_extension_instruction() {
+    let target = nh_codegen::vm::target_by_name("crash-vm").expect("a known target");
+
+    // The base set is inherited whole: a language targeting an extended VM did
+    // not stop needing arithmetic.
+    assert!(target.ops.contains_key("add"), "core roles survive");
+    assert!(target.ops.contains_key("idiv"));
+
+    // And the extension is reachable by role.
+    assert!(
+        matches!(target.ops.get("deref"), Some(nh_codegen::vm::Shape::ExtUnary(path, _)) if path.contains("BasicOp::Deref")),
+        "the extended VM's own instruction is bound to a role"
+    );
+}
+
+/// `nh-vm` is the *base* machine and must stay that way — an extension belongs
+/// to whoever extended it, not to everyone.
+#[test]
+fn the_base_target_has_no_extensions() {
+    let base = nh_codegen::vm::target_by_name("nh-vm").expect("a known target");
+    assert!(base.ops.contains_key("add"));
+    assert!(
+        !base.ops.contains_key("deref"),
+        "a language on the plain machine cannot reach somebody else's instruction"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Target files
+// ---------------------------------------------------------------------------
+
+use nh_codegen::vm::{parse_target, Shape};
+
+/// **The point of the whole mechanism.** Somebody extends the VM, writes a
+/// file, and a front end targets it — with no change to this toolkit. §7.5
+/// reserves the target file for exactly this case, and "bring your own
+/// language" is otherwise "bring your own language and a fork of nh".
+#[test]
+fn a_target_can_be_defined_entirely_in_a_file() {
+    let t = parse_target(
+        "// somebody else's machine\n\
+         target my-vm;\n\
+         extends nh-vm;\n\
+         op deref = ext my_vm::Op::Deref { dst, src };\n\
+         op repeat = ext my_vm::Op::Repeat { dst, a, b };\n",
+    )
+    .expect("parses");
+
+    assert_eq!(t.name, "my-vm");
+    // The base machine came whole: an extended VM did not stop needing
+    // arithmetic.
+    assert!(matches!(t.ops.get("add"), Some(Shape::Binary(n)) if n == "Add"));
+    assert!(t.ops.contains_key("compare"), "structural roles inherit too");
+    // And its own instructions are reachable by role.
+    assert!(matches!(t.ops.get("deref"), Some(Shape::ExtUnary(p, f)) if p == "my_vm::Op::Deref" && f == "src"));
+    assert!(matches!(t.ops.get("repeat"), Some(Shape::ExtBinary(p)) if p == "my_vm::Op::Repeat"));
+}
+
+/// A file may replace an inherited spelling — the same instruction under a
+/// different name is a real thing when a VM forks.
+#[test]
+fn a_file_overrides_what_it_inherits() {
+    let t = parse_target(
+        "target v;\nextends nh-vm;\nop add = ext v::Op::Plus { dst, a, b };\n",
+    )
+    .unwrap();
+    assert!(matches!(t.ops.get("add"), Some(Shape::ExtBinary(p)) if p == "v::Op::Plus"));
+}
+
+/// A core instruction needs no `ext` — a target file describes a machine, and
+/// most of one is ordinary opcodes.
+#[test]
+fn a_core_instruction_needs_no_ext() {
+    let t = parse_target("target v;\nop add = Add { dst, a, b };\nop neg = Neg { dst, a };\n").unwrap();
+    assert!(matches!(t.ops.get("add"), Some(Shape::Binary(n)) if n == "Add"));
+    // The operand's field name travels with a unary, because it is not always
+    // `a`: `Await` calls it `src`.
+    assert!(matches!(t.ops.get("neg"), Some(Shape::Unary(n, f)) if n == "Neg" && f == "a"));
+}
+
+/// Mistakes name the line, because a target file is written by hand.
+#[test]
+fn a_malformed_target_says_where() {
+    for (src, want) in [
+        ("op add = Add { dst, a, b };\n", "no `target"),
+        ("target v;\nop add = Add { dst, a, b }\n", "ends with `;`"),
+        ("target v;\nop add = Add { a, b };\n", "first field is `dst`"),
+        ("target v;\nop add = Add { dst, x, y };\n", "names its operands"),
+        ("target v;\nextends nope;\n", "not a known target"),
+        ("target v;\nwhat is this;\n", "expected `target`"),
+    ] {
+        let e = parse_target(src).expect_err("should be refused");
+        assert!(e.contains(want), "wanted {want:?} in {e:?}");
+    }
+}

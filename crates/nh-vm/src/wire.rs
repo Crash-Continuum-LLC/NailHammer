@@ -38,7 +38,7 @@
 use std::collections::HashMap;
 
 use crate::op::{Cmp, Op, Reg};
-use crate::program::{FnDef, Program};
+use crate::program::{DebugInfo, FnDef, Program};
 use crate::value::Value;
 
 const MAGIC: &[u8; 4] = b"NHVM";
@@ -182,6 +182,8 @@ const V_BOOL: u8 = 1;
 const V_NUM: u8 = 2;
 const V_STR: u8 = 3;
 const V_ARRAY: u8 = 4;
+/// Appended, never renumbered — the same rule the opcode tags follow.
+const V_OBJECT: u8 = 5;
 
 fn put_value(out: &mut Vec<u8>, v: &Value) {
     match v {
@@ -197,6 +199,18 @@ fn put_value(out: &mut Vec<u8>, v: &Value) {
         Value::Str(s) => {
             out.push(V_STR);
             put_str(out, s);
+        }
+        Value::Object(o) => {
+            // By value, for the same reason an array is: an object literal in
+            // the code is a literal, and two of them are two objects. Sharing
+            // is something a program arranges at run time.
+            out.push(V_OBJECT);
+            let g = o.read().expect("poisoned");
+            put_u32(out, g.len() as u32);
+            for (k, v) in g.iter() {
+                put_str(out, k);
+                put_value(out, v);
+            }
         }
         Value::Array(a) => {
             // Encoded by value. An array constant in the code is a literal, so
@@ -225,6 +239,15 @@ fn get_value(r: &mut Reader<'_>) -> Result<Value, WireError> {
                 items.push(get_value(r)?);
             }
             Value::array(items)
+        }
+        V_OBJECT => {
+            let n = r.usize()?;
+            let mut fields = std::collections::BTreeMap::new();
+            for _ in 0..n {
+                let k = r.str()?;
+                fields.insert(k, get_value(r)?);
+            }
+            Value::object(fields)
         }
         tag => return Err(WireError::UnknownTag { what: "value", tag }),
     })
@@ -270,6 +293,13 @@ const TAG_NEWARRAY: u8 = 28;
 const TAG_INDEX: u8 = 29;
 const TAG_SETINDEX: u8 = 30;
 const TAG_LEN: u8 = 31;
+/// Appended rather than inserted: tags are a wire format, so an existing
+/// instruction's number can never move.
+const TAG_IDIV: u8 = 32;
+const TAG_NEWOBJECT: u8 = 33;
+const TAG_NEWSIZED: u8 = 34;
+const TAG_RESIZE: u8 = 35;
+const TAG_ENTRIES: u8 = 36;
 const TAG_EXT: u8 = 255;
 
 fn cmp_tag(c: Cmp) -> u8 {
@@ -323,6 +353,28 @@ fn put_op<X: Wire>(out: &mut Vec<u8>, op: &Op<X>) {
         Op::Sub { dst, a, b } => bin!(TAG_SUB, dst, a, b),
         Op::Mul { dst, a, b } => bin!(TAG_MUL, dst, a, b),
         Op::Div { dst, a, b } => bin!(TAG_DIV, dst, a, b),
+        Op::IDiv { dst, a, b } => bin!(TAG_IDIV, dst, a, b),
+        Op::Entries { dst, src } => {
+            out.push(TAG_ENTRIES);
+            put_u16(out, *dst);
+            put_u16(out, *src);
+        }
+        Op::NewSized { dst, size } => {
+            out.push(TAG_NEWSIZED);
+            put_u16(out, *dst);
+            put_u16(out, *size);
+        }
+        Op::Resize { seq, size } => {
+            out.push(TAG_RESIZE);
+            put_u16(out, *seq);
+            put_u16(out, *size);
+        }
+        Op::NewObject { dst, base, len } => {
+            out.push(TAG_NEWOBJECT);
+            put_u16(out, *dst);
+            put_u16(out, *base);
+            put_u32(out, *len as u32);
+        }
         Op::Rem { dst, a, b } => bin!(TAG_REM, dst, a, b),
         Op::Pow { dst, a, b } => bin!(TAG_POW, dst, a, b),
         Op::And { dst, a, b } => bin!(TAG_AND, dst, a, b),
@@ -426,6 +478,15 @@ fn get_op<X: Wire>(r: &mut Reader<'_>) -> Result<Op<X>, WireError> {
         TAG_SUB => bin!(Sub),
         TAG_MUL => bin!(Mul),
         TAG_DIV => bin!(Div),
+        TAG_IDIV => bin!(IDiv),
+        TAG_ENTRIES => Op::Entries { dst: r.u16()?, src: r.u16()? },
+        TAG_NEWSIZED => Op::NewSized { dst: r.u16()?, size: r.u16()? },
+        TAG_RESIZE => Op::Resize { seq: r.u16()?, size: r.u16()? },
+        TAG_NEWOBJECT => Op::NewObject {
+            dst: r.u16()?,
+            base: r.u16()?,
+            len: r.usize()?,
+        },
         TAG_REM => bin!(Rem),
         TAG_POW => bin!(Pow),
         TAG_AND => bin!(And),
@@ -531,6 +592,9 @@ impl<X: Wire> Program<X> {
             code.push(get_op(&mut r)?);
         }
 
-        Ok(Program { code, fns, frame, globals })
+        // Names are not on the wire: the format carries what a machine needs to
+        // *run*, and a debugger attaches to a compiler's output rather than to a
+        // shipped binary. A decoded program is therefore runnable but unnamed.
+        Ok(Program { code, fns, frame, globals, debug: DebugInfo::default() })
     }
 }
